@@ -14,6 +14,7 @@ import { Integrations } from './pages/Integrations';
 import { ReviewQueue } from './pages/ReviewQueue';
 import { Account } from './pages/Account';
 import { EmbedPage } from './pages/EmbedPage';
+import { BookingPage } from './pages/BookingPage';
 
 // Components
 import { AuthPage } from './components/AuthPage';
@@ -24,9 +25,15 @@ import { ReviewItem } from './types';
 const AppContent = () => {
   const { session, loading } = useAuth();
 
-  // Public Embed Route - Bypasses Auth
-  if (window.location.pathname.startsWith('/embed')) {
+  // Public Routes - Bypass Auth
+  const path = window.location.pathname;
+
+  if (path.startsWith('/embed')) {
     return <EmbedPage />;
+  }
+
+  if (path.startsWith('/book')) {
+    return <BookingPage />;
   }
 
   if (loading) {

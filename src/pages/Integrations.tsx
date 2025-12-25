@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Calendar, CheckCircle2, RefreshCw, Clock, CalendarDays, Settings, LogOut } from 'lucide-react';
+import { Calendar, CheckCircle2, RefreshCw, Clock, CalendarDays, Settings, LogOut, ChevronRight } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
 import { handleAuthClick, loadGoogleScripts, fetchCalendars, handleSignOut } from '../services/calendarAuth';
 import { CalendarSettings, CalendarItem } from '../types';
@@ -189,6 +189,49 @@ export const Integrations = () => {
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/* BOOKING PAGE LINK SECTION */}
+            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
+                <div className="p-10 border-b border-slate-100 bg-slate-50/50">
+                    <div className="flex items-center gap-6">
+                        <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center border border-slate-100">
+                            <CalendarDays className="w-8 h-8 text-chippy-coral" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-2xl text-chippy-navy">Booking Page</h3>
+                            <p className="text-slate-500">Share your availability with a simple link.</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="p-10 text-left">
+                    <p className="text-sm text-slate-500 mb-4">Send this link to clients to let them book appointments directly.</p>
+                    <div className="flex flex-col md:flex-row gap-4">
+                        <div className="relative flex-1 group">
+                            <input
+                                className="w-full p-4 bg-slate-50 text-slate-600 font-medium rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-chippy-coral"
+                                readOnly
+                                value={`https://app.hellochippy.com/book`}
+                            />
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard.writeText("https://app.hellochippy.com/book");
+                                    alert("Copied to clipboard!");
+                                }}
+                                className="absolute top-1/2 -translate-y-1/2 right-2 bg-white hover:bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg text-sm font-bold transition-all border border-slate-200 shadow-sm"
+                            >
+                                Copy
+                            </button>
+                        </div>
+                        <a
+                            href="/book"
+                            target="_blank"
+                            className="px-6 py-4 bg-chippy-navy text-white font-bold rounded-xl hover:bg-chippy-navy/90 transition-all flex items-center justify-center gap-2 shadow-lg shadow-chippy-navy/20"
+                        >
+                            View Page <ChevronRight className="w-4 h-4" />
+                        </a>
+                    </div>
+                </div>
             </div>
 
             {/* WEBSITE EMBED SECTION */}
