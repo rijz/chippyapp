@@ -2,9 +2,10 @@
 // Fix: Import Chat instead of deprecated ChatSession and GenerativeModel
 import { GoogleGenAI, Chat } from "@google/genai";
 import { KnowledgeBaseData, KnowledgeConflict, ReviewItem, Sentiment, Message, ChatSessionRecord, EnquiryType } from "../types";
+import { getEnv } from "../utils/env";
 
 // Initialize the client
-const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || '';
+const apiKey = getEnv('VITE_GOOGLE_API_KEY');
 const ai = new GoogleGenAI({ apiKey });
 
 /**

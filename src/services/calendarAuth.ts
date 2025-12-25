@@ -1,5 +1,6 @@
 
 import { CalendarItem } from "../types";
+import { getEnv } from "../utils/env";
 
 /**
  * GOOGLE CALENDAR AUTHENTICATION SERVICE
@@ -10,8 +11,8 @@ import { CalendarItem } from "../types";
 declare var gapi: any;
 declare var google: any;
 
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || '';
+const CLIENT_ID = getEnv('VITE_GOOGLE_CLIENT_ID');
+const API_KEY = getEnv('VITE_GOOGLE_API_KEY');
 
 // Scopes required: Read/Write events, Read Calendar Lists
 const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly';
