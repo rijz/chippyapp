@@ -70,21 +70,28 @@ export interface EnquiryDataPoint {
   color: string;
 }
 
+export interface PricingPlan {
+  name: string;
+  price: string;
+  features: string[];
+}
+
 export interface KnowledgeBaseData {
-  companyName?: string;
-  website?: string;
-  phoneNumber?: string;
-  businessCategory: string;
+  companyName: string | null;
+  website: string | null;
+  phoneNumber: string | null;
+  businessCategory: string | null;
   keywords: string[];
-  summary: string;
+  summary: string | null;
   services: string[];
-  businessHours: string;
-  contactInfo: string;
-  pricing?: string;
-  policies?: string;
+  businessHours: string | null;
+  contactInfo: string | null;
+  pricing: string | null; // Summarized text
+  policies: string | null; // Summarized text
   sources?: string[];
   lastUpdated?: Date;
-  corrections?: { query: string; correction: string }[]; 
+  isMock?: boolean; // New flag for error handling
+  corrections?: { query: string; correction: string }[];
 }
 
 export interface KnowledgeConflict {
@@ -106,12 +113,12 @@ export interface CalendarItem {
   id: string;
   name: string;
   color: string;
-  selected: boolean; 
+  selected: boolean;
 }
 
 export interface CalendarSettings {
   email: string;
   calendars: CalendarItem[];
-  bookingCalendarId: string; 
-  appointmentDuration: number; 
+  bookingCalendarId: string;
+  appointmentDuration: number;
 }

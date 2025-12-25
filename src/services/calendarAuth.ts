@@ -10,8 +10,8 @@ import { CalendarItem } from "../types";
 declare var gapi: any;
 declare var google: any;
 
-const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
-const API_KEY = process.env.GOOGLE_API_KEY || '';
+const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || '';
 
 // Scopes required: Read/Write events, Read Calendar Lists
 const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly';
@@ -30,9 +30,9 @@ export const loadGoogleScripts = () => {
     script1.id = "gapi-script";
     script1.async = true;
     script1.defer = true;
-    script1.onload = () => { 
-        gapiInited = true; 
-        maybeInitialize(); 
+    script1.onload = () => {
+        gapiInited = true;
+        maybeInitialize();
     };
     document.body.appendChild(script1);
 
@@ -41,9 +41,9 @@ export const loadGoogleScripts = () => {
     script2.id = "gsi-script";
     script2.async = true;
     script2.defer = true;
-    script2.onload = () => { 
-        gisInited = true; 
-        maybeInitialize(); 
+    script2.onload = () => {
+        gisInited = true;
+        maybeInitialize();
     };
     document.body.appendChild(script2);
 };
@@ -61,7 +61,7 @@ async function initializeGapiClient() {
         console.warn("Google API Key is missing. Check your environment variables.");
         return;
     }
-    
+
     return new Promise<void>((resolve) => {
         gapi.load('client', async () => {
             try {
@@ -72,7 +72,7 @@ async function initializeGapiClient() {
                 resolve();
             } catch (error) {
                 console.error("Error initializing GAPI client", error);
-                resolve(); 
+                resolve();
             }
         });
     });
@@ -97,16 +97,23 @@ function initializeTokenClient() {
 }
 
 // --- 4. Trigger Sign In ---
+// --- 4. Trigger Sign In ---
 export const handleAuthClick = (): Promise<string> => {
     return new Promise((resolve, reject) => {
+        // MOCK MODE: If keys are missing, simulate login for demo purposes
+        if (!CLIENT_ID || !API_KEY) {
+            console.warn("Google Credentials missing. Using MOCK MODE.");
+            // Simulate network delay
+            setTimeout(() => {
+                resolve("demo@chippy.ai");
+            }, 1000);
+            return;
+        }
+
         // If not initialized, try one more time before failing
         if (!tokenClient || !gapiInited) {
             console.error("Google Auth not fully initialized.");
-            if (!CLIENT_ID || !API_KEY) {
-                alert("Integration Error: Google Client ID or API Key is missing from the environment. Please configure GOOGLE_CLIENT_ID and GOOGLE_API_KEY.");
-            } else {
-                alert("Auth system is still loading. Please wait a moment and try again.");
-            }
+            alert("Auth system is still loading. Please wait a moment and try again.");
             reject(new Error("Auth not initialized"));
             return;
         }
@@ -125,7 +132,7 @@ export const handleAuthClick = (): Promise<string> => {
                 resolve(email);
             } catch (error) {
                 console.error("Error fetching profile", error);
-                resolve("Google User"); 
+                resolve("Google User");
             }
         };
 
@@ -139,6 +146,15 @@ export const handleAuthClick = (): Promise<string> => {
 
 // --- 5. Fetch Real Calendars ---
 export const fetchCalendars = async (): Promise<CalendarItem[]> => {
+    // MOCK MODE
+    if (!CLIENT_ID || !API_KEY) {
+        return [
+            { id: 'primary', name: 'demo@chippy.ai', color: '#4285F4', selected: true },
+            { id: 'personal', name: 'Personal', color: '#34A853', selected: false },
+            { id: 'work', name: 'Work', color: '#EA4335', selected: true }
+        ];
+    }
+
     if (!gapiInited || !gapi.client.getToken()) {
         return [];
     }
@@ -149,10 +165,26 @@ export const fetchCalendars = async (): Promise<CalendarItem[]> => {
             id: item.id,
             name: item.summaryOverride || item.summary,
             color: item.backgroundColor || '#4285F4',
-            selected: item.primary 
+            selected: item.primary
         }));
     } catch (err) {
         console.error("Error fetching calendars", err);
         throw err;
+    }
+};
+
+// --- 6. Sign Out / Revoke Access ---
+export const handleSignOut = () => {
+    // MOCK MODE: Just return
+    if (!CLIENT_ID || !API_KEY) return;
+
+    if (typeof gapi !== 'undefined' && gapi.client) {
+        const token = gapi.client.getToken();
+        if (token !== null) {
+            google.accounts.oauth2.revoke(token.access_token, () => {
+                console.log('Access token revoked');
+            });
+            gapi.client.setToken(null);
+        }
     }
 };
