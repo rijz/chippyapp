@@ -9,6 +9,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import { Dashboard } from './pages/Dashboard';
 import { Inbox } from './pages/Inbox';
 import { KnowledgeBase } from './pages/KnowledgeBase';
+import { Leads } from './pages/Leads';
 import { WidgetStudio } from './pages/WidgetStudio';
 import { Integrations } from './pages/Integrations';
 import { ReviewQueue } from './pages/ReviewQueue';
@@ -133,6 +134,7 @@ const AuthenticatedApp = () => {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/inbox" element={<Inbox />} />
+          <Route path="/leads" element={<Leads />} />
           <Route path="/knowledge" element={<KnowledgeBase />} />
           <Route path="/widget" element={<WidgetStudio />} />
           <Route path="/integrations" element={<Integrations />} />

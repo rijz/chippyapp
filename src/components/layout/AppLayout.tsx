@@ -9,7 +9,8 @@ import {
     Inbox as InboxIcon,
     UserCircle,
     Menu,
-    LogOut
+    LogOut,
+    Users
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
@@ -25,6 +26,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     const navItems = [
         { id: '/', label: 'Dashboard', icon: LayoutDashboard },
         { id: '/inbox', label: 'Inbox', icon: InboxIcon },
+        { id: '/leads', label: 'Leads', icon: Users },
         { id: '/knowledge', label: 'Knowledge Base', icon: BookOpen },
         { id: '/widget', label: 'Widget Studio', icon: MessageCircle },
         { id: '/integrations', label: 'Integrations', icon: Settings },

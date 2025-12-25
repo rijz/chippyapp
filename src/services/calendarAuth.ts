@@ -189,3 +189,41 @@ export const handleSignOut = () => {
         }
     }
 };
+
+// --- 7. Check Availability (Check for Conflicts) ---
+export const checkAvailability = async (startTime: Date, endTime: Date): Promise<{ available: boolean; conflicts: number }> => {
+    // MOCK MODE
+    if (!CLIENT_ID || !API_KEY) {
+        // Randomly simulate conflict for demo if hour is 10:00 AM
+        if (startTime.getHours() === 10) {
+            return { available: false, conflicts: 1 };
+        }
+        return { available: true, conflicts: 0 };
+    }
+
+    if (!gapiInited || !gapi.client.getToken()) {
+        console.warn("GAPI not initialized or not signed in.");
+        return { available: true, conflicts: 0 }; // Assume available if we can't check
+    }
+
+    try {
+        const response = await gapi.client.calendar.events.list({
+            'calendarId': 'primary',
+            'timeMin': startTime.toISOString(),
+            'timeMax': endTime.toISOString(),
+            'showDeleted': false,
+            'singleEvents': true,
+            'maxResults': 10,
+            'orderBy': 'startTime'
+        });
+
+        const events = response.result.items;
+        return {
+            available: events.length === 0,
+            conflicts: events.length
+        };
+    } catch (err) {
+        console.error("Error checking availability", err);
+        return { available: true, conflicts: 0 }; // Fail safe
+    }
+};
