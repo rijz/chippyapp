@@ -190,6 +190,40 @@ export const Integrations = () => {
                     </div>
                 )}
             </div>
+
+            {/* WEBSITE EMBED SECTION */}
+            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
+                <div className="p-10 border-b border-slate-100 bg-slate-50/50">
+                    <div className="flex items-center gap-6">
+                        <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center border border-slate-100">
+                            <code className="text-xl font-bold text-chippy-coral">&lt;/&gt;</code>
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-2xl text-chippy-navy">Website Embed</h3>
+                            <p className="text-slate-500">Add the AI agent to your own website.</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="p-10 text-left">
+                    <p className="text-sm text-slate-500 mb-4">Copy and paste this code into your website's HTML before the closing <code>&lt;/body&gt;</code> tag.</p>
+                    <div className="relative group">
+                        <textarea
+                            className="w-full h-32 p-4 bg-slate-900 text-slate-300 font-mono text-xs rounded-xl border border-slate-700 outline-none resize-none"
+                            readOnly
+                            value={`<iframe \n  src="https://app.hellochippy.com/embed" \n  style="position: fixed; bottom: 20px; right: 20px; width: 400px; height: 600px; border: none; z-index: 9999; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"\n></iframe>`}
+                        />
+                        <button
+                            onClick={() => {
+                                navigator.clipboard.writeText(`<iframe src="https://app.hellochippy.com/embed" style="position: fixed; bottom: 20px; right: 20px; width: 400px; height: 600px; border: none; z-index: 9999; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></iframe>`);
+                                alert("Copied to clipboard!");
+                            }}
+                            className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all border border-white/10"
+                        >
+                            Copy Code
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };

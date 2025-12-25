@@ -13,8 +13,9 @@ import { WidgetStudio } from './pages/WidgetStudio';
 import { Integrations } from './pages/Integrations';
 import { ReviewQueue } from './pages/ReviewQueue';
 import { Account } from './pages/Account';
+import { EmbedPage } from './pages/EmbedPage';
 
-// Components (Legacy location)
+// Components
 import { AuthPage } from './components/AuthPage';
 import { ChatWidget } from './components/ChatWidget';
 import { OnboardingWizard } from './components/OnboardingWizard';
@@ -22,6 +23,11 @@ import { ReviewItem } from './types';
 
 const AppContent = () => {
   const { session, loading } = useAuth();
+
+  // Public Embed Route - Bypasses Auth
+  if (window.location.pathname.startsWith('/embed')) {
+    return <EmbedPage />;
+  }
 
   if (loading) {
     return (
