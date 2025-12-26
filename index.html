@@ -6,68 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
 
   <title>Chippy App | Dashboard</title>
-  <!-- Runtime Env Injection (Docker) -->
-  <script src="/env-config.js"></script>
+  <script type="module" src="/env-config.js"></script>
   <meta name="description" content="Manage your AI booking agent." />
   <meta name="theme-color" content="#FF6B5E" />
-
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            chippy: {
-              coral: '#FF6B5E',
-              'coral-hover': '#E55A4D',
-              navy: '#1A2332',
-              'navy-light': '#2A3546',
-              cream: '#FFF8F0',
-              yellow: '#FFD93D',
-              sage: '#7FB069',
-              gray: '#F5F7FA',
-            }
-          },
-          fontFamily: {
-            sans: ['Inter', 'sans-serif'],
-          },
-          animation: {
-            'marquee': 'marquee 25s linear infinite',
-          },
-          keyframes: {
-            marquee: {
-              '0%': { transform: 'translateX(0%)' },
-              '100%': { transform: 'translateX(-100%)' },
-            }
-          }
-        }
-      }
-    }
-  </script>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
-
-    body {
-      font-family: 'Inter', sans-serif;
-      background-color: #F5F7FA;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      color: #1A2332;
-    }
-
-    .custom-scrollbar::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    .custom-scrollbar::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    .custom-scrollbar::-webkit-scrollbar-thumb {
-      background-color: #CBD5E1;
-      border-radius: 20px;
-    }
-  </style>
 </head>
 
 <body>

@@ -17,6 +17,11 @@ export default defineConfig(({ mode }) => {
       'process.env.SUPABASE_ANON_KEY': JSON.stringify(env.SUPABASE_ANON_KEY),
       // Fallback for any other process.env usages
       'process.env': env
+    },
+    build: {
+      rollupOptions: {
+        external: ['/env-config.js']
+      }
     }
   };
 });
