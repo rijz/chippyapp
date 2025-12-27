@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { User, CreditCard, Lock, Bell, LogOut, ChevronRight } from 'lucide-react';
+import { User, CreditCard, Lock, Bell, LogOut, ChevronRight, MapPin, Users } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { ProfileSection } from '../components/account/ProfileSection';
 import { BillingSection } from '../components/account/BillingSection';
 import { SecuritySection } from '../components/account/SecuritySection';
 import { NotificationsSection } from '../components/account/NotificationsSection';
+import { LocationsSection } from '../components/account/LocationsSection';
+import { AdminsSection } from '../components/account/AdminsSection';
 
-type Tab = 'profile' | 'billing' | 'security' | 'notifications';
+type Tab = 'profile' | 'billing' | 'locations' | 'admins' | 'security' | 'notifications';
 
 export const Account = () => {
     const { signOut } = useAuth();
@@ -15,6 +17,8 @@ export const Account = () => {
     const menuItems = [
         { id: 'profile', label: 'Profile Settings', icon: User },
         { id: 'billing', label: 'Billing & Plan', icon: CreditCard },
+        { id: 'locations', label: 'Locations', icon: MapPin },
+        { id: 'admins', label: 'Admin Access', icon: Users },
         { id: 'security', label: 'Security', icon: Lock },
         { id: 'notifications', label: 'Notifications', icon: Bell },
     ];
@@ -36,8 +40,8 @@ export const Account = () => {
                                         key={item.id}
                                         onClick={() => setActiveTab(item.id as Tab)}
                                         className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-all ${isActive
-                                                ? 'bg-chippy-navy text-white shadow-md'
-                                                : 'text-slate-500 hover:bg-slate-50 hover:text-chippy-navy'
+                                            ? 'bg-chippy-navy text-white shadow-md'
+                                            : 'text-slate-500 hover:bg-slate-50 hover:text-chippy-navy'
                                             }`}
                                     >
                                         <div className="flex items-center gap-3">
@@ -68,6 +72,8 @@ export const Account = () => {
                         {/* Tab Content */}
                         {activeTab === 'profile' && <ProfileSection />}
                         {activeTab === 'billing' && <BillingSection />}
+                        {activeTab === 'locations' && <LocationsSection />}
+                        {activeTab === 'admins' && <AdminsSection />}
                         {activeTab === 'security' && <SecuritySection />}
                         {activeTab === 'notifications' && <NotificationsSection />}
                     </div>

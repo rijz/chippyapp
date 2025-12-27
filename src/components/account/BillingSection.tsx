@@ -2,99 +2,124 @@ import React, { useState } from 'react';
 import { CreditCard, CheckCircle2, FileText, Zap, ArrowUpRight } from 'lucide-react';
 import { PricingModal } from '../ui/Shared';
 
+import { useData } from '../../contexts/DataContext';
+import { PLAN_DETAILS } from '../../types';
+
 export const BillingSection = () => {
+    const { subscription, getOverageCost } = useData();
     const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-    const currentPlan = 'Growth';
+
+    const planDetails = {
+        'Starter': { color: 'from-slate-700 to-slate-900' },
+        'Growth': { color: 'from-chippy-navy to-slate-800' },
+        'Advanced': { color: 'from-chippy-coral to-rose-700' },
+        'Free': { color: 'from-slate-400 to-slate-600' }
+    };
+
+    const details = planDetails[subscription.plan] || planDetails['Starter'];
+    const limits = PLAN_DETAILS[subscription.plan]?.limits || { conversations: 0, locations: 0, admins: 0, calendars: 0 };
+    const overageCost = getOverageCost();
+
+    const UsageBar = ({ label, current, limit, unit = '' }: { label: string, current: number, limit: number, unit?: string }) => {
+        const percentage = Math.min((current / limit) * 100, 100);
+        const isOver = current > limit;
+
+        return (
+            <div className="space-y-2">
+                <div className="flex justify-between items-end">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                    <span className={`text-xs font-bold ${isOver ? 'text-chippy-coral' : 'text-chippy-navy'}`}>
+                        {current}{unit} / {limit}{unit}
+                    </span>
+                </div>
+                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                        className={`h-full transition-all duration-1000 ${isOver ? 'bg-chippy-coral' : 'bg-chippy-navy'}`}
+                        style={{ width: `${percentage}%` }}
+                    />
+                </div>
+                {isOver && <p className="text-[10px] text-chippy-coral font-bold">+ ${PLAN_DETAILS[subscription.plan].overage[label.toLowerCase().slice(0, -1)] || 0} add-on active</p>}
+            </div>
+        );
+    };
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
-            {showUpgradeModal && <PricingModal onClose={() => setShowUpgradeModal(false)} currentPlan={currentPlan} />}
+        <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500 pb-20">
+            {showUpgradeModal && <PricingModal onClose={() => setShowUpgradeModal(false)} currentPlan={subscription.plan} />}
 
-            <div>
-                <h2 className="text-xl font-bold text-chippy-navy">Billing & Plan</h2>
-                <p className="text-slate-500 text-sm">Manage your subscription and payment methods.</p>
+            <div className="flex justify-between items-end">
+                <div>
+                    <h2 className="text-xl font-bold text-chippy-navy">Billing & Plan</h2>
+                    <p className="text-slate-500 text-sm">Manage your subscription and usage.</p>
+                </div>
+                {overageCost > 0 && (
+                    <div className="bg-chippy-coral/10 border border-chippy-coral/20 px-4 py-2 rounded-xl">
+                        <p className="text-[10px] font-black uppercase text-chippy-coral">Estimated Overage</p>
+                        <p className="text-lg font-black text-chippy-navy">+${overageCost.toFixed(2)}</p>
+                    </div>
+                )}
             </div>
 
-            {/* Current Plan Card */}
-            <div className="p-6 bg-gradient-to-br from-chippy-navy to-slate-800 rounded-2xl text-white shadow-xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-16 -mt-16"></div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Current Plan Card */}
+                <div className={`p-6 bg-gradient-to-br ${details.color} rounded-[2rem] text-white shadow-xl relative overflow-hidden h-fit`}>
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-16 -mt-16"></div>
 
-                <div className="relative z-10 flex justify-between items-start">
-                    <div>
-                        <div className="flex items-center gap-2 mb-2">
-                            <span className="bg-white/20 text-white px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest backdrop-blur-sm">Active</span>
-                            <span className="text-slate-300 text-xs">Renews Jan 24, 2026</span>
-                        </div>
-                        <h3 className="text-3xl font-bold mb-1">{currentPlan} Plan</h3>
-                        <p className="text-slate-300 text-sm">$49/month</p>
-                    </div>
-                    <div className="bg-white/10 p-3 rounded-xl backdrop-blur-sm">
-                        <Zap className="w-8 h-8 text-chippy-yellow" />
-                    </div>
-                </div>
-
-                <div className="mt-8 flex gap-3">
-                    <button
-                        onClick={() => setShowUpgradeModal(true)}
-                        className="px-4 py-2 bg-chippy-coral hover:bg-white hover:text-chippy-navy text-white text-xs font-bold rounded-lg transition-all"
-                    >
-                        Change Plan
-                    </button>
-                    <button className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition-all">
-                        Cancel Subscription
-                    </button>
-                </div>
-            </div>
-
-            {/* Payment Method */}
-            <div className="bg-white p-6 border border-slate-200 rounded-2xl">
-                <h4 className="font-bold text-chippy-navy mb-4 flex items-center gap-2">
-                    <CreditCard className="w-5 h-5 text-slate-400" />
-                    Payment Method
-                </h4>
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="flex items-center gap-4">
-                        <div className="w-12 h-8 bg-white border border-slate-200 rounded flex items-center justify-center">
-                            <span className="font-bold text-xs text-slate-600 italic">VISA</span>
-                        </div>
+                    <div className="relative z-10 flex justify-between items-start">
                         <div>
-                            <p className="text-sm font-bold text-chippy-navy">•••• •••• •••• 4242</p>
-                            <p className="text-xs text-slate-500">Expires 12/28</p>
+                            <div className="flex items-center gap-2 mb-2">
+                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest backdrop-blur-sm ${subscription.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/20 text-white'}`}>
+                                    {subscription.status}
+                                </span>
+                                {subscription.nextBillingDate && <span className="text-slate-300 text-[10px]">Renews {subscription.nextBillingDate}</span>}
+                            </div>
+                            <h3 className="text-3xl font-black mb-1">{subscription.plan}</h3>
+                            <p className="text-slate-300 text-xs font-bold">${PLAN_DETAILS[subscription.plan]?.price || 0}/month base</p>
+                        </div>
+                        <div className="bg-white/10 p-3 rounded-xl backdrop-blur-sm">
+                            <Zap className="w-8 h-8 text-chippy-yellow fill-chippy-yellow" />
                         </div>
                     </div>
-                    <button className="text-xs font-bold text-chippy-coral hover:text-chippy-navy">Update</button>
+
+                    <div className="mt-8 flex gap-3 relative z-10">
+                        <button
+                            onClick={() => setShowUpgradeModal(true)}
+                            className="px-6 py-2.5 bg-white text-chippy-navy hover:bg-chippy-coral hover:text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95"
+                        >
+                            {subscription.status === 'active' ? 'Change Plan' : 'Choose Plan'}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Usage Stats Card */}
+                <div className="bg-white p-8 border border-slate-200 rounded-[2rem] shadow-sm space-y-6">
+                    <h4 className="font-black text-chippy-navy text-sm uppercase tracking-widest border-b border-slate-50 pb-4 flex justify-between items-center">
+                        Plan Usage
+                        <span className="text-[10px] text-slate-400 font-bold">This Cycle</span>
+                    </h4>
+
+                    <div className="space-y-6">
+                        <UsageBar label="Conversations" current={subscription.usage.conversations} limit={limits.conversations} />
+                        <UsageBar label="Locations" current={subscription.usage.locations} limit={limits.locations} />
+                        <UsageBar label="Admins" current={subscription.usage.admins} limit={limits.admins} />
+                        <UsageBar label="Calendars" current={subscription.usage.calendars} limit={limits.calendars} />
+                    </div>
                 </div>
             </div>
 
             {/* Invoices */}
-            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-                    <h4 className="font-bold text-chippy-navy flex items-center gap-2">
+            <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-sm">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <h4 className="font-black text-sm uppercase tracking-widest text-chippy-navy flex items-center gap-2">
                         <FileText className="w-5 h-5 text-slate-400" />
                         Invoice History
                     </h4>
-                    <button className="text-xs font-bold text-slate-500 hover:text-chippy-navy flex items-center gap-1">
-                        View All <ArrowUpRight className="w-3 h-3" />
-                    </button>
                 </div>
-                <div className="divide-y divide-slate-100">
-                    {[1, 2, 3].map((i) => (
-                        <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                            <div className="flex items-center gap-4">
-                                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
-                                    <CheckCircle2 className="w-4 h-4" />
-                                </div>
-                                <div>
-                                    <p className="text-sm font-bold text-chippy-navy">Invoice #{2024000 + i}</p>
-                                    <p className="text-xs text-slate-500">Dec {24 - i}, 2025</p>
-                                </div>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-sm font-bold text-chippy-navy">$49.00</p>
-                                <button className="text-[10px] font-bold text-slate-400 hover:text-chippy-coral mt-1">Download PDF</button>
-                            </div>
-                        </div>
-                    ))}
+                <div className="p-12 text-center">
+                    <div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto mb-4">
+                        <FileText className="w-8 h-8 text-slate-300" />
+                    </div>
+                    <p className="text-sm font-bold text-slate-400">Your first invoice will appear here after your cycle ends.</p>
                 </div>
             </div>
         </div>

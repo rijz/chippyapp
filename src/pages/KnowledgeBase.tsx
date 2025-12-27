@@ -6,16 +6,18 @@ import { OnboardingWizard } from '../components/OnboardingWizard';
 import { KnowledgeOverview } from '../components/knowledge/KnowledgeOverview';
 import { KnowledgeData } from '../components/knowledge/KnowledgeData';
 import { KnowledgeSources } from '../components/knowledge/KnowledgeSources';
+import { PricingModal } from '../components/ui/Shared';
 import { KnowledgeBaseData } from '../types';
 
 type Tab = 'overview' | 'data' | 'sources';
 
 export const KnowledgeBase = () => {
     const { session } = useAuth();
-    const { knowledgeData, setKnowledgeData, tenantConfig, setTenantConfig } = useData();
+    const { knowledgeData, setKnowledgeData, tenantConfig, setTenantConfig, subscription, isFeatureEnabled } = useData();
     const [activeTab, setActiveTab] = useState<Tab>('overview');
     const [showWizard, setShowWizard] = useState(false);
     const [showRescanWarning, setShowRescanWarning] = useState(false);
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
     const handleWizardComplete = (data: KnowledgeBaseData) => {
         setKnowledgeData(data);
@@ -61,6 +63,8 @@ export const KnowledgeBase = () => {
         );
     }
 
+    const isSourcesEnabled = isFeatureEnabled('Document upload training');
+
     return (
         <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
             {/* Header with Re-scan */}
@@ -82,17 +86,21 @@ export const KnowledgeBase = () => {
                 {tabs.map((tab) => {
                     const Icon = tab.icon;
                     const isActive = activeTab === tab.id;
+                    const isLocked = tab.id === 'sources' && !isSourcesEnabled;
+
                     return (
                         <button
                             key={tab.id}
+                            disabled={isLocked && false} // Let them click to see the upgrade message
                             onClick={() => setActiveTab(tab.id as Tab)}
-                            className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-bold transition-all ${isActive
+                            className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-bold transition-all relative ${isActive
                                 ? 'bg-white text-chippy-navy shadow-sm'
                                 : 'text-slate-500 hover:text-chippy-navy hover:bg-white/50'
-                                }`}
+                                } ${isLocked ? 'opacity-70' : ''}`}
                         >
                             <Icon className={`w-4 h-4 ${isActive ? 'text-chippy-coral' : ''}`} />
                             {tab.label}
+                            {isLocked && <Zap className="w-3 h-3 text-chippy-yellow fill-chippy-yellow absolute -top-1 -right-1" />}
                         </button>
                     );
                 })}
@@ -101,7 +109,30 @@ export const KnowledgeBase = () => {
             {/* Main Content */}
             {activeTab === 'overview' && <KnowledgeOverview />}
             {activeTab === 'data' && <KnowledgeData />}
-            {activeTab === 'sources' && <KnowledgeSources />}
+            {activeTab === 'sources' && (
+                isSourcesEnabled ? (
+                    <KnowledgeSources />
+                ) : (
+                    <div className="bg-white p-20 text-center rounded-[3rem] border-2 border-dashed border-slate-100 animate-in fade-in zoom-in-95">
+                        <div className="w-20 h-20 bg-chippy-coral/10 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                            <Zap className="w-10 h-10 text-chippy-coral fill-chippy-coral" />
+                        </div>
+                        <h3 className="text-2xl font-black text-chippy-navy mb-2">Upgrade to Unlock Sources</h3>
+                        <p className="text-slate-500 max-w-sm mx-auto mb-8 text-sm">
+                            Training your AI on PDFs, FAQs, and service guides is a **Growth** feature.
+                            Upgrade now to give your assistant deeper knowledge.
+                        </p>
+                        <button
+                            onClick={() => setShowUpgradeModal(true)}
+                            className="bg-chippy-navy text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-chippy-coral transition-all"
+                        >
+                            View Plans
+                        </button>
+                    </div>
+                )
+            )}
+
+            {showUpgradeModal && <PricingModal onClose={() => setShowUpgradeModal(false)} currentPlan={subscription.plan} />}
 
             {/* Re-scan Warning Modal */}
             {showRescanWarning && (

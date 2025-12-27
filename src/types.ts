@@ -122,3 +122,57 @@ export interface CalendarSettings {
   bookingCalendarId: string;
   appointmentDuration: number;
 }
+
+export interface Subscription {
+  plan: 'Starter' | 'Growth' | 'Advanced' | 'Free';
+  status: 'active' | 'inactive' | 'past_due' | 'canceled';
+  nextBillingDate?: string;
+  usage: {
+    conversations: number;
+    locations: number;
+    admins: number;
+    calendars: number;
+  };
+}
+
+export const PLAN_DETAILS = {
+  Starter: {
+    price: 49,
+    limits: { conversations: 100, locations: 1, admins: 1, calendars: 1 },
+    features: [
+      'Smart appointment booking',
+      '24/7 customer answers',
+      '1 Calendar integration',
+      'Learns from your website',
+      'Conversation history',
+      'Analytics dashboard',
+      'Branded chat widget',
+      'Email notifications'
+    ],
+    overage: { conversation: 0.5, location: 25, admin: 15, calendar: 20 }
+  },
+  Growth: {
+    price: 99,
+    limits: { conversations: 500, locations: 3, admins: 3, calendars: 3 },
+    features: [
+      'Everything in Starter',
+      '3 Calendar integrations',
+      'Document upload training',
+      'Custom response training',
+      'Lead qualification questions',
+      'Advanced analytics'
+    ],
+    overage: { conversation: 0.5, location: 25, admin: 15, calendar: 20 }
+  },
+  Advanced: {
+    price: 249,
+    limits: { conversations: 1500, locations: 5, admins: 5, calendars: 5 },
+    features: [
+      'Everything in Growth',
+      '5+ Calendar integrations',
+      'Multi-location dashboard',
+      'Custom reports & data export'
+    ],
+    overage: { conversation: 0.5, location: 0, admin: 0, calendar: 0 } // Advanced might have different overage or no caps on seats
+  }
+};

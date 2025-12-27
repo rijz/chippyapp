@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { useAuth } from './AuthContext';
 import {
     TenantConfig,
@@ -7,7 +7,9 @@ import {
     KnowledgeBaseData,
     ChartDataPoint,
     ChatSessionRecord,
-    ReviewItem
+    ReviewItem,
+    Subscription,
+    PLAN_DETAILS
 } from '../types';
 import { storage } from '../services/storage';
 import {
@@ -79,8 +81,23 @@ interface DataContextType {
     setChatSessions: React.Dispatch<React.SetStateAction<ChatSessionRecord[]>>;
     reviewItems: ReviewItem[];
     setReviewItems: React.Dispatch<React.SetStateAction<ReviewItem[]>>;
+    subscription: Subscription;
+    setSubscription: React.Dispatch<React.SetStateAction<Subscription>>;
+    isFeatureEnabled: (feature: string) => boolean;
+    getOverageCost: () => number;
     refreshData: () => Promise<void>;
 }
+
+const DEFAULT_SUBSCRIPTION: Subscription = {
+    plan: 'Starter',
+    status: 'inactive',
+    usage: {
+        conversations: 0,
+        locations: 1,
+        admins: 1,
+        calendars: 0
+    }
+};
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
@@ -115,6 +132,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>(() => storage.getChatSessions([]));
     const [reviewItems, setReviewItems] = useState<ReviewItem[]>(() => storage.getReviewItems([]));
+    const [subscription, setSubscription] = useState<Subscription>(DEFAULT_SUBSCRIPTION);
 
     const refreshData = async () => {
         if (!session?.user?.id) return;
@@ -134,6 +152,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                 }));
             }
             if (settings.calendar_settings) setCalendarSettings(settings.calendar_settings);
+            if (settings.subscription) {
+                setSubscription(prev => ({
+                    ...prev,
+                    ...settings.subscription,
+                    usage: {
+                        ...prev.usage,
+                        ...(settings.subscription.usage || {})
+                    }
+                }));
+            }
         }
 
         const remoteSessions = await fetchChatSessions(userId);
@@ -169,6 +197,39 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         }
     }, [tenantConfig, widgetConfig, calendarSettings, session?.user?.id]);
 
+    // Computed Usage
+    const currentUsage = useMemo(() => {
+        return {
+            conversations: chatSessions.length,
+            locations: subscription.usage?.locations || 1,
+            admins: subscription.usage?.admins || 1,
+            calendars: calendarSettings?.calendars.filter(c => c.selected).length || 0
+        };
+    }, [chatSessions, subscription.usage, calendarSettings]);
+
+    const isFeatureEnabled = (feature: string) => {
+        const details = PLAN_DETAILS[subscription.plan];
+        if (!details) return false;
+        return details.features.includes(feature) || details.features.some(f => f.startsWith('Everything in'));
+    };
+
+    const getOverageCost = () => {
+        const details = PLAN_DETAILS[subscription.plan];
+        if (!details) return 0;
+
+        let total = 0;
+        const u = currentUsage;
+        const l = details.limits;
+        const o = details.overage;
+
+        if (u.conversations > l.conversations) total += (u.conversations - l.conversations) * o.conversation;
+        if (u.locations > l.locations) total += (u.locations - l.locations) * o.location;
+        if (u.admins > l.admins) total += (u.admins - l.admins) * o.admin;
+        if (u.calendars > l.calendars) total += (u.calendars - l.calendars) * o.calendar;
+
+        return total;
+    };
+
     return (
         <DataContext.Provider value={{
             tenantConfig, setTenantConfig,
@@ -180,6 +241,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             totalBookings, setTotalBookings,
             chatSessions, setChatSessions,
             reviewItems, setReviewItems,
+            subscription: { ...subscription, usage: currentUsage },
+            setSubscription,
+            isFeatureEnabled,
+            getOverageCost,
             refreshData
         }}>
             {children}
