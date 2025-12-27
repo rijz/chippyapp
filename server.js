@@ -13,6 +13,13 @@ const PORT = process.env.PORT || 8080;
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
 
+// Initialize Supabase Admin (Service Role)
+import { createClient } from '@supabase/supabase-js';
+const supabaseAdmin = createClient(
+  process.env.VITE_SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+);
+
 // Webhook needs raw body
 app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -29,8 +36,65 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
   switch (event.type) {
     case 'checkout.session.completed':
       const session = event.data.object;
-      console.log('Payment Succeeded for session:', session.id);
-      // Here you would update your database (Supabase) via service role
+      const userId = session.metadata?.userId;
+      const amount = session.amount_total; // e.g. 4900 for $49.00
+
+      if (userId) {
+        console.log(`Processing subscription for User ${userId}, Amount: ${amount}`);
+
+        // Determine Plan
+        let newPlan = 'Starter';
+        let limits = { conversations: 100, locations: 1, admins: 1, calendars: 1 };
+
+        if (amount === 9900) {
+          newPlan = 'Growth';
+          limits = { conversations: 500, locations: 3, admins: 3, calendars: 3 };
+        } else if (amount === 24900) {
+          newPlan = 'Advanced';
+          limits = { conversations: 1500, locations: 5, admins: 5, calendars: 5 };
+        }
+
+        try {
+          // 1. Fetch current settings to preserve other data
+          const { data: currentData, error: fetchError } = await supabaseAdmin
+            .from('settings')
+            .select('subscription')
+            .eq('user_id', userId)
+            .single();
+
+          if (fetchError && fetchError.code !== 'PGRST116') { // Ignore not found, we'll create
+            console.error('Error fetching settings:', fetchError);
+          }
+
+          const currentUsage = currentData?.subscription?.usage || {
+            conversations: 0, locations: 1, admins: 1, calendars: 0
+          };
+
+          // 2. Upsert new subscription state
+          const { error: updateError } = await supabaseAdmin
+            .from('settings')
+            .upsert({
+              user_id: userId,
+              subscription: {
+                plan: newPlan,
+                status: 'active',
+                nextBillingDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toLocaleDateString(),
+                usage: {
+                  ...currentUsage,
+                  // We don't reset usage here, just plan type. 
+                  // In a real app, you might reset monthly counters on 'invoice.payment_succeeded'
+                }
+              },
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id' });
+
+          if (updateError) throw updateError;
+          console.log(`Successfully upgraded User ${userId} to ${newPlan}`);
+
+        } catch (dbError) {
+          console.error('Supabase Update Error:', dbError);
+        }
+      }
       break;
     default:
       console.log(`Unhandled event type ${event.type}`);
