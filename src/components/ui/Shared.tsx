@@ -67,7 +67,7 @@ export const PricingModal = ({ onClose, currentPlan }: { onClose: () => void, cu
     const plans = [
         {
             name: 'Starter',
-            priceId: 'price_starter_placeholder',
+            priceId: 'price_1SiqlIB191hifB6xO0gbG5wb',
             price: '$49',
             desc: 'Solo practitioners and single-location businesses.',
             features: [
@@ -86,7 +86,7 @@ export const PricingModal = ({ onClose, currentPlan }: { onClose: () => void, cu
         },
         {
             name: 'Growth',
-            priceId: 'price_growth_placeholder',
+            priceId: 'price_1SiqlGB191hifB6xS2KHI5tl',
             price: '$99',
             popular: true,
             desc: 'Growing businesses with multiple team members.',
@@ -104,7 +104,7 @@ export const PricingModal = ({ onClose, currentPlan }: { onClose: () => void, cu
         },
         {
             name: 'Advanced',
-            priceId: 'price_advanced_placeholder',
+            priceId: 'price_1SiqlEB191hifB6x3Pp7OPe4',
             price: '$249',
             desc: 'Multi-location practices and established businesses.',
             features: [
