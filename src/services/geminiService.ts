@@ -5,7 +5,7 @@ import { KnowledgeBaseData, KnowledgeConflict, ReviewItem, Sentiment, Message, C
 import { getEnv } from "../utils/env";
 
 // Initialize the client
-const apiKey = getEnv('VITE_GOOGLE_API_KEY');
+const apiKey = getEnv('VITE_GEMINI_API_KEY');
 const ai = new GoogleGenAI({ apiKey });
 
 /**
