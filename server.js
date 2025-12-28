@@ -151,6 +151,33 @@ app.post('/api/create-checkout-session', async (req, res) => {
 });
 
 // =====================
+// Gemini API Proxy for Chat Widget
+// =====================
+// This proxies chat requests through the backend to keep the API key secure
+app.all('/api-proxy/*', async (req, res) => {
+  try {
+    const geminiPath = req.params[0]; // e.g., "v1beta/models/gemini-2.0-flash:generateContent"
+    const geminiUrl = `https://generativelanguage.googleapis.com/${geminiPath}?key=${process.env.VITE_GEMINI_API_KEY}`;
+
+    console.log(`[API Proxy] Forwarding to: ${geminiPath}`);
+
+    const response = await fetch(geminiUrl, {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: req.method !== 'GET' ? JSON.stringify(req.body) : undefined,
+    });
+
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('[API Proxy] Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// =====================
 // Web Scraper + Gemini Analysis Endpoint
 // =====================
 import { scrapeWebsite } from './scraper.js';
