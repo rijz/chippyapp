@@ -10,11 +10,13 @@
   },
   "dependencies": {
     "@google/genai": "^1.34.0",
+    "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.39.0",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "express": "^4.18.2",
     "lucide-react": "^0.294.0",
+    "puppeteer": "^24.34.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.11.0",

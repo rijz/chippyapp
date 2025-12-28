@@ -3,8 +3,32 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Sparkles, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
 import { Message, TenantConfig, WidgetConfig } from '../types';
 import { createAgentSession, analyzeInteraction } from '../services/geminiService';
-// Fix: Import Chat instead of deprecated ChatSession
-import { Chat, GenerateContentResponse } from '@google/genai';
+import { ChatSession } from '@google/generative-ai';
+
+// Simple Markdown renderer for chat messages
+const FormattedMessage: React.FC<{ text: string }> = ({ text }) => {
+  // Convert markdown to HTML
+  const formatText = (input: string) => {
+    return input
+      // Bold: **text** or __text__
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/__(.*?)__/g, '<strong>$1</strong>')
+      // Italic: *text* or _text_
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/_(.*?)_/g, '<em>$1</em>')
+      // Bullet points: - item or * item
+      .replace(/^[-*]\s+(.*)$/gm, '<li class="ml-4 list-disc">$1</li>')
+      // Line breaks
+      .replace(/\n/g, '<br />');
+  };
+
+  return (
+    <span
+      className="formatted-message"
+      dangerouslySetInnerHTML={{ __html: formatText(text) }}
+    />
+  );
+};
 
 interface ChatWidgetProps {
   tenantConfig: TenantConfig;
@@ -20,24 +44,23 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  // Fix: Use Chat type instead of ChatSession
-  const [chatSession, setChatSession] = useState<Chat | null>(null);
-  
+  const [chatSession, setChatSession] = useState<ChatSession | null>(null);
+
   // Lead Data
   const [leadData, setLeadData] = useState({ name: '', email: '', phone: '' });
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Determine if we should show lead form based on config
   const isPreChatMode = widgetConfig.leadCaptureMode === 'pre-chat';
-  const hasLeadFields = widgetConfig.contactFields.name !== 'hidden' || 
-                       widgetConfig.contactFields.email !== 'hidden' || 
-                       widgetConfig.contactFields.phone !== 'hidden';
+  const hasLeadFields = widgetConfig.contactFields.name !== 'hidden' ||
+    widgetConfig.contactFields.email !== 'hidden' ||
+    widgetConfig.contactFields.phone !== 'hidden';
 
   // Initialize welcome message
   useEffect(() => {
     if (widgetConfig.welcomeMessage) {
-       setMessages([{
+      setMessages([{
         id: 'welcome',
         role: 'model',
         text: widgetConfig.welcomeMessage,
@@ -49,10 +72,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
   // Handle initialization based on mode
   useEffect(() => {
     if (widgetConfig.leadCaptureMode === 'ai-driven' || !hasLeadFields) {
-        setShowLeadForm(false);
-        initChat(); // Initialize AI session immediately
+      setShowLeadForm(false);
+      initChat(); // Initialize AI session immediately
     } else if (isPreChatMode) {
-        setShowLeadForm(true);
+      setShowLeadForm(true);
     }
   }, [widgetConfig.leadCaptureMode, hasLeadFields]);
 
@@ -60,9 +83,17 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     let structuredInfo = "Standard business hours apply.";
     let correctionsInfo = "";
 
+    console.log('[ChatWidget] initChat called');
+    console.log('[ChatWidget] knowledgeSummary received:', knowledgeSummary ? `${knowledgeSummary.substring(0, 100)}...` : 'EMPTY');
+
     try {
       if (knowledgeSummary) {
         const parsed = JSON.parse(knowledgeSummary);
+        console.log('[ChatWidget] Parsed knowledge:', {
+          companyName: parsed.companyName,
+          pricing: parsed.pricing ? 'HAS PRICING' : 'NO PRICING',
+          services: parsed.services?.length || 0
+        });
         structuredInfo = `
           Business Category: ${parsed.businessCategory}
           Summary: ${parsed.summary}
@@ -169,8 +200,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     setIsLoading(true);
 
     try {
-      const result: GenerateContentResponse = await chatSession.sendMessage({ message: userMsg.text });
-      const responseText = result.text || "I'm sorry, I'm having trouble connecting to the schedule right now.";
+      const result = await chatSession.sendMessage(userMsg.text);
+      const responseText = result.response.text() || "I'm sorry, I'm having trouble connecting to the schedule right now.";
 
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -182,7 +213,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
 
       analyzeInteraction(currentText, responseText).then(analysis => {
         if (onInteraction) {
-           onInteraction(currentText, responseText, analysis);
+          onInteraction(currentText, responseText, analysis);
         }
       });
 
@@ -231,74 +262,74 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
           <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col">
             {showLeadForm ? (
               <div className="p-6 flex-1 flex flex-col">
-                 <div className="mb-6">
-                    <h4 className="font-bold text-slate-800">Hello!</h4>
-                    <p className="text-sm text-slate-500 mt-1">Please introduce yourself to start the conversation.</p>
-                 </div>
-                 
-                 <form onSubmit={handleLeadSubmit} className="space-y-4 flex-1">
-                    {widgetConfig.contactFields.name !== 'hidden' && (
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Full Name {widgetConfig.contactFields.name === 'required' && '*'}</label>
-                        <div className="relative">
-                           <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                           <input 
-                             type="text" 
-                             required={widgetConfig.contactFields.name === 'required'}
-                             placeholder="John Doe"
-                             className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
-                             value={leadData.name}
-                             onChange={(e) => setLeadData({...leadData, name: e.target.value})}
-                           />
-                        </div>
-                      </div>
-                    )}
+                <div className="mb-6">
+                  <h4 className="font-bold text-slate-800">Hello!</h4>
+                  <p className="text-sm text-slate-500 mt-1">Please introduce yourself to start the conversation.</p>
+                </div>
 
-                    {widgetConfig.contactFields.email !== 'hidden' && (
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Email Address {widgetConfig.contactFields.email === 'required' && '*'}</label>
-                        <div className="relative">
-                           <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                           <input 
-                             type="email" 
-                             required={widgetConfig.contactFields.email === 'required'}
-                             placeholder="john@example.com"
-                             className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
-                             value={leadData.email}
-                             onChange={(e) => setLeadData({...leadData, email: e.target.value})}
-                           />
-                        </div>
+                <form onSubmit={handleLeadSubmit} className="space-y-4 flex-1">
+                  {widgetConfig.contactFields.name !== 'hidden' && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Full Name {widgetConfig.contactFields.name === 'required' && '*'}</label>
+                      <div className="relative">
+                        <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                        <input
+                          type="text"
+                          required={widgetConfig.contactFields.name === 'required'}
+                          placeholder="John Doe"
+                          className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
+                          value={leadData.name}
+                          onChange={(e) => setLeadData({ ...leadData, name: e.target.value })}
+                        />
                       </div>
-                    )}
-
-                    {widgetConfig.contactFields.phone !== 'hidden' && (
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Phone Number {widgetConfig.contactFields.phone === 'required' && '*'}</label>
-                        <div className="relative">
-                           <Phone className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                           <input 
-                             type="tel" 
-                             required={widgetConfig.contactFields.phone === 'required'}
-                             placeholder="+1 (555) 000-0000"
-                             className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
-                             value={leadData.phone}
-                             onChange={(e) => setLeadData({...leadData, phone: e.target.value})}
-                           />
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="pt-4 mt-auto">
-                       <button 
-                         type="submit" 
-                         disabled={!isLeadFormValid()}
-                         className="w-full py-3 rounded-xl text-white font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none"
-                         style={{ backgroundColor: widgetConfig.color }}
-                       >
-                         Start Chatting <ArrowRight className="w-4 h-4" />
-                       </button>
                     </div>
-                 </form>
+                  )}
+
+                  {widgetConfig.contactFields.email !== 'hidden' && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Email Address {widgetConfig.contactFields.email === 'required' && '*'}</label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                        <input
+                          type="email"
+                          required={widgetConfig.contactFields.email === 'required'}
+                          placeholder="john@example.com"
+                          className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
+                          value={leadData.email}
+                          onChange={(e) => setLeadData({ ...leadData, email: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {widgetConfig.contactFields.phone !== 'hidden' && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Phone Number {widgetConfig.contactFields.phone === 'required' && '*'}</label>
+                      <div className="relative">
+                        <Phone className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                        <input
+                          type="tel"
+                          required={widgetConfig.contactFields.phone === 'required'}
+                          placeholder="+1 (555) 000-0000"
+                          className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
+                          value={leadData.phone}
+                          onChange={(e) => setLeadData({ ...leadData, phone: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-4 mt-auto">
+                    <button
+                      type="submit"
+                      disabled={!isLeadFormValid()}
+                      className="w-full py-3 rounded-xl text-white font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none"
+                      style={{ backgroundColor: widgetConfig.color }}
+                    >
+                      Start Chatting <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </form>
               </div>
             ) : (
               <>
@@ -306,20 +337,20 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
                   {messages.map((msg) => (
                     <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-none'}`} style={msg.role === 'user' ? { backgroundColor: widgetConfig.color } : {}}>
-                        {msg.text}
+                        {msg.role === 'user' ? msg.text : <FormattedMessage text={msg.text} />}
                       </div>
                     </div>
                   ))}
                   {isLoading && (
-                     <div className="flex justify-start">
-                       <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm">
-                         <Loader2 className="w-4 h-4 animate-spin" style={{ color: widgetConfig.color }} />
-                       </div>
-                     </div>
+                    <div className="flex justify-start">
+                      <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm">
+                        <Loader2 className="w-4 h-4 animate-spin" style={{ color: widgetConfig.color }} />
+                      </div>
+                    </div>
                   )}
                   <div ref={messagesEndRef} />
                 </div>
-                
+
                 <div className="p-3 bg-white border-t border-slate-100">
                   <div className="flex items-center gap-2 bg-slate-50 rounded-full px-4 py-2 border border-slate-200 focus-within:border-chippy-coral transition-colors">
                     <input

@@ -150,6 +150,97 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
+// =====================
+// Web Scraper + Gemini Analysis Endpoint
+// =====================
+import { scrapeWebsite } from './scraper.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const genAI = new GoogleGenerativeAI(process.env.VITE_GEMINI_API_KEY || '');
+
+app.post('/api/scrape', async (req, res) => {
+  const { url } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ error: 'URL is required' });
+  }
+
+  try {
+    console.log(`[API] Scraping: ${url}`);
+
+    // Step 1: Scrape the website
+    const scrapedData = await scrapeWebsite(url);
+
+    if (!scrapedData.combinedText || scrapedData.combinedText.length < 100) {
+      return res.status(400).json({ error: 'Could not extract enough content from the website.' });
+    }
+
+    console.log(`[API] Scraped ${scrapedData.pages.length} pages. Sending to Gemini...`);
+
+    // Step 2: Send to Gemini for structuring
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    const prompt = `You are a business data extractor. Analyze the following website text content and extract structured information.
+
+SCRAPED WEBSITE CONTENT:
+"""
+${scrapedData.combinedText}
+"""
+
+Based on this content, extract and return a JSON object with this exact structure (no markdown, no backticks):
+{
+  "companyName": "Official business name",
+  "website": "${url}",
+  "phoneNumber": "Primary phone number if found (or null)",
+  "businessCategory": "2-3 word industry category (e.g., 'Hair Salon', 'E-Commerce Platform')",
+  "keywords": ["5", "relevant", "industry", "keywords"],
+  "summary": "2-sentence executive summary of what they do and who they serve",
+  "services": ["Specific Service 1", "Specific Service 2", "...list all found services/products"],
+  "businessHours": "Operating hours if found (or 'Not specified')",
+  "contactInfo": "Email, address, other contact methods (or 'Not specified')",
+  "pricing": "Extract ALL pricing information found: plan names, prices (monthly/yearly), features. Format nicely. If none found, say 'No pricing information found.'",
+  "policies": "Cancellation, refund, or booking policies found. If none, say 'No policies found.'",
+  "locations": [
+    {
+      "name": "Location name (e.g., 'Downtown Office', 'Main Street Clinic')",
+      "address": "Full street address",
+      "city": "City name",
+      "state": "State/Province",
+      "zip": "Postal/ZIP code",
+      "phone": "Location-specific phone if different from main",
+      "hours": "Location-specific hours if different"
+    }
+  ]
+}
+
+IMPORTANT: 
+- For pricing, look for "$" amounts, plan tiers (Basic, Pro, Enterprise), monthly/yearly options.
+- Be thorough with services - list every distinct offering.
+- For LOCATIONS: Look for physical addresses, storefronts, clinics, offices, or branches. This is critical for local businesses where customers need to find the nearest location for booking. If no locations found, return an empty array [].
+- Return ONLY valid JSON, no explanations.`;
+
+    const result = await model.generateContent(prompt);
+    let text = result.response.text();
+
+    // Clean up response
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    const knowledgeBaseData = JSON.parse(text);
+
+    // Add metadata
+    knowledgeBaseData.sources = scrapedData.pages.map(p => p.url);
+    knowledgeBaseData.lastUpdated = new Date().toISOString();
+
+    console.log(`[API] Successfully structured data for: ${knowledgeBaseData.companyName}`);
+
+    res.json(knowledgeBaseData);
+
+  } catch (error) {
+    console.error('[API] Scrape Error:', error);
+    res.status(500).json({ error: error.message || 'Scraping failed' });
+  }
+});
+
 // Handle SPA routing: return index.html for all non-file requests
 app.get('*', (req, res) => {
   const indexPath = path.join(distPath, 'index.html');

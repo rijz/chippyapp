@@ -29,6 +29,11 @@ export default defineConfig(({ mode }) => {
           target: 'http://localhost:8080',
           changeOrigin: true,
           secure: false,
+        },
+        '/env-config.js': {
+          target: 'http://localhost:8080',
+          changeOrigin: true,
+          secure: false,
         }
       }
     }

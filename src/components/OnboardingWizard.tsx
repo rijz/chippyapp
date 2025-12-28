@@ -24,9 +24,13 @@ import {
    Building,
    Phone,
    Link2,
-   Unlock
+   Unlock,
+   MapPin,
+   Store,
+   Car,
+   Laptop
 } from 'lucide-react';
-import { KnowledgeBaseData, LogEntry, TenantConfig } from '../types';
+import { KnowledgeBaseData, LogEntry, TenantConfig, BusinessLocation, BusinessType } from '../types';
 import { analyzeCompanyContent, analyzeRawText } from '../services/geminiService';
 import { uploadKnowledgeAsset } from '../services/supabaseStorage';
 
@@ -56,13 +60,24 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
    onComplete,
    onCancel
 }) => {
-   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
    const [url, setUrl] = useState(tenantConfig.companyUrl);
+
+   // Step 1.5: Business Type
+   const [businessType, setBusinessType] = useState<BusinessType | null>(tenantConfig.businessType || null);
+   const [locations, setLocations] = useState<BusinessLocation[]>(tenantConfig.locations || [{
+      name: 'Main Location',
+      address: '',
+      city: '',
+      state: '',
+      zip: ''
+   }]);
 
    // Step 2 State
    const [logs, setLogs] = useState<LogEntry[]>([]);
    const [progress, setProgress] = useState(0);
    const [scannedData, setScannedData] = useState<KnowledgeBaseData | null>(null);
+   const lastLoggedStageRef = useRef<number>(-1);
    const logsEndRef = useRef<HTMLDivElement>(null);
 
    // Step 3 State
@@ -97,14 +112,22 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       }]);
    };
 
-   const handleStartScan = async () => {
+   // Step 1 → Step 2: Just save URL and proceed to Business Type selection
+   const handleProceedToBusinessType = () => {
       if (!url) return;
       onUpdateConfig({ ...tenantConfig, companyUrl: url });
-
       setStep(2);
+   };
+
+   // Step 2 → Step 3: Actually start the scan after business type is selected
+   const handleStartScan = async () => {
+      if (!url) return;
+
+      setStep(3);
       setProgress(10);
       setLogs([]);
       setScannedData(null);
+      lastLoggedStageRef.current = -1;
 
       addLog(`Initializing Gemini Agent...`, 'pending');
       addLog(`Connecting to ${url}...`, 'pending');
@@ -131,9 +154,11 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
          // Let's just use the STAGES array cyclically based on progress
 
          const currentProgress = 10 + (tick * 1.5); // Approx progress calculation
-         const stage = STAGES.find(s => Math.abs(s.p - currentProgress) < 2);
-         if (stage) {
-            addLog(stage.m, 'processing');
+         const stageIndex = STAGES.findIndex(s => Math.abs(s.p - currentProgress) < 2);
+
+         if (stageIndex !== -1 && stageIndex > lastLoggedStageRef.current) {
+            addLog(STAGES[stageIndex].m, 'processing');
+            lastLoggedStageRef.current = stageIndex;
          }
       }, 100);
 
@@ -149,6 +174,17 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                addLog("⚠️ Connection Failed. API Key rejected/blocked.", 'error');
                addLog("Falling back to DEMO DATA.", 'pending');
             } else {
+               // Dynamic Result Logs
+               addLog(`✓ Found ${data.services.length} Services/Offerings`, 'success');
+               if (data.pricing && data.pricing !== 'Detailed pricing information was not found.') {
+                  addLog("✓ Successfully captured Pricing Packages", 'success');
+               } else {
+                  addLog("ℹ No detailed pricing found (Action Required)", 'pending');
+               }
+               if (data.businessHours !== 'Not specified') {
+                  addLog("✓ Captured Business Hours", 'success');
+               }
+
                addLog("Data Model Constructed Successfully.", 'success');
                addLog("Ready for human verification.", 'success');
             }
@@ -222,7 +258,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
    const handleTrainAndLaunch = async () => {
       if (!scannedData) return;
       setIsTraining(true);
-      setStep(4);
+      setStep(5);
       setTrainingPhase(0);
 
       const SEQUENCE = [
@@ -272,7 +308,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   <div className="bg-chippy-coral/10 p-2 rounded-lg border border-chippy-coral/20 backdrop-blur-sm">
                      <BrainCircuit className="w-6 h-6 text-chippy-coral" />
                   </div>
-                  <span className="text-xl font-bold tracking-tight text-white">Agent X</span>
+                  <span className="text-xl font-bold tracking-tight text-white">Chippy</span>
                </div>
 
                {/* 2. Dynamic Left Content */}
@@ -296,8 +332,32 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                      </div>
                   )}
 
-                  {/* STEP 2 LEFT */}
+                  {/* STEP 2 LEFT - Business Type */}
                   {step === 2 && (
+                     <div className="flex flex-col items-center text-center">
+                        <div className="w-40 h-40 bg-white/5 backdrop-blur-xl rounded-full flex items-center justify-center border border-white/10 shadow-2xl relative mb-8">
+                           <MapPin className="w-16 h-16 text-chippy-coral" />
+                        </div>
+                        <h3 className="text-2xl font-bold text-white mb-2">Business Setup</h3>
+                        <p className="text-slate-400 mb-6 max-w-xs mx-auto">
+                           Tell us where you serve your customers so Chippy can guide them to the right location.
+                        </p>
+                        <div className="w-full max-w-[200px] space-y-2 text-left">
+                           <div className={`flex items-center gap-2 text-sm ${businessType === 'storefront' ? 'text-chippy-coral' : 'text-slate-500'}`}>
+                              <Store className="w-4 h-4" /> Storefront / Clinic
+                           </div>
+                           <div className={`flex items-center gap-2 text-sm ${businessType === 'mobile' ? 'text-chippy-coral' : 'text-slate-500'}`}>
+                              <Car className="w-4 h-4" /> Mobile / On-Site
+                           </div>
+                           <div className={`flex items-center gap-2 text-sm ${businessType === 'online' ? 'text-chippy-coral' : 'text-slate-500'}`}>
+                              <Laptop className="w-4 h-4" /> Online Only
+                           </div>
+                        </div>
+                     </div>
+                  )}
+
+                  {/* STEP 3 LEFT - Scanning */}
+                  {step === 3 && (
                      <div className="flex flex-col items-center text-center">
                         <div className="w-40 h-40 bg-white/5 backdrop-blur-xl rounded-full flex items-center justify-center border border-white/10 shadow-2xl relative mb-8">
                            {scannedData ? (
@@ -325,8 +385,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                      </div>
                   )}
 
-                  {/* STEP 3 LEFT */}
-                  {step === 3 && (
+                  {/* STEP 4 LEFT - Review */}
+                  {step === 4 && (
                      <div className="flex flex-col h-full max-h-[600px]">
                         <div className="mb-6">
                            <div className="flex items-center gap-2 mb-2 text-chippy-coral">
@@ -364,8 +424,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                      </div>
                   )}
 
-                  {/* STEP 4 LEFT */}
-                  {step === 4 && (
+                  {/* STEP 5 LEFT - Training */}
+                  {step === 5 && (
                      <div className="flex flex-col items-center text-center">
                         <div className="w-40 h-40 bg-white/5 backdrop-blur-xl rounded-full flex items-center justify-center border border-white/10 shadow-2xl relative mb-8">
                            {trainingPhase >= 4 ? (
@@ -396,9 +456,9 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
 
                {/* 3. Footer Step Indicator */}
                <div className="mt-8 pt-6 border-t border-slate-800/50 flex justify-between items-center text-xs text-slate-500">
-                  <span>Step {step} of 4</span>
+                  <span>Step {step} of 5</span>
                   <div className="flex gap-1">
-                     {[1, 2, 3, 4].map(i => (
+                     {[1, 2, 3, 4, 5].map(i => (
                         <div key={i} className={`h-1 rounded-full transition-all duration-300 ${i <= step ? 'w-8 bg-chippy-coral' : 'w-2 bg-slate-700'}`} />
                      ))}
                   </div>
@@ -423,16 +483,151 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-sm focus-within:ring-2 focus-within:ring-chippy-coral focus-within:border-chippy-coral transition-all">
                            <div className="flex items-center">
                               <div className="pl-4 pr-3 text-slate-400"><Search className="w-5 h-5" /></div>
-                              <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://yourcompany.com" className="flex-1 py-3 bg-transparent outline-none text-slate-900 placeholder:text-slate-300" onKeyDown={(e) => e.key === 'Enter' && handleStartScan()} />
+                              <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://yourcompany.com" className="flex-1 py-3 bg-transparent outline-none text-slate-900 placeholder:text-slate-300" onKeyDown={(e) => e.key === 'Enter' && handleProceedToBusinessType()} />
                            </div>
                         </div>
-                        <button onClick={handleStartScan} disabled={!url} className="w-full mt-6 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-semibold py-4 rounded-xl transition-all shadow-lg shadow-chippy-coral/20 hover:shadow-chippy-coral/30 hover:-translate-y-0.5 disabled:opacity-50 disabled:shadow-none disabled:translate-y-0 flex items-center justify-center gap-2">Begin Analysis <ArrowRight className="w-5 h-5" /></button>
+                        <button onClick={handleProceedToBusinessType} disabled={!url} className="w-full mt-6 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-semibold py-4 rounded-xl transition-all shadow-lg shadow-chippy-coral/20 hover:shadow-chippy-coral/30 hover:-translate-y-0.5 disabled:opacity-50 disabled:shadow-none disabled:translate-y-0 flex items-center justify-center gap-2">Continue <ArrowRight className="w-5 h-5" /></button>
                      </div>
                   </div>
                )}
 
-               {/* STEP 2 RIGHT */}
+               {/* STEP 2: BUSINESS TYPE & LOCATION (NEW) */}
                {step === 2 && (
+                  <div className="h-full flex flex-col items-center justify-center p-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                     <div className="max-w-2xl w-full">
+                        <div className="text-center mb-10">
+                           <div className="w-16 h-16 bg-white rounded-2xl shadow-lg shadow-chippy-coral/10 flex items-center justify-center mx-auto mb-6 border border-slate-100"><MapPin className="w-8 h-8 text-chippy-coral" /></div>
+                           <h2 className="text-2xl font-bold text-chippy-navy mb-2">Where Do You Serve Customers?</h2>
+                           <p className="text-slate-500">This helps Chippy guide customers to your location or service area.</p>
+                        </div>
+
+                        {/* Business Type Cards */}
+                        <div className="grid grid-cols-3 gap-4 mb-8">
+                           <button
+                              onClick={() => setBusinessType('storefront')}
+                              className={`p-6 rounded-xl border-2 transition-all text-left ${businessType === 'storefront' ? 'border-chippy-coral bg-chippy-coral/5 shadow-lg' : 'border-slate-200 bg-white hover:border-chippy-coral/50'}`}
+                           >
+                              <Store className={`w-8 h-8 mb-3 ${businessType === 'storefront' ? 'text-chippy-coral' : 'text-slate-400'}`} />
+                              <h3 className="font-bold text-slate-900 mb-1">Storefront / Clinic</h3>
+                              <p className="text-xs text-slate-500">Customers visit your location(s)</p>
+                           </button>
+                           <button
+                              onClick={() => setBusinessType('mobile')}
+                              className={`p-6 rounded-xl border-2 transition-all text-left ${businessType === 'mobile' ? 'border-chippy-coral bg-chippy-coral/5 shadow-lg' : 'border-slate-200 bg-white hover:border-chippy-coral/50'}`}
+                           >
+                              <Car className={`w-8 h-8 mb-3 ${businessType === 'mobile' ? 'text-chippy-coral' : 'text-slate-400'}`} />
+                              <h3 className="font-bold text-slate-900 mb-1">Mobile / On-Site</h3>
+                              <p className="text-xs text-slate-500">You visit the customer</p>
+                           </button>
+                           <button
+                              onClick={() => setBusinessType('online')}
+                              className={`p-6 rounded-xl border-2 transition-all text-left ${businessType === 'online' ? 'border-chippy-coral bg-chippy-coral/5 shadow-lg' : 'border-slate-200 bg-white hover:border-chippy-coral/50'}`}
+                           >
+                              <Laptop className={`w-8 h-8 mb-3 ${businessType === 'online' ? 'text-chippy-coral' : 'text-slate-400'}`} />
+                              <h3 className="font-bold text-slate-900 mb-1">Online Only</h3>
+                              <p className="text-xs text-slate-500">Virtual / digital services</p>
+                           </button>
+                        </div>
+
+                        {/* Location Form (Only for Storefront) */}
+                        {businessType === 'storefront' && (
+                           <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                              <div className="flex items-center justify-between mb-2">
+                                 <h4 className="font-bold text-slate-900 flex items-center gap-2"><MapPin className="w-4 h-4 text-chippy-coral" /> Your Locations</h4>
+                                 {locations.length < 5 && (
+                                    <button onClick={() => setLocations([...locations, { name: `Location ${locations.length + 1}`, address: '', city: '', state: '', zip: '' }])} className="text-sm text-chippy-coral font-semibold flex items-center gap-1 hover:underline">
+                                       <Plus className="w-4 h-4" /> Add Location
+                                    </button>
+                                 )}
+                              </div>
+                              {locations.map((loc, i) => (
+                                 <div key={i} className="p-4 bg-slate-50 rounded-lg border border-slate-100 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                       <input
+                                          type="text"
+                                          value={loc.name}
+                                          onChange={(e) => { const next = [...locations]; next[i].name = e.target.value; setLocations(next); }}
+                                          placeholder="Location Name"
+                                          className="font-semibold text-slate-900 bg-transparent border-none outline-none"
+                                       />
+                                       {locations.length > 1 && (
+                                          <button onClick={() => setLocations(locations.filter((_, idx) => idx !== i))} className="text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                                       )}
+                                    </div>
+                                    <input
+                                       type="text"
+                                       value={loc.address}
+                                       onChange={(e) => { const next = [...locations]; next[i].address = e.target.value; setLocations(next); }}
+                                       placeholder="Street Address *"
+                                       className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
+                                    />
+                                    <div className="grid grid-cols-3 gap-2">
+                                       <input
+                                          type="text"
+                                          value={loc.city}
+                                          onChange={(e) => { const next = [...locations]; next[i].city = e.target.value; setLocations(next); }}
+                                          placeholder="City *"
+                                          className="p-2 border border-slate-200 rounded-lg text-sm bg-white"
+                                       />
+                                       <input
+                                          type="text"
+                                          value={loc.state}
+                                          onChange={(e) => { const next = [...locations]; next[i].state = e.target.value; setLocations(next); }}
+                                          placeholder="State *"
+                                          className="p-2 border border-slate-200 rounded-lg text-sm bg-white"
+                                       />
+                                       <input
+                                          type="text"
+                                          value={loc.zip}
+                                          onChange={(e) => { const next = [...locations]; next[i].zip = e.target.value; setLocations(next); }}
+                                          placeholder="ZIP *"
+                                          className="p-2 border border-slate-200 rounded-lg text-sm bg-white"
+                                       />
+                                    </div>
+                                 </div>
+                              ))}
+                           </div>
+                        )}
+
+                        {/* Service Area (For Mobile) */}
+                        {businessType === 'mobile' && (
+                           <div className="bg-white rounded-xl border border-slate-200 p-6 animate-in fade-in slide-in-from-bottom-2">
+                              <h4 className="font-bold text-slate-900 flex items-center gap-2 mb-4"><Car className="w-4 h-4 text-chippy-coral" /> Service Area (Optional)</h4>
+                              <input
+                                 type="text"
+                                 value={locations[0]?.city || ''}
+                                 onChange={(e) => setLocations([{ ...locations[0], city: e.target.value, name: 'Service Area' }])}
+                                 placeholder="e.g., Los Angeles, Orange County, Bay Area"
+                                 className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white"
+                              />
+                              <p className="text-xs text-slate-400 mt-2">Enter the cities or regions you serve</p>
+                           </div>
+                        )}
+
+                        {/* Online - No Location Needed */}
+                        {businessType === 'online' && (
+                           <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-6 text-center animate-in fade-in slide-in-from-bottom-2">
+                              <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+                              <p className="text-emerald-800 font-medium">No physical location needed for online services!</p>
+                           </div>
+                        )}
+
+                        <button
+                           onClick={() => {
+                              onUpdateConfig({ ...tenantConfig, businessType: businessType!, locations: businessType === 'storefront' ? locations : undefined });
+                              handleStartScan();
+                           }}
+                           disabled={!businessType || (businessType === 'storefront' && !locations[0]?.address)}
+                           className="w-full mt-8 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-semibold py-4 rounded-xl transition-all shadow-lg disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
+                        >
+                           Begin Analysis <ArrowRight className="w-5 h-5" />
+                        </button>
+                     </div>
+                  </div>
+               )}
+
+               {/* STEP 3 RIGHT (was Step 2) - Discovery Scan */}
+               {step === 3 && (
                   <div className="h-full flex flex-col p-12">
                      <div className="flex items-center gap-2 mb-8">
                         <Terminal className="w-5 h-5 text-chippy-coral" /><h4 className="font-bold text-slate-900 uppercase tracking-wider">Discovery Protocol</h4>
@@ -463,10 +658,21 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                               if (!scannedData) {
                                  // Manual Fallback Init
                                  setScannedData({
-                                    companyName: '', services: [], sources: ['Manual Entry'], businessCategory: '', summary: '', pricing: '', policies: '', businessHours: '', contactInfo: '', keywords: []
+                                    companyName: '',
+                                    website: url,
+                                    phoneNumber: '',
+                                    services: [],
+                                    sources: ['Manual Entry'],
+                                    businessCategory: '',
+                                    summary: '',
+                                    pricing: '',
+                                    policies: '',
+                                    businessHours: '',
+                                    contactInfo: '',
+                                    keywords: []
                                  });
                               }
-                              setStep(3);
+                              setStep(4);
                            }} className="w-full h-full bg-chippy-coral hover:bg-chippy-coral-hover text-white font-bold text-lg rounded-xl transition-all shadow-lg hover:shadow-chippy-coral/20 hover:-translate-y-0.5 flex items-center justify-center gap-2 animate-in slide-in-from-bottom-2 fade-in">
                               {scannedData ? "Proceed to Review" : "Continue Manually"} <ArrowRight className="w-5 h-5" />
                            </button>
@@ -475,8 +681,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   </div>
                )}
 
-               {/* STEP 3 RIGHT */}
-               {step === 3 && scannedData && (
+               {/* STEP 4 RIGHT (was Step 3) - Human Review */}
+               {step === 4 && scannedData && (
                   <div className="max-w-4xl mx-auto p-6 lg:p-12 space-y-6 pb-32 animate-in fade-in slide-in-from-right-4 duration-500">
                      <div id="card-identity">
                         <ReviewCard title="Identity & Summary" icon={<LayoutTemplate className="w-5 h-5 text-chippy-coral" />} isExpanded={expandedSection === 'identity'} isApproved={sectionStatus.identity} onToggle={() => setExpandedSection(expandedSection === 'identity' ? null : 'identity')} onApprove={() => toggleApproval('identity')}>
@@ -522,7 +728,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         <ReviewCard title="Pricing & Rates" icon={<DollarSign className="w-5 h-5 text-amber-600" />} isExpanded={expandedSection === 'pricing'} isApproved={sectionStatus.pricing} onToggle={() => setExpandedSection(expandedSection === 'pricing' ? null : 'pricing')} onApprove={() => toggleApproval('pricing')} isEmpty={!scannedData.pricing}>
                            <div>
                               {!scannedData.pricing && <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-sm mb-3 flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><div><p className="font-semibold">Missing Pricing Data</p><p className="text-xs">We couldn't find pricing on the site.</p></div></div>}
-                              <textarea rows={6} placeholder="e.g. \nBasic Plan: $50/mo" className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral font-mono" value={typeof scannedData.pricing === 'string' ? scannedData.pricing : Array.isArray(scannedData.pricing) ? scannedData.pricing.map(p => `${p.name}: ${p.price}`).join('\n') : ''} onChange={(e) => setScannedData({ ...scannedData, pricing: e.target.value })} />
+                              <textarea rows={6} placeholder="e.g. \nBasic Plan: $50/mo" className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral font-mono" value={scannedData.pricing || ''} onChange={(e) => setScannedData({ ...scannedData, pricing: e.target.value })} />
                            </div>
                         </ReviewCard>
                      </div>
@@ -537,8 +743,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   </div>
                )}
 
-               {/* STEP 4 RIGHT */}
-               {step === 4 && (
+               {/* STEP 5 RIGHT (was Step 4) - Training */}
+               {step === 5 && (
                   <div className="h-full flex flex-col items-center justify-center p-12 relative">
                      <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-700">
                         <div className="text-center mb-10">

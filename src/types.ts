@@ -6,11 +6,15 @@ export interface Message {
   timestamp: Date;
 }
 
+export type BusinessType = 'storefront' | 'mobile' | 'online';
+
 export interface TenantConfig {
   id: string;
   companyName: string;
   companyUrl: string;
   industry: string;
+  businessType?: BusinessType;
+  locations?: BusinessLocation[];
   bookingPlatform: 'GOOGLE_CALENDAR' | 'SQUARE_APPOINTMENTS' | 'ACUITY_SCHEDULING' | null;
   isConnected: boolean;
 }
@@ -76,6 +80,16 @@ export interface PricingPlan {
   features: string[];
 }
 
+export interface BusinessLocation {
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  phone?: string;
+  hours?: string;
+}
+
 export interface KnowledgeBaseData {
   companyName: string | null;
   website: string | null;
@@ -88,6 +102,7 @@ export interface KnowledgeBaseData {
   contactInfo: string | null;
   pricing: string | null; // Summarized text
   policies: string | null; // Summarized text
+  locations?: BusinessLocation[]; // Physical business locations
   sources?: string[];
   lastUpdated?: Date;
   isMock?: boolean; // New flag for error handling
@@ -105,7 +120,7 @@ export interface KnowledgeConflict {
 export interface LogEntry {
   id: string;
   message: string;
-  status: 'pending' | 'success' | 'processing';
+  status: 'pending' | 'success' | 'processing' | 'error';
   timestamp: Date;
 }
 

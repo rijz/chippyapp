@@ -182,8 +182,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         refreshData();
     }, [session?.user?.id]);
 
-    // Sync Effects
+    // Sync Effects - Persist to localStorage AND Supabase
     useEffect(() => {
+        if (knowledgeData) {
+            // Always save to localStorage immediately for fast local access
+            storage.saveKnowledgeData(knowledgeData);
+            console.log('[DataContext] Knowledge data saved to localStorage:', knowledgeData.companyName);
+        }
         if (session?.user?.id && knowledgeData) {
             const timeout = setTimeout(() => syncKnowledgeBase(knowledgeData, session.user.id), 2000);
             return () => clearTimeout(timeout);

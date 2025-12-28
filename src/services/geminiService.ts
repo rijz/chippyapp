@@ -1,27 +1,30 @@
-
-// Fix: Import Chat instead of deprecated ChatSession and GenerativeModel
-import { GoogleGenAI, Chat } from "@google/genai";
-import { KnowledgeBaseData, KnowledgeConflict, ReviewItem, Sentiment, Message, ChatSessionRecord, EnquiryType } from "../types";
+import {
+  GoogleGenerativeAI,
+  HarmCategory,
+  HarmBlockThreshold
+} from "@google/generative-ai";
+import { KnowledgeBaseData, KnowledgeConflict, ReviewItem, Sentiment, Message, EnquiryType } from "../types";
 import { getEnv } from "../utils/env";
 
 // Initialize the client
 const apiKey = getEnv('VITE_GEMINI_API_KEY');
-const ai = new GoogleGenAI({ apiKey });
+console.log('[GeminiService] Initializing with Key:', apiKey ? `${apiKey.substring(0, 4)}...` : 'MISSING');
+const genAI = new GoogleGenerativeAI(apiKey || '');
 
 /**
- * Uses gemini-1.5-pro for high-reasoning chat interactions.
- * This is the "Brain" of Agent X.
+ * Uses gemini-2.0-flash for high-performance interactions.
+ * This is the "Brain" of Chippy.
  */
-// Fix: Use Chat type instead of ChatSession
 export const createAgentSession = async (
   systemInstruction: string
 ): Promise<any> => {
-  const model = 'gemini-1.5-pro';
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.0-flash',
+    systemInstruction: systemInstruction,
+  });
 
-  return ai.chats.create({
-    model: model,
-    config: {
-      systemInstruction: systemInstruction,
+  return model.startChat({
+    generationConfig: {
       temperature: 0.7,
     },
   });
@@ -35,11 +38,9 @@ export const classifySession = async (messages: Message[]): Promise<{ type: Enqu
 
   try {
     const transcript = messages.map(m => `${m.role}: ${m.text}`).join('\n');
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-    // Fix: Use gemini-1.5-flash for basic text analysis
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: `Analyze this chat transcript.
+    const result = await model.generateContent(`Analyze this chat transcript.
       
       TRANSCRIPT:
       ${transcript.substring(0, 5000)}
@@ -55,17 +56,16 @@ export const classifySession = async (messages: Message[]): Promise<{ type: Enqu
         "summary": "User asked about monthly rates.",
         "sentiment": "neutral"
       }
-      `
-    });
+      `);
 
-    let text = response.text || "";
+    let text = result.response.text();
     text = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    const result = JSON.parse(text);
+    const json = JSON.parse(text);
 
     return {
-      type: result.type || 'General',
-      summary: result.summary || 'Conversation',
-      sentiment: result.sentiment || 'neutral'
+      type: json.type || 'General',
+      summary: json.summary || 'Conversation',
+      sentiment: json.sentiment || 'neutral'
     };
   } catch (error) {
     return { type: 'General', summary: 'New Conversation', sentiment: 'neutral' };
@@ -78,10 +78,8 @@ export const classifySession = async (messages: Message[]): Promise<{ type: Enqu
  */
 export const analyzeInteraction = async (query: string, response: string): Promise<Partial<ReviewItem>> => {
   try {
-    // Fix: Use gemini-1.5-flash for sentiment and topic extraction
-    const result = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: `Analyze this chat interaction between a User and an AI Agent.
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const result = await model.generateContent(`Analyze this chat interaction between a User and an AI Agent.
       
       User: "${query}"
       AI: "${response}"
@@ -97,10 +95,9 @@ export const analyzeInteraction = async (query: string, response: string): Promi
         "confidence": 0.9,
         "topics": ["topic1", "topic2"]
       }
-      `
-    });
+      `);
 
-    let text = result.text || "";
+    let text = result.response.text();
     text = text.replace(/```json/g, "").replace(/```/g, "").trim();
     return JSON.parse(text);
   } catch (error) {
@@ -114,101 +111,50 @@ export const analyzeInteraction = async (query: string, response: string): Promi
 };
 
 /**
- * Uses gemini-1.5-flash with Google Search Grounding to research a company URL.
- * Returns structured JSON data about the business.
+ * Calls the server-side scraper to analyze a company website.
+ * The backend uses Puppeteer to crawl the site and Gemini to structure the data.
  */
 export const analyzeCompanyContent = async (url: string): Promise<KnowledgeBaseData | null> => {
   try {
-    // Fix: Use gemini-1.5-flash for search grounding with DEEP SCAN strategy
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: `You are a business intelligence researcher. Perform a DEEP SCAN of the following business website: ${url}
+    console.log(`[GeminiService] Calling /api/scrape for: ${url}`);
 
-STEP 1: HOMEPAGE ANALYSIS
-- Search for the main homepage of ${url}
-- Extract: Company name, tagline, primary contact info, business hours
-
-STEP 2: SERVICES/PRODUCTS DISCOVERY
-- Search specifically for: "site:${url} services" OR "site:${url} what we do" OR "site:${url} solutions"
-- Look for dedicated Services, Products, or Solutions pages
-- Extract ALL distinct service/product offerings (be comprehensive, not generic)
-
-STEP 3: PRICING INTELLIGENCE
-- Search specifically for: "site:${url} pricing" OR "site:${url} rates" OR "site:${url} cost" OR "site:${url} packages"
-- Look for /pricing, /rates, /plans pages
-- Extract specific dollar amounts, rate structures, package names, starting prices
-- If no pricing found, return empty string (do NOT guess)
-
-STEP 4: POLICIES & TERMS
-- Search specifically for: "site:${url} terms" OR "site:${url} cancellation policy" OR "site:${url} refund"
-- Look for /terms, /privacy, /policies pages
-- Extract cancellation windows, deposit requirements, booking terms
-- If no policies found, return empty string
-
-STEP 5: SYNTHESIS
-Based on your multi-query research, return a VALID JSON object (NO markdown formatting, NO \`\`\`json wrapper):
-
-{
-  "companyName": "Official business name",
-  "website": "${url}",
-  "phoneNumber": "Primary phone (or null if not found)",
-  "businessCategory": "2-3 word industry (e.g., 'Hair Salon', 'Law Firm')",
-  "keywords": ["5", "relevant", "industry", "keywords", "here"],
-  "summary": "2-sentence executive summary of what they do and who they serve",
-  "services": ["Specific Service 1", "Specific Service 2", "etc"],
-  "businessHours": "Open hours string (or 'Not specified')",
-  "contactInfo": "Email, address, other contact methods (or 'Not specified')",
-  "pricing": "Detailed pricing info with actual numbers/packages found. Empty string if none.",
-  "policies": "Cancellation/booking policies found. Empty string if none."
-}
-
-CRITICAL: Be thorough. Use the search tool multiple times if needed. Return ONLY valid JSON.`,
-      config: {
-        tools: [{ googleSearch: {} }],
-        // responseMimeType is NOT allowed when using tools
-      }
+    const response = await fetch('/api/scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
     });
 
-    let text = response.text || "";
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Scrape failed: ${response.status}`);
+    }
 
-    // Cleanup any potential markdown leaks
-    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    const data = await response.json() as KnowledgeBaseData;
+    data.lastUpdated = new Date(); // Ensure it's a Date object
 
-    if (!text) return null;
+    console.log(`[GeminiService] Successfully received data for: ${data.companyName}`);
+    return data;
 
-    // Parse JSON
-    const parsedData = JSON.parse(text) as KnowledgeBaseData;
+  } catch (error: any) {
+    console.error("Scraper API Error:", {
+      message: error.message,
+      name: error.name
+    });
+    console.warn("Server-side scraping failed, falling back to MOCK data for demo.");
 
-    // Extract Grounding Metadata (Sources)
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    const sources = chunks
-      .map(c => c.web?.uri)
-      .filter((uri): uri is string => !!uri);
-
-    // Deduplicate sources
-    parsedData.sources = Array.from(new Set(sources));
-    parsedData.lastUpdated = new Date();
-
-    return parsedData;
-
-  } catch (error) {
-    console.error("Gemini Search Error:", error);
-    console.warn("Analysis failed or API key missing, falling back to MOCK data for demo.", error);
-
-    // MOCK DATA FALLBACK
-    // This ensures the user sees a successful result in the demo environment even if the API call fails.
+    // MOCK FAILURE FALLBACK
     return {
       companyName: "Demo Company (Mock)",
       website: url,
       phoneNumber: "+1 (555) 123-4567",
-      businessCategory: "Technology Services",
-      keywords: ["AI", "Demo", "Automation", "Mock Data"],
-      summary: `This is a simulated scan result for ${url}. In a real deployment with valid API keys, this would be real data extracted from the site.`,
-      services: ["Consulting", "Implementation", "Support", "Training"],
-      businessHours: "Mon-Fri: 9am - 5pm EST",
-      contactInfo: "contact@demo.com",
-      pricing: "Initial Consultation: $150\nStandard Rate: $100/hr\nMonthly Retainer: $2000/mo",
-      policies: "24-hour cancellation required. 50% deposit for new projects.",
+      businessCategory: "Services",
+      keywords: ["Mock", "Demo", "Fallback"],
+      summary: `Simulation for ${url}. Real analysis failed: ${error.message}`,
+      services: ["Demo Service A", "Demo Service B"],
+      businessHours: "Mon-Fri: 9am - 5pm",
+      contactInfo: "demo@example.com",
+      pricing: "Standard Rate: $100/hr",
+      policies: "24h Cancellation Policy",
       sources: ["Mock Generator"],
       lastUpdated: new Date(),
       isMock: true
@@ -221,10 +167,8 @@ CRITICAL: Be thorough. Use the search tool multiple times if needed. Return ONLY
  */
 export const analyzeRawText = async (textContext: string, fileName: string): Promise<KnowledgeBaseData | null> => {
   try {
-    // Fix: Use gemini-1.5-flash for text extraction
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: `Analyze the following text content from a document named "${fileName}".
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const result = await model.generateContent(`Analyze the following text content from a document named "${fileName}".
             Extract key business information into a structured format.
             
             Focus heavily on extracting SERVICES, PRICING, and POLICIES if they exist in the text.
@@ -245,10 +189,9 @@ export const analyzeRawText = async (textContext: string, fileName: string): Pro
               "policies": "Policy/Cancellation information found in text"
             }
             
-            Return ONLY the JSON object.`
-    });
+            Return ONLY the JSON object.`);
 
-    let text = response.text || "";
+    let text = result.response.text();
     text = text.replace(/```json/g, "").replace(/```/g, "").trim();
 
     if (!text) return null;
@@ -269,10 +212,8 @@ export const analyzeRawText = async (textContext: string, fileName: string): Pro
  */
 export const detectConflicts = async (current: KnowledgeBaseData, incoming: KnowledgeBaseData): Promise<KnowledgeConflict[]> => {
   try {
-    // Fix: Use gemini-1.5-flash for conflict detection
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: `Compare these two business knowledge sets (Current vs New).
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const result = await model.generateContent(`Compare these two business knowledge sets (Current vs New).
             Identify SIGNIFICANT semantic discrepancies that a human should review.
             Ignore minor formatting differences (e.g., "9am-5pm" vs "09:00 - 17:00" is NOT a conflict).
             
@@ -289,10 +230,9 @@ export const detectConflicts = async (current: KnowledgeBaseData, incoming: Know
                 }
             ]
             
-            If no significant conflicts, return [] (empty array).`
-    });
+            If no significant conflicts, return [] (empty array).`);
 
-    let text = response.text || "";
+    let text = result.response.text();
     text = text.replace(/```json/g, "").replace(/```/g, "").trim();
 
     if (!text) return [];
@@ -305,21 +245,19 @@ export const detectConflicts = async (current: KnowledgeBaseData, incoming: Know
 }
 
 /**
- * Uses gemini-3-pro-preview to suggest corrections for the Review Queue.
+ * Uses gemini-2.0-flash to suggest corrections for the Review Queue.
  */
 export const suggestCorrection = async (query: string, poorResponse: string): Promise<string> => {
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-pro',
-      contents: `You are a QA specialist for an AI booking agent. 
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const result = await model.generateContent(`You are a QA specialist for an AI booking agent. 
             The agent gave a low-confidence or incorrect response.
             
             User Query: "${query}"
             Agent Response: "${poorResponse}"
             
-            Please rewrite the response to be more helpful, professional, and goal-oriented (driving towards a booking).`
-    });
-    return response.text || "";
+            Please rewrite the response to be more helpful, professional, and goal-oriented (driving towards a booking).`);
+    return result.response.text();
   } catch (e) {
     return "";
   }
