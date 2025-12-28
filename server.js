@@ -165,13 +165,31 @@ app.post('/api/scrape', async (req, res) => {
     return res.status(400).json({ error: 'URL is required' });
   }
 
+  // Set a timeout for the entire request (Cloud Run has 5 min max)
+  const timeoutMs = 120000; // 2 minutes
+  const timeout = setTimeout(() => {
+    console.error('[API] Scrape request timed out');
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Request timed out. Try a simpler website.' });
+    }
+  }, timeoutMs);
+
   try {
     console.log(`[API] Scraping: ${url}`);
+    console.log(`[API] PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH || 'Not set'}`);
 
     // Step 1: Scrape the website
-    const scrapedData = await scrapeWebsite(url);
+    let scrapedData;
+    try {
+      scrapedData = await scrapeWebsite(url);
+    } catch (scrapeError) {
+      console.error('[API] Scraper Error:', scrapeError.message);
+      clearTimeout(timeout);
+      return res.status(500).json({ error: `Scraper failed: ${scrapeError.message}` });
+    }
 
     if (!scrapedData.combinedText || scrapedData.combinedText.length < 100) {
+      clearTimeout(timeout);
       return res.status(400).json({ error: 'Could not extract enough content from the website.' });
     }
 
@@ -233,9 +251,11 @@ IMPORTANT:
 
     console.log(`[API] Successfully structured data for: ${knowledgeBaseData.companyName}`);
 
+    clearTimeout(timeout);
     res.json(knowledgeBaseData);
 
   } catch (error) {
+    clearTimeout(timeout);
     console.error('[API] Scrape Error:', error);
     res.status(500).json({ error: error.message || 'Scraping failed' });
   }
