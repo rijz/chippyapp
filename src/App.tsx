@@ -116,8 +116,10 @@ const AuthenticatedApp = () => {
     setKnowledgeData(data);
     if (data.companyName) setTenantConfig(prev => ({ ...prev, companyName: data.companyName! }));
     setShowWizard(false);
-    // Navigate to Widget Studio after onboarding
-    window.location.href = '/widget';
+    // Navigate to Widget Studio after onboarding (using timeout to allow state to update)
+    setTimeout(() => {
+      window.location.href = '/widget';
+    }, 100);
   }
 
   return (
