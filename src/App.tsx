@@ -66,7 +66,8 @@ const AuthenticatedApp = () => {
     setTotalChats,
     setTotalBookings,
     setReviewItems,
-    setDashboardData
+    setDashboardData,
+    addLead
   } = useData();
 
   const { session } = useAuth();
@@ -153,6 +154,16 @@ const AuthenticatedApp = () => {
         widgetConfig={widgetConfig}
         knowledgeSummary={knowledgeData ? JSON.stringify(knowledgeData) : ""}
         onInteraction={handleChatInteraction}
+        onLeadCapture={(leadData) => {
+          addLead({
+            name: leadData.name,
+            email: leadData.email,
+            phone: leadData.phone,
+            status: 'New',
+            source: 'AI Chat',
+            notes: 'Captured from chat widget'
+          });
+        }}
       />
     </BrowserRouter>
   );

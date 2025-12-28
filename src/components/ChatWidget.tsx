@@ -36,9 +36,10 @@ interface ChatWidgetProps {
   knowledgeSummary: string;
   onInteraction?: (query: string, response: string, analysis: any) => void;
   onSessionUpdate?: (messages: Message[]) => void;
+  onLeadCapture?: (leadData: { name: string; email: string; phone: string }) => void;
 }
 
-export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate }) => {
+export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showLeadForm, setShowLeadForm] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -173,6 +174,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
   const handleLeadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setShowLeadForm(false);
+    // Capture the lead when form is submitted
+    if (onLeadCapture && (leadData.name || leadData.email || leadData.phone)) {
+      onLeadCapture(leadData);
+    }
     initChat(leadData);
   };
 

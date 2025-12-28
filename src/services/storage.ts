@@ -1,4 +1,4 @@
-import { ChartDataPoint, KnowledgeBaseData, ReviewItem, TenantConfig, WidgetConfig, CalendarSettings, ChatSessionRecord } from "../types";
+import { ChartDataPoint, KnowledgeBaseData, ReviewItem, TenantConfig, WidgetConfig, CalendarSettings, ChatSessionRecord, Lead } from "../types";
 
 /**
  * STORAGE SERVICE
@@ -17,7 +17,8 @@ const KEYS = {
   REVIEWS: 'reviewItems',
   CHATS: 'totalChats',
   BOOKINGS: 'totalBookings',
-  SESSIONS: 'chatSessions' // New key for Inbox
+  SESSIONS: 'chatSessions',
+  LEADS: 'leads'
 };
 
 // --- Internal Helpers ---
@@ -71,13 +72,17 @@ export const storage = {
   // Analytics & Stats
   getDashboardData: (fallback: ChartDataPoint[]) => load(KEYS.DASHBOARD, fallback),
   saveDashboardData: (data: ChartDataPoint[]) => save(KEYS.DASHBOARD, data),
-  
+
   getTotals: (fallbackChats: number, fallbackBookings: number) => ({
-      chats: load(KEYS.CHATS, fallbackChats),
-      bookings: load(KEYS.BOOKINGS, fallbackBookings)
+    chats: load(KEYS.CHATS, fallbackChats),
+    bookings: load(KEYS.BOOKINGS, fallbackBookings)
   }),
   saveTotals: (chats: number, bookings: number) => {
-      save(KEYS.CHATS, chats);
-      save(KEYS.BOOKINGS, bookings);
-  }
+    save(KEYS.CHATS, chats);
+    save(KEYS.BOOKINGS, bookings);
+  },
+
+  // Leads
+  getLeads: (fallback: Lead[]) => load(KEYS.LEADS, fallback),
+  saveLeads: (data: Lead[]) => save(KEYS.LEADS, data)
 };

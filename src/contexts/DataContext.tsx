@@ -9,7 +9,8 @@ import {
     ChatSessionRecord,
     ReviewItem,
     Subscription,
-    PLAN_DETAILS
+    PLAN_DETAILS,
+    Lead
 } from '../types';
 import { storage } from '../services/storage';
 import {
@@ -83,6 +84,9 @@ interface DataContextType {
     setReviewItems: React.Dispatch<React.SetStateAction<ReviewItem[]>>;
     subscription: Subscription;
     setSubscription: React.Dispatch<React.SetStateAction<Subscription>>;
+    leads: Lead[];
+    setLeads: React.Dispatch<React.SetStateAction<Lead[]>>;
+    addLead: (lead: Omit<Lead, 'id' | 'date'>) => void;
     isFeatureEnabled: (feature: string) => boolean;
     getOverageCost: () => number;
     refreshData: () => Promise<void>;
@@ -133,6 +137,17 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>(() => storage.getChatSessions([]));
     const [reviewItems, setReviewItems] = useState<ReviewItem[]>(() => storage.getReviewItems([]));
     const [subscription, setSubscription] = useState<Subscription>(DEFAULT_SUBSCRIPTION);
+    const [leads, setLeads] = useState<Lead[]>(() => storage.getLeads([]));
+
+    // Helper to add a new lead
+    const addLead = (leadData: Omit<Lead, 'id' | 'date'>) => {
+        const newLead: Lead = {
+            ...leadData,
+            id: Date.now().toString(),
+            date: new Date()
+        };
+        setLeads(prev => [newLead, ...prev]);
+    };
 
     const refreshData = async () => {
         if (!session?.user?.id) return;
@@ -195,6 +210,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         }
     }, [knowledgeData, session?.user?.id]);
 
+    // Persist leads to localStorage
+    useEffect(() => {
+        storage.saveLeads(leads);
+    }, [leads]);
+
     useEffect(() => {
         if (session?.user?.id) {
             const timeout = setTimeout(() => syncSettings(session.user.id, tenantConfig, widgetConfig, calendarSettings), 1500);
@@ -248,6 +268,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             reviewItems, setReviewItems,
             subscription: { ...subscription, usage: currentUsage },
             setSubscription,
+            leads, setLeads, addLead,
             isFeatureEnabled,
             getOverageCost,
             refreshData

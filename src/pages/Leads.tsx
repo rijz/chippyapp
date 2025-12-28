@@ -1,28 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Search, Filter, Download, Calendar, Mail, Phone, MoreHorizontal, Pencil, X, Save, Check, PhoneIncoming, LayoutList, AlertTriangle } from 'lucide-react';
 import { checkAvailability } from '../services/calendarAuth';
-
-interface Lead {
-    id: string;
-    name: string;
-    email: string;
-    phone: string;
-    status: 'Booked' | 'Call Back' | 'Contacted' | 'New' | 'Cancelled';
-    source: 'Booking Page' | 'AI Chat';
-    date: Date;
-    notes: string;
-}
-
-const INITIAL_MOCK_LEADS: Lead[] = [
-    { id: '1', name: 'Sarah Miller', email: 'sarah.m@example.com', phone: '+1 (555) 123-4567', status: 'Booked', source: 'Booking Page', date: new Date(Date.now() - 1000 * 60 * 60 * 2), notes: 'Interested in enterprise plan.' },
-    { id: '2', name: 'Mike Ross', email: 'mike.ross@example.com', phone: '+1 (555) 987-6543', status: 'New', source: 'AI Chat', date: new Date(Date.now() - 1000 * 60 * 60 * 24), notes: 'Asked about pricing.' },
-    { id: '3', name: 'Jessica Pearson', email: 'jessica@example.com', phone: '+1 (555) 456-7890', status: 'Call Back', source: 'AI Chat', date: new Date(Date.now() - 1000 * 60 * 60 * 48), notes: 'Requested a call regarding custom integration.' },
-    { id: '4', name: 'Harvey Specter', email: 'harvey@example.com', phone: '+1 (555) 222-3333', status: 'Booked', source: 'Booking Page', date: new Date(Date.now() - 1000 * 60 * 60 * 72), notes: 'Confirmed for Monday.' },
-    { id: '5', name: 'Louis Litt', email: 'louis@example.com', phone: '+1 (555) 777-8888', status: 'Call Back', source: 'Booking Page', date: new Date(Date.now() - 1000 * 60 * 30), notes: 'Urgent callback needed.' },
-];
+import { useData } from '../contexts/DataContext';
+import { Lead } from '../types';
 
 export const Leads = () => {
-    const [leads, setLeads] = useState<Lead[]>(INITIAL_MOCK_LEADS);
+    const { leads, setLeads } = useData();
     const [searchTerm, setSearchTerm] = useState('');
     const [currentView, setCurrentView] = useState<'All' | 'Appointments' | 'CallBacks'>('All');
     const [editingLead, setEditingLead] = useState<Lead | null>(null);
@@ -179,7 +162,7 @@ export const Leads = () => {
                                         <td className="p-6">
                                             <div className="flex items-center gap-2 text-sm text-slate-500">
                                                 <Calendar className="w-4 h-4 text-slate-400" />
-                                                {lead.date.toLocaleDateString()}
+                                                {new Date(lead.date).toLocaleDateString()}
                                             </div>
                                         </td>
                                         <td className="p-6 text-right">
