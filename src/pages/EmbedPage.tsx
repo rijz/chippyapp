@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { ChatWidget } from '../components/ChatWidget';
 import { TenantConfig, WidgetConfig, KnowledgeBaseData } from '../types';
+import { fetchSettings, fetchKnowledgeBase } from '../services/supabaseStorage';
+import { Loader2 } from 'lucide-react';
 
 export const EmbedPage = () => {
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
     const [tenantConfig, setTenantConfig] = useState<TenantConfig>({
         id: 'public-embed',
         industry: 'General',
@@ -28,43 +33,94 @@ export const EmbedPage = () => {
 
     const [knowledgeData, setKnowledgeData] = useState<KnowledgeBaseData | null>(null);
 
-    // Load from LocalStorage (Simulating database fetch for MVP)
-    // In production, this would fetch from Supabase by URL subdomain or query param
+    // Load config from Supabase using userId from URL params
     useEffect(() => {
-        try {
-            const storedTenant = localStorage.getItem('tenantConfig');
-            if (storedTenant) setTenantConfig(JSON.parse(storedTenant));
+        const loadConfig = async () => {
+            try {
+                // Get userId from URL params (e.g., /embed?u=user-123)
+                const params = new URLSearchParams(window.location.search);
+                const userId = params.get('u');
 
-            const storedWidget = localStorage.getItem('widgetConfig');
-            if (storedWidget) setWidgetConfig(JSON.parse(storedWidget));
+                if (!userId) {
+                    // Fallback to localStorage for backwards compatibility
+                    console.log('[EmbedPage] No userId in URL, falling back to localStorage');
+                    try {
+                        const storedTenant = localStorage.getItem('tenantConfig');
+                        if (storedTenant) setTenantConfig(JSON.parse(storedTenant));
 
-            const storedKnowledge = localStorage.getItem('knowledgeData');
-            if (storedKnowledge) setKnowledgeData(JSON.parse(storedKnowledge));
-        } catch (e) {
-            console.error("Failed to load embed config", e);
-        }
+                        const storedWidget = localStorage.getItem('widgetConfig');
+                        if (storedWidget) setWidgetConfig(JSON.parse(storedWidget));
+
+                        const storedKnowledge = localStorage.getItem('knowledgeData');
+                        if (storedKnowledge) setKnowledgeData(JSON.parse(storedKnowledge));
+                    } catch (e) {
+                        console.error("Failed to load from localStorage", e);
+                    }
+                    setIsLoading(false);
+                    return;
+                }
+
+                console.log('[EmbedPage] Loading config for userId:', userId);
+
+                // Fetch settings from Supabase
+                const settings = await fetchSettings(userId);
+                if (settings) {
+                    if (settings.tenant_config) setTenantConfig(settings.tenant_config);
+                    if (settings.widget_config) setWidgetConfig(settings.widget_config);
+                }
+
+                // Fetch knowledge base from Supabase
+                const knowledge = await fetchKnowledgeBase(userId);
+                if (knowledge) setKnowledgeData(knowledge);
+
+                if (!settings && !knowledge) {
+                    setError('Widget not found. Please check your embed code.');
+                }
+
+                setIsLoading(false);
+            } catch (e) {
+                console.error('[EmbedPage] Error loading config:', e);
+                setError('Failed to load widget configuration.');
+                setIsLoading(false);
+            }
+        };
+
+        loadConfig();
     }, []);
 
-    // Mock interaction handler since we don't have a backend 
+    // Mock interaction handler
     const handleInteraction = (query: string, response: string, analysis: any) => {
         console.log("Embed Interaction:", query, response);
     };
 
+    // Loading state
+    if (isLoading) {
+        return (
+            <div className="w-full h-screen bg-transparent flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+            </div>
+        );
+    }
+
+    // Error state
+    if (error) {
+        return (
+            <div className="w-full h-screen bg-transparent flex items-center justify-center">
+                <p className="text-red-500 text-sm">{error}</p>
+            </div>
+        );
+    }
+
     return (
         <div className="w-full h-screen bg-transparent">
-            {/* We render the widget in 'embed' mode which forces it open or full screen? 
-                Actually the ChatWidget is a popup bubble. 
-                For an iframe embed, we usually want it to look like the bubble 
-                floating in the corner of the IFRAME, which is floating in the corner of the PARENT. 
-                
-                So rendering ChatWidget as usual is fine.
-            */}
             <ChatWidget
                 tenantConfig={tenantConfig}
                 widgetConfig={widgetConfig}
                 knowledgeSummary={knowledgeData ? JSON.stringify(knowledgeData) : ""}
                 onInteraction={handleInteraction}
+                showPoweredBy={true}
             />
         </div>
     );
 };
+

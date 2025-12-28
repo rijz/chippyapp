@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider, useData } from './contexts/DataContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { AppLayout } from './components/layout/AppLayout';
 
 // Pages
@@ -67,7 +68,8 @@ const AuthenticatedApp = () => {
     setTotalBookings,
     setReviewItems,
     setDashboardData,
-    addLead
+    addLead,
+    subscription
   } = useData();
 
   const { session } = useAuth();
@@ -164,6 +166,7 @@ const AuthenticatedApp = () => {
             notes: 'Captured from chat widget'
           });
         }}
+        showPoweredBy={subscription.status !== 'active'}
       />
     </BrowserRouter>
   );
@@ -171,8 +174,10 @@ const AuthenticatedApp = () => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ToastProvider>
   );
 }

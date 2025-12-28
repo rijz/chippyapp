@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { User, Camera, Mail, UserCircle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 
 export const ProfileSection = () => {
     const { session } = useAuth();
+    const { showToast } = useToast();
     const [displayName, setDisplayName] = useState(session?.user?.user_metadata?.full_name || 'Chippy User');
     const [isSaving, setIsSaving] = useState(false);
 
@@ -13,7 +15,7 @@ export const ProfileSection = () => {
         await new Promise(resolve => setTimeout(resolve, 800));
         setIsSaving(false);
         // In a real app, update Supabase user metadata here
-        alert("Profile updated!");
+        showToast("Profile updated!", 'success');
     };
 
     return (

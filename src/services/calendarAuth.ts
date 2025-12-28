@@ -227,3 +227,89 @@ export const checkAvailability = async (startTime: Date, endTime: Date): Promise
         return { available: true, conflicts: 0 }; // Fail safe
     }
 };
+
+// --- 8. Get Available Time Slots for a Date ---
+export interface TimeSlot {
+    time: string;
+    datetime: Date;
+    available: boolean;
+}
+
+export const getAvailableSlots = async (
+    date: Date,
+    durationMinutes: number = 30,
+    startHour: number = 9,
+    endHour: number = 17
+): Promise<TimeSlot[]> => {
+    const slots: TimeSlot[] = [];
+
+    // Generate all possible slots for the day
+    for (let hour = startHour; hour < endHour; hour++) {
+        for (let min = 0; min < 60; min += durationMinutes) {
+            const slotTime = new Date(date);
+            slotTime.setHours(hour, min, 0, 0);
+
+            // Skip if slot is in the past
+            if (slotTime < new Date()) continue;
+
+            const timeString = slotTime.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+
+            slots.push({
+                time: timeString,
+                datetime: slotTime,
+                available: true // Will be updated below
+            });
+        }
+    }
+
+    // MOCK MODE - return all slots as available
+    if (!CLIENT_ID || !API_KEY) {
+        console.log('[Calendar] Mock mode: returning all slots as available');
+        return slots;
+    }
+
+    // If not signed in, return all slots but mark as unverified
+    if (!gapiInited || !gapi.client.getToken()) {
+        console.warn("GAPI not initialized or not signed in - returning demo slots");
+        return slots;
+    }
+
+    // Check each slot for conflicts using freebusy query
+    try {
+        const dayStart = new Date(date);
+        dayStart.setHours(startHour, 0, 0, 0);
+        const dayEnd = new Date(date);
+        dayEnd.setHours(endHour, 0, 0, 0);
+
+        const response = await gapi.client.calendar.freebusy.query({
+            timeMin: dayStart.toISOString(),
+            timeMax: dayEnd.toISOString(),
+            items: [{ id: 'primary' }]
+        });
+
+        const busyPeriods = response.result.calendars?.primary?.busy || [];
+
+        // Mark slots that overlap with busy periods as unavailable
+        return slots.map(slot => {
+            const slotEnd = new Date(slot.datetime);
+            slotEnd.setMinutes(slotEnd.getMinutes() + durationMinutes);
+
+            const isConflict = busyPeriods.some((busy: { start: string; end: string }) => {
+                const busyStart = new Date(busy.start);
+                const busyEnd = new Date(busy.end);
+                // Check if slot overlaps with busy period
+                return slot.datetime < busyEnd && slotEnd > busyStart;
+            });
+
+            return { ...slot, available: !isConflict };
+        });
+    } catch (err) {
+        console.error("Error fetching freebusy", err);
+        // Return mock slots on error
+        return slots;
+    }
+};

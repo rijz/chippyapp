@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, CheckCircle2, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { TenantConfig } from '../types';
+import { getAvailableSlots, TimeSlot, loadGoogleScripts } from '../services/calendarAuth';
 
 // Simple helper to get days in month
 const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -19,13 +20,16 @@ export const BookingPage = () => {
 
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-    const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+    const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
     const [step, setStep] = useState<'calendar' | 'form' | 'success'>('calendar');
     const [formData, setFormData] = useState({ name: '', email: '', notes: '' });
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [slots, setSlots] = useState<TimeSlot[]>([]);
+    const [isLoadingSlots, setIsLoadingSlots] = useState(false);
 
     // Load tenant name if available (same localStorage hack as EmbedPage)
     useEffect(() => {
+        loadGoogleScripts(); // Initialize calendar API
         try {
             const stored = localStorage.getItem('tenantConfig');
             if (stored) {
@@ -34,6 +38,19 @@ export const BookingPage = () => {
             }
         } catch (e) { }
     }, []);
+
+    // Fetch available slots when date is selected
+    useEffect(() => {
+        if (selectedDate) {
+            setIsLoadingSlots(true);
+            setSlots([]);
+            getAvailableSlots(selectedDate, 30, 9, 17)
+                .then(availableSlots => {
+                    setSlots(availableSlots);
+                })
+                .finally(() => setIsLoadingSlots(false));
+        }
+    }, [selectedDate]);
 
     // Calendar Navigation
     const nextMonth = () => {
@@ -81,9 +98,6 @@ export const BookingPage = () => {
         }
         return days;
     };
-
-    // Mock Slots
-    const SLOTS = ['09:00 AM', '09:30 AM', '10:00 AM', '11:00 AM', '01:00 PM', '02:30 PM', '04:00 PM'];
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -159,15 +173,21 @@ export const BookingPage = () => {
                                     <h3 className="font-bold text-slate-700 mb-4">Available Times</h3>
                                     {!selectedDate ? (
                                         <p className="text-sm text-slate-400 italic">Select a date first.</p>
+                                    ) : isLoadingSlots ? (
+                                        <div className="flex items-center justify-center py-8">
+                                            <Loader2 className="w-6 h-6 animate-spin text-chippy-coral" />
+                                        </div>
+                                    ) : slots.length === 0 ? (
+                                        <p className="text-sm text-slate-400 italic">No available slots for this date.</p>
                                     ) : (
                                         <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                                            {SLOTS.map(slot => (
+                                            {slots.filter(slot => slot.available).map(slot => (
                                                 <button
-                                                    key={slot}
+                                                    key={slot.time}
                                                     onClick={() => { setSelectedSlot(slot); setStep('form'); }}
                                                     className="w-full py-2 px-3 text-sm font-medium border border-chippy-coral text-chippy-coral rounded-lg hover:bg-chippy-coral hover:text-white transition-all text-center"
                                                 >
-                                                    {slot}
+                                                    {slot.time}
                                                 </button>
                                             ))}
                                         </div>
@@ -187,7 +207,7 @@ export const BookingPage = () => {
                             <h2 className="text-xl font-bold text-chippy-navy mb-2">Confirm Booking</h2>
                             <p className="text-slate-500 text-sm mb-6 flex items-center gap-2">
                                 <CalendarIcon className="w-4 h-4 text-chippy-coral" />
-                                {selectedDate?.toLocaleDateString()} at {selectedSlot}
+                                {selectedDate?.toLocaleDateString()} at {selectedSlot?.time}
                             </p>
 
                             <form onSubmit={handleSubmit} className="space-y-4">
@@ -228,7 +248,7 @@ export const BookingPage = () => {
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="text-slate-500">Time</span>
-                                    <span className="font-bold text-slate-700">{selectedSlot}</span>
+                                    <span className="font-bold text-slate-700">{selectedSlot?.time}</span>
                                 </div>
                             </div>
                         </div>

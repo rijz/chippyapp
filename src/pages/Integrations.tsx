@@ -1,11 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Calendar, CheckCircle2, RefreshCw, Clock, CalendarDays, Settings, LogOut, ChevronRight } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { handleAuthClick, loadGoogleScripts, fetchCalendars, handleSignOut } from '../services/calendarAuth';
 import { CalendarSettings, CalendarItem } from '../types';
 
 export const Integrations = () => {
     const { tenantConfig, setTenantConfig, calendarSettings, setCalendarSettings } = useData();
+    const { session } = useAuth();
+    const { showToast } = useToast();
+    const userId = session?.user?.id || '';
     const [isLoading, setIsLoading] = useState(false);
     const [availableCalendars, setAvailableCalendars] = useState<CalendarItem[]>([]);
 
@@ -191,7 +196,7 @@ export const Integrations = () => {
                 )}
             </div>
 
-            {/* BOOKING PAGE LINK SECTION */}
+            {/* BOOKING PAGE LINK SECTION - Hidden for V1 (booking page uses mock data)
             <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
                 <div className="p-10 border-b border-slate-100 bg-slate-50/50">
                     <div className="flex items-center gap-6">
@@ -216,7 +221,7 @@ export const Integrations = () => {
                             <button
                                 onClick={() => {
                                     navigator.clipboard.writeText("https://app.hellochippy.com/book");
-                                    alert("Copied to clipboard!");
+                                    showToast("Copied to clipboard!", 'success');
                                 }}
                                 className="absolute top-1/2 -translate-y-1/2 right-2 bg-white hover:bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg text-sm font-bold transition-all border border-slate-200 shadow-sm"
                             >
@@ -233,6 +238,7 @@ export const Integrations = () => {
                     </div>
                 </div>
             </div>
+            */}
 
             {/* WEBSITE EMBED SECTION */}
             <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
@@ -253,12 +259,12 @@ export const Integrations = () => {
                         <textarea
                             className="w-full h-32 p-4 bg-slate-900 text-slate-300 font-mono text-xs rounded-xl border border-slate-700 outline-none resize-none"
                             readOnly
-                            value={`<iframe \n  src="https://app.hellochippy.com/embed" \n  style="position: fixed; bottom: 20px; right: 20px; width: 400px; height: 600px; border: none; z-index: 9999; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"\n></iframe>`}
+                            value={`<iframe \n  src="https://app.hellochippy.com/embed?u=${userId}" \n  style="position: fixed; bottom: 20px; right: 20px; width: 400px; height: 600px; border: none; z-index: 9999; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"\n></iframe>`}
                         />
                         <button
                             onClick={() => {
-                                navigator.clipboard.writeText(`<iframe src="https://app.hellochippy.com/embed" style="position: fixed; bottom: 20px; right: 20px; width: 400px; height: 600px; border: none; z-index: 9999; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></iframe>`);
-                                alert("Copied to clipboard!");
+                                navigator.clipboard.writeText(`<iframe src="https://app.hellochippy.com/embed?u=${userId}" style="position: fixed; bottom: 20px; right: 20px; width: 400px; height: 600px; border: none; z-index: 9999; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></iframe>`);
+                                showToast("Copied to clipboard!", 'success');
                             }}
                             className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all border border-white/10"
                         >

@@ -21,7 +21,9 @@ import {
     fetchAnalytics,
     syncKnowledgeBase,
     syncSettings,
-    syncChatSessions
+    syncChatSessions,
+    syncLeads,
+    fetchLeads
 } from '../services/supabaseStorage';
 
 // Default Configs (Copied from App.tsx)
@@ -153,8 +155,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         if (!session?.user?.id) return;
         const userId = session.user.id;
 
+        // Always update knowledge data from Supabase (even if null - means it was reset)
         const remoteKnowledge = await fetchKnowledgeBase(userId);
-        if (remoteKnowledge) setKnowledgeData(remoteKnowledge);
+        setKnowledgeData(remoteKnowledge);
 
         const settings = await fetchSettings(userId);
         if (settings) {
@@ -191,6 +194,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             if (analytics.total_chats !== undefined) setTotalChats(analytics.total_chats);
             if (analytics.total_bookings !== undefined) setTotalBookings(analytics.total_bookings);
         }
+
+        // Fetch leads from Supabase
+        const remoteLeads = await fetchLeads(userId);
+        if (remoteLeads && remoteLeads.length > 0) setLeads(remoteLeads);
     };
 
     useEffect(() => {
@@ -210,10 +217,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         }
     }, [knowledgeData, session?.user?.id]);
 
-    // Persist leads to localStorage
+    // Persist leads to localStorage and sync to Supabase
     useEffect(() => {
         storage.saveLeads(leads);
-    }, [leads]);
+        // Sync to Supabase (debounced)
+        if (session?.user?.id && leads.length > 0) {
+            const timeout = setTimeout(() => syncLeads(leads, session.user.id), 1500);
+            return () => clearTimeout(timeout);
+        }
+    }, [leads, session?.user?.id]);
 
     useEffect(() => {
         if (session?.user?.id) {

@@ -46,6 +46,29 @@ export const Leads = () => {
         setEditingLead(null);
     };
 
+    const exportToCSV = () => {
+        const headers = ['Name', 'Email', 'Phone', 'Status', 'Source', 'Date', 'Notes'];
+        const csvContent = [
+            headers.join(','),
+            ...leads.map(lead => [
+                `"${lead.name}"`,
+                `"${lead.email}"`,
+                `"${lead.phone || ''}"`,
+                `"${lead.status}"`,
+                `"${lead.source}"`,
+                `"${new Date(lead.date).toLocaleDateString()}"`,
+                `"${(lead.notes || '').replace(/"/g, '""')}"`
+            ].join(','))
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `leads_${new Date().toISOString().split('T')[0]}.csv`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+    };
+
     return (
         <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500 pb-20">
             {/* Header */}
@@ -55,7 +78,10 @@ export const Leads = () => {
                     <p className="text-slate-500">Manage your potential clients and upcoming bookings.</p>
                 </div>
                 <div className="flex gap-3">
-                    <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-2">
+                    <button
+                        onClick={exportToCSV}
+                        className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-2"
+                    >
                         <Download className="w-4 h-4" /> Export CSV
                     </button>
                 </div>

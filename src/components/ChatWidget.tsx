@@ -37,9 +37,10 @@ interface ChatWidgetProps {
   onInteraction?: (query: string, response: string, analysis: any) => void;
   onSessionUpdate?: (messages: Message[]) => void;
   onLeadCapture?: (leadData: { name: string; email: string; phone: string }) => void;
+  showPoweredBy?: boolean; // Show "Powered by Chippy" badge for free users
 }
 
-export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture }) => {
+export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture, showPoweredBy = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showLeadForm, setShowLeadForm] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -189,10 +190,25 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     scrollToBottom();
   }, [messages, isOpen, showLeadForm]);
 
-  const handleSend = async () => {
-    if (!inputText.trim() || !chatSession) return;
+  // Sanitize user input to prevent XSS and prompt injection
+  const sanitizeInput = (text: string): string => {
+    // Remove HTML tags
+    let sanitized = text.replace(/<[^>]*>/g, '');
+    // Remove potential script injection patterns
+    sanitized = sanitized.replace(/javascript:/gi, '');
+    sanitized = sanitized.replace(/on\w+\s*=/gi, '');
+    // Limit length to prevent abuse
+    sanitized = sanitized.slice(0, 1000);
+    // Trim whitespace
+    sanitized = sanitized.trim();
+    return sanitized;
+  };
 
-    const currentText = inputText;
+  const handleSend = async () => {
+    const sanitizedText = sanitizeInput(inputText);
+    if (!sanitizedText || !chatSession) return;
+
+    const currentText = sanitizedText;
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -370,6 +386,18 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
                       <Send className="w-4 h-4" />
                     </button>
                   </div>
+                  {showPoweredBy && (
+                    <div className="text-center mt-2">
+                      <a
+                        href="https://hellochippy.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
+                      >
+                        ⚡ Powered by <span className="font-semibold">Chippy</span>
+                      </a>
+                    </div>
+                  )}
                 </div>
               </>
             )}

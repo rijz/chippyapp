@@ -54,16 +54,6 @@ export const Account = () => {
                             })}
                         </nav>
                     </div>
-
-                    <div className="px-4">
-                        <button
-                            onClick={() => signOut()}
-                            className="flex items-center gap-3 text-sm font-bold text-slate-400 hover:text-red-500 transition-colors"
-                        >
-                            <LogOut className="w-4 h-4" />
-                            Sign Out
-                        </button>
-                    </div>
                 </div>
 
                 {/* Main Content Area */}

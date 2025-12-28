@@ -185,11 +185,54 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.VITE_GEMINI_API_KEY || '');
 
+// Rate Limiter for /api/scrape (in-memory, per IP)
+const scrapeRateLimiter = new Map(); // IP -> { count, windowStart }
+const SCRAPE_RATE_LIMIT = 5; // Max requests per window
+const SCRAPE_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour window
+
+const checkScrapeRateLimit = (ip) => {
+  const now = Date.now();
+  const record = scrapeRateLimiter.get(ip);
+
+  if (!record || now - record.windowStart > SCRAPE_RATE_WINDOW_MS) {
+    // Reset or create new window
+    scrapeRateLimiter.set(ip, { count: 1, windowStart: now });
+    return true;
+  }
+
+  if (record.count >= SCRAPE_RATE_LIMIT) {
+    return false; // Rate limited
+  }
+
+  record.count++;
+  return true;
+};
+
 app.post('/api/scrape', async (req, res) => {
   const { url } = req.body;
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+
+  // Check rate limit
+  if (!checkScrapeRateLimit(clientIp)) {
+    console.log(`[API] Rate limit exceeded for IP: ${clientIp}`);
+    return res.status(429).json({
+      error: 'Rate limit exceeded. You can only scan 5 websites per hour. Please try again later.'
+    });
+  }
 
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
+  }
+
+  // Validate URL format
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return res.status(400).json({ error: 'Invalid URL. Only HTTP and HTTPS are supported.' });
+    }
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid URL format.' });
   }
 
   // Set a timeout for the entire request (Cloud Run has 5 min max)
