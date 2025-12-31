@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Sparkles, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
 import { Message, TenantConfig, WidgetConfig } from '../types';
 import { createAgentSession, analyzeInteraction } from '../services/geminiService';
+import { checkAvailability } from '../services/calendarAuth';
 import { ChatSession } from '@google/generative-ai';
 
 // Simple Markdown renderer for chat messages
@@ -47,6 +48,13 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
+  const [availableSlots, setAvailableSlots] = useState<string>('');
+  const [statusMessage, setStatusMessage] = useState<string>(''); // For showing "Checking calendar..." etc.
+
+  // UX Enhancement States
+  const [showSuggestedQuestions, setShowSuggestedQuestions] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('chatSoundEnabled') !== 'false');
+  const [sessionId] = useState(() => localStorage.getItem('chatSessionId') || `session_${Date.now()}`);
 
   // Lead Data
   const [leadData, setLeadData] = useState({ name: '', email: '', phone: '' });
@@ -59,8 +67,74 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     widgetConfig.contactFields.email !== 'hidden' ||
     widgetConfig.contactFields.phone !== 'hidden';
 
-  // Initialize welcome message
+  // Sound notification function
+  const playNotificationSound = () => {
+    if (!soundEnabled) return;
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.frequency.value = 800; // Hz
+      oscillator.type = 'sine';
+
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    } catch (e) {
+      console.error('Sound playback failed:', e);
+    }
+  };
+
+  // Get relative time string
+  const getRelativeTime = (timestamp: Date): string => {
+    const now = new Date();
+    const diff = now.getTime() - new Date(timestamp).getTime();
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+
+    if (seconds < 30) return 'Just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return new Date(timestamp).toLocaleDateString();
+  };
+
+  // Suggested questions
+  const suggestedQuestions = [
+    'What services do you offer?',
+    "What's your pricing?",
+    'Can I book an appointment?',
+    'What are your business hours?'
+  ];
+
+  // Initialize welcome message and restore persisted messages
   useEffect(() => {
+    // Save session ID to localStorage
+    localStorage.setItem('chatSessionId', sessionId);
+
+    // Try to restore previous messages for this session
+    const savedMessages = localStorage.getItem(`chatMessages_${sessionId}`);
+    if (savedMessages) {
+      try {
+        const parsed = JSON.parse(savedMessages);
+        // Limit to last 50 messages
+        const limitedMessages = parsed.slice(-50);
+        setMessages(limitedMessages);
+        setShowSuggestedQuestions(limitedMessages.length <= 1); // Hide if conversation exists
+        return;
+      } catch (e) {
+        console.error('Failed to parse saved messages:', e);
+      }
+    }
+
+    // If no saved messages, show welcome message
     if (widgetConfig.welcomeMessage) {
       setMessages([{
         id: 'welcome',
@@ -69,7 +143,16 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
         timestamp: new Date()
       }]);
     }
-  }, [widgetConfig.welcomeMessage]);
+  }, [widgetConfig.welcomeMessage, sessionId]);
+
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Only save user and model messages, skip status messages
+      const messagesToSave = messages.slice(-50); // Keep last 50
+      localStorage.setItem(`chatMessages_${sessionId}`, JSON.stringify(messagesToSave));
+    }
+  }, [messages, sessionId]);
 
   // Handle initialization based on mode
   useEffect(() => {
@@ -162,7 +245,9 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
 
       YOUR GOAL:
       Reliably convert inquiries into confirmed appointments.
-      If the user wants to book, ask for their preferred date and time.
+      ${availableSlots ? `AVAILABLE TIME SLOTS (CHECK CALENDAR BEFORE CONFIRMING):\n${availableSlots}\n` : ''}
+      If the user wants to book, ONLY offer times from the available slots above.
+      If no available slots are shown, ask for their preferred date/time and say you'll check availability.
       Keep responses concise and professional.
       Use Markdown formatting (bullet points, bold text).
       
@@ -209,6 +294,12 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     if (!sanitizedText || !chatSession) return;
 
     const currentText = sanitizedText;
+
+    // Hide suggested questions after first message
+    if (showSuggestedQuestions) {
+      setShowSuggestedQuestions(false);
+    }
+
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -220,17 +311,86 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     setInputText('');
     setIsLoading(true);
 
+    // Check if booking intent - fetch calendar availability
+    const bookingKeywords = ['book', 'appointment', 'schedule', 'availab', 'time', 'when can'];
+    const hasBookingIntent = bookingKeywords.some(keyword => currentText.toLowerCase().includes(keyword));
+
+    if (hasBookingIntent && !availableSlots) {
+      // Show status message
+      setStatusMessage('🔍 Let me check my calendar...');
+
+      // Generate next 7 days of available time slots
+      const slots: string[] = [];
+      const now = new Date();
+
+      for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+        const checkDate = new Date(now);
+        checkDate.setDate(now.getDate() + dayOffset);
+
+        // Check business hours (9 AM - 5 PM)
+        for (let hour = 9; hour < 17; hour++) {
+          const slotStart = new Date(checkDate);
+          slotStart.setHours(hour, 0, 0, 0);
+          const slotEnd = new Date(slotStart);
+          slotEnd.setHours(hour + 1, 0, 0, 0);
+
+          try {
+            const { available } = await checkAvailability(slotStart, slotEnd);
+            if (available) {
+              const dayName = slotStart.toLocaleDateString('en-US', { weekday: 'short' });
+              const dateStr = slotStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              const timeStr = slotStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+              slots.push(`${dayName}, ${dateStr} at ${timeStr}`);
+
+              if (slots.length >= 10) break; // Limit to 10 slots
+            }
+          } catch (e) {
+            console.error('Error checking availability:', e);
+          }
+        }
+        if (slots.length >= 10) break;
+      }
+
+      if (slots.length > 0) {
+        setStatusMessage(`✅ Found ${slots.length} available slots!`);
+        await new Promise(resolve => setTimeout(resolve, 800)); // Show success for 800ms
+        setStatusMessage('');
+        setAvailableSlots(slots.join('\n'));
+        // Reinitialize chat with updated slots
+        await initChat();
+      } else {
+        setStatusMessage('❌ No availability found in the next 7 days');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        setStatusMessage('');
+      }
+    }
+
     try {
       const result = await chatSession.sendMessage(userMsg.text);
       const responseText = result.response.text() || "I'm sorry, I'm having trouble connecting to the schedule right now.";
 
+      // Add empty message that will be filled with typewriter effect
+      const botMsgId = (Date.now() + 1).toString();
       const botMsg: Message = {
-        id: (Date.now() + 1).toString(),
+        id: botMsgId,
         role: 'model',
-        text: responseText,
+        text: '', // Start empty
         timestamp: new Date()
       };
       setMessages(prev => [...prev, botMsg]);
+
+      // Typewriter effect
+      setIsLoading(false); // Hide thinking indicator
+      playNotificationSound(); // Play sound when response starts
+      const chars = responseText.split('');
+      for (let i = 0; i < chars.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 20)); // 20ms per character
+        setMessages(prev => prev.map(msg =>
+          msg.id === botMsgId
+            ? { ...msg, text: responseText.substring(0, i + 1) }
+            : msg
+        ));
+      }
 
       analyzeInteraction(currentText, responseText).then(analysis => {
         if (onInteraction) {
@@ -274,144 +434,238 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
                 <p className="text-xs text-white/80">{widgetConfig.subtitle}</p>
               </div>
             </div>
-            <button onClick={() => setIsOpen(false)} className="hover:bg-white/20 p-1 rounded transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+            <div className="flex items-center gap-2">
+              {/* Sound Toggle */}
+              <button
+                onClick={() => {
+                  const newValue = !soundEnabled;
+                  setSoundEnabled(newValue);
+                  localStorage.setItem('chatSoundEnabled', String(newValue));
+                }}
+                className="hover:bg-white/20 p-1.5 rounded transition-colors"
+                title={soundEnabled ? 'Mute notifications' : 'Enable notifications'}
+              >
+                {soundEnabled ? '🔔' : '🔕'}
+              </button>
 
-          {/* Body */}
-          <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col">
-            {showLeadForm ? (
-              <div className="p-6 flex-1 flex flex-col">
-                <div className="mb-6">
-                  <h4 className="font-bold text-slate-800">Hello!</h4>
-                  <p className="text-sm text-slate-500 mt-1">Please introduce yourself to start the conversation.</p>
-                </div>
+              {/* New Chat Button */}
+              <button
+                onClick={() => {
+                  const newSessionId = `session_${Date.now()}`;
+                  localStorage.setItem('chatSessionId', newSessionId);
+                  localStorage.removeItem(`chatMessages_${sessionId}`);
+                  window.location.reload(); // Reload to start fresh
+                }}
+                className="hover:bg-white/20 p-1.5 rounded transition-colors text-xs"
+                title="Start new conversation"
+              >
+                🔄
+              </button>
 
-                <form onSubmit={handleLeadSubmit} className="space-y-4 flex-1">
-                  {widgetConfig.contactFields.name !== 'hidden' && (
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Full Name {widgetConfig.contactFields.name === 'required' && '*'}</label>
-                      <div className="relative">
-                        <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                        <input
-                          type="text"
-                          required={widgetConfig.contactFields.name === 'required'}
-                          placeholder="John Doe"
-                          className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
-                          value={leadData.name}
-                          onChange={(e) => setLeadData({ ...leadData, name: e.target.value })}
-                        />
-                      </div>
-                    </div>
-                  )}
+              {/* Close Button */}
+              <button onClick={() => {
+                // Save session before closing
+                if (onSessionUpdate && messages.length > 0) {
+                  onSessionUpdate(messages);
+                }
+                setIsOpen(false);
+              }} className="hover:bg-white/20 p-1 rounded transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-                  {widgetConfig.contactFields.email !== 'hidden' && (
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Email Address {widgetConfig.contactFields.email === 'required' && '*'}</label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                        <input
-                          type="email"
-                          required={widgetConfig.contactFields.email === 'required'}
-                          placeholder="john@example.com"
-                          className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
-                          value={leadData.email}
-                          onChange={(e) => setLeadData({ ...leadData, email: e.target.value })}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {widgetConfig.contactFields.phone !== 'hidden' && (
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Phone Number {widgetConfig.contactFields.phone === 'required' && '*'}</label>
-                      <div className="relative">
-                        <Phone className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                        <input
-                          type="tel"
-                          required={widgetConfig.contactFields.phone === 'required'}
-                          placeholder="+1 (555) 000-0000"
-                          className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
-                          value={leadData.phone}
-                          onChange={(e) => setLeadData({ ...leadData, phone: e.target.value })}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="pt-4 mt-auto">
-                    <button
-                      type="submit"
-                      disabled={!isLeadFormValid()}
-                      className="w-full py-3 rounded-xl text-white font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none"
-                      style={{ backgroundColor: widgetConfig.color }}
-                    >
-                      Start Chatting <ArrowRight className="w-4 h-4" />
-                    </button>
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col">
+              {showLeadForm ? (
+                <div className="p-6 flex-1 flex flex-col">
+                  <div className="mb-6">
+                    <h4 className="font-bold text-slate-800">Hello!</h4>
+                    <p className="text-sm text-slate-500 mt-1">Please introduce yourself to start the conversation.</p>
                   </div>
-                </form>
-              </div>
-            ) : (
-              <>
-                <div className="flex-1 p-4 space-y-4">
-                  {messages.map((msg) => (
-                    <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-none'}`} style={msg.role === 'user' ? { backgroundColor: widgetConfig.color } : {}}>
-                        {msg.role === 'user' ? msg.text : <FormattedMessage text={msg.text} />}
-                      </div>
-                    </div>
-                  ))}
-                  {isLoading && (
-                    <div className="flex justify-start">
-                      <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm">
-                        <Loader2 className="w-4 h-4 animate-spin" style={{ color: widgetConfig.color }} />
-                      </div>
-                    </div>
-                  )}
-                  <div ref={messagesEndRef} />
-                </div>
 
-                <div className="p-3 bg-white border-t border-slate-100">
-                  <div className="flex items-center gap-2 bg-slate-50 rounded-full px-4 py-2 border border-slate-200 focus-within:border-chippy-coral transition-colors">
-                    <input
-                      type="text"
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                      placeholder="Type a message..."
-                      className="bg-transparent flex-1 outline-none text-sm text-slate-700 placeholder-slate-400"
-                    />
-                    <button onClick={handleSend} disabled={isLoading || !inputText.trim() || !chatSession} className="hover:opacity-80 disabled:opacity-50" style={{ color: widgetConfig.color }}>
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </div>
-                  {showPoweredBy && (
-                    <div className="text-center mt-2">
-                      <a
-                        href="https://hellochippy.com"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
+                  <form onSubmit={handleLeadSubmit} className="space-y-4 flex-1">
+                    {widgetConfig.contactFields.name !== 'hidden' && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Full Name {widgetConfig.contactFields.name === 'required' && '*'}</label>
+                        <div className="relative">
+                          <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                          <input
+                            type="text"
+                            required={widgetConfig.contactFields.name === 'required'}
+                            placeholder="John Doe"
+                            className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
+                            value={leadData.name}
+                            onChange={(e) => setLeadData({ ...leadData, name: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {widgetConfig.contactFields.email !== 'hidden' && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Email Address {widgetConfig.contactFields.email === 'required' && '*'}</label>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                          <input
+                            type="email"
+                            required={widgetConfig.contactFields.email === 'required'}
+                            placeholder="john@example.com"
+                            className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
+                            value={leadData.email}
+                            onChange={(e) => setLeadData({ ...leadData, email: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {widgetConfig.contactFields.phone !== 'hidden' && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Phone Number {widgetConfig.contactFields.phone === 'required' && '*'}</label>
+                        <div className="relative">
+                          <Phone className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                          <input
+                            type="tel"
+                            required={widgetConfig.contactFields.phone === 'required'}
+                            placeholder="+1 (555) 000-0000"
+                            className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
+                            value={leadData.phone}
+                            onChange={(e) => setLeadData({ ...leadData, phone: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-4 mt-auto">
+                      <button
+                        type="submit"
+                        disabled={!isLeadFormValid()}
+                        className="w-full py-3 rounded-xl text-white font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none"
+                        style={{ backgroundColor: widgetConfig.color }}
                       >
-                        ⚡ Powered by <span className="font-semibold">Chippy</span>
-                      </a>
+                        Start Chatting <ArrowRight className="w-4 h-4" />
+                      </button>
                     </div>
-                  )}
+                  </form>
                 </div>
-              </>
-            )}
+              ) : (
+                <>
+                  <div className="flex-1 p-4 space-y-4">
+                    {/* Suggested Questions */}
+                    {showSuggestedQuestions && messages.length <= 1 && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-slate-500 font-medium">Suggested questions:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {suggestedQuestions.map((question, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => {
+                                setInputText(question);
+                                handleSend();
+                              }}
+                              className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-full hover:border-chippy-coral hover:bg-chippy-coral/5 transition-all shadow-sm"
+                            >
+                              {question}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {messages.map((msg) => (
+                      <div key={msg.id}>
+                        <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-none'}`} style={msg.role === 'user' ? { backgroundColor: widgetConfig.color } : {}}>
+                            {msg.role === 'user' ? msg.text : <FormattedMessage text={msg.text} />}
+                          </div>
+                        </div>
+                        {/* Timestamp */}
+                        <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mt-1 px-2`}>
+                          <span className="text-[10px] text-slate-400">{getRelativeTime(msg.timestamp)}</span>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Quick Reply Buttons - Show after last bot message */}
+                    {messages.length > 0 && messages[messages.length - 1].role === 'model' && !isLoading && (
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => { setInputText('Can I book an appointment?'); handleSend(); }}
+                          className="px-3 py-1.5 text-xs bg-chippy-coral/10 text-chippy-coral border border-chippy-coral/30 rounded-full hover:bg-chippy-coral/20 transition-all"
+                        >
+                          📅 Book Now
+                        </button>
+                        <button
+                          onClick={() => { setInputText("What's your pricing?"); handleSend(); }}
+                          className="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded-full hover:bg-blue-100 transition-all"
+                        >
+                          💰 Pricing
+                        </button>
+                        <button
+                          onClick={() => { setInputText('How can I contact you?'); handleSend(); }}
+                          className="px-3 py-1.5 text-xs bg-green-50 text-green-600 border border-green-200 rounded-full hover:bg-green-100 transition-all"
+                        >
+                          📞 Contact
+                        </button>
+                      </div>
+                    )}
+
+                    {isLoading && (
+                      <div className="flex justify-start">
+                        <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-slate-500">Chippy is thinking</span>
+                            <div className="flex gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
+
+                  <div className="p-3 bg-white border-t border-slate-100">
+                    <div className="flex items-center gap-2 bg-slate-50 rounded-full px-4 py-2 border border-slate-200 focus-within:border-chippy-coral transition-colors">
+                      <input
+                        type="text"
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                        placeholder="Type a message..."
+                        className="bg-transparent flex-1 outline-none text-sm text-slate-700 placeholder-slate-400"
+                      />
+                      <button onClick={handleSend} disabled={isLoading || !inputText.trim() || !chatSession} className="hover:opacity-80 disabled:opacity-50" style={{ color: widgetConfig.color }}>
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                    {showPoweredBy && (
+                      <div className="text-center mt-2">
+                        <a
+                          href="https://hellochippy.com"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
+                        >
+                          ⚡ Powered by <span className="font-semibold">Chippy</span>
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
-        </div>
       )}
 
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="text-white p-4 rounded-full shadow-lg hover:scale-110 transition-all duration-300"
-        style={{ backgroundColor: widgetConfig.color }}
-      >
-        {isOpen ? <X className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
-      </button>
-    </div>
-  );
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className="text-white p-4 rounded-full shadow-lg hover:scale-110 transition-all duration-300"
+            style={{ backgroundColor: widgetConfig.color }}
+          >
+            {isOpen ? <X className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
+          </button>
+        </div>
+      );
 };
