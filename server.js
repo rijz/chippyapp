@@ -331,6 +331,119 @@ IMPORTANT:
   }
 });
 
+// =====================
+// Calendar Booking Endpoint
+// =====================
+
+// Rate limiter for bookings
+const bookingRateLimiter = new Map();
+const BOOKING_RATE_LIMIT = 10; // Max 10 bookings per window
+const BOOKING_RATE_WINDOW_MS = 60 * 1000; // 1 minute window
+
+const checkBookingRateLimit = (ip) => {
+  const now = Date.now();
+  const record = bookingRateLimiter.get(ip);
+
+  if (!record || now - record.windowStart > BOOKING_RATE_WINDOW_MS) {
+    bookingRateLimiter.set(ip, { count: 1, windowStart: now });
+    return true;
+  }
+
+  if (record.count >= BOOKING_RATE_LIMIT) {
+    return false;
+  }
+
+  record.count++;
+  return true;
+};
+
+app.post('/api/bookings/create', async (req, res) => {
+  const clientIp = req.ip || req.connection.remoteAddress;
+
+  // Rate limiting
+  if (!checkBookingRateLimit(clientIp)) {
+    return res.status(429).json({
+      success: false,
+      error: 'Too many booking requests. Please try again later.'
+    });
+  }
+
+  try {
+    const {
+      provider = 'google',
+      customerName,
+      customerEmail,
+      customerPhone,
+      startTime,
+      endTime,
+      description,
+      timezone
+    } = req.body;
+
+    // Validate required fields
+    if (!customerName || !customerEmail || !startTime || !endTime) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: customerName, customerEmail, startTime, endTime'
+      });
+    }
+
+    // Validate times are in the future
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    const now = new Date();
+
+    if (start < now) {
+      return res.status(400).json({
+        success: false,
+        error: 'Booking time must be in the future'
+      });
+    }
+
+    if (end <= start) {
+      return res.status(400).json({
+        success: false,
+        error: 'End time must be after start time'
+      });
+    }
+
+    // For now, only Google Calendar is supported
+    // In the future, this would route to different providers based on the 'provider' param
+    if (provider !== 'google') {
+      return res.status(400).json({
+        success: false,
+        error: `Provider '${provider}' is not yet supported. Currently only 'google' is available.`
+      });
+    }
+
+    // Return booking info for client-side Google Calendar creation
+    // The actual calendar event will be created client-side using gapi
+    // because we need the user's OAuth token
+    res.json({
+      success: true,
+      bookingId: `pending_${Date.now()}`,
+      provider: 'google',
+      details: {
+        customerName,
+        customerEmail,
+        customerPhone,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        description,
+        timezone: timezone || 'America/New_York'
+      },
+      message: 'Booking details validated. Please create event using client-side Google Calendar API.'
+    });
+
+  } catch (error) {
+    console.error('[API] Booking creation error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create booking'
+    });
+  }
+});
+
 // Handle SPA routing: return index.html for all non-file requests
 app.get('*', (req, res) => {
   const indexPath = path.join(distPath, 'index.html');

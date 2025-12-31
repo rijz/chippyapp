@@ -4,6 +4,7 @@ import { MessageCircle, X, Send, Sparkles, Loader2, User, Mail, Phone, ArrowRigh
 import { Message, TenantConfig, WidgetConfig } from '../types';
 import { createAgentSession, analyzeInteraction } from '../services/geminiService';
 import { checkAvailability } from '../services/calendarAuth';
+import { parseBookingConfirmation, createCalendarBooking } from '../services/bookingUtils';
 import { ChatSession } from '@google/generative-ai';
 
 // Simple Markdown renderer for chat messages
@@ -230,26 +231,23 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
       ${correctionsInfo}
       
       CONTACT COLLECTION RULES:
-      If NOT provided in the "CUSTOMER INFO" block above, you MUST collect the following details from the user ONLY when they express interest in:
-      1. Booking an appointment.
-      2. Requesting a call back.
-      3. Asking for information that requires a personalized follow-up.
-
-      Fields to collect contextually:
-      ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No specific details required."}
-      
-      - Be conversational. Do not ask for all details upfront unless a booking/callback is initiated.
-      - If a field is REQUIRED, you cannot confirm a booking without it.
-      - If a field is OPTIONAL, ask for it once, but proceed if the user declines.
-      - If a field is HIDDEN, do not ask for it.
+      ${userInfoContext ? `✅ You ALREADY HAVE the customer's contact information (see CUSTOMER INFO section above). DO NOT ask for their name, email, or phone again.` : `Collect contact info ONLY when booking:
+${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No details required."}
+      - Be conversational. Ask ONLY when booking is confirmed.
+      - REQUIRED fields must be collected before confirming.
+      - OPTIONAL fields: ask once, proceed if user declines.`}
 
       YOUR GOAL:
-      Reliably convert inquiries into confirmed appointments.
-      ${availableSlots ? `AVAILABLE TIME SLOTS (CHECK CALENDAR BEFORE CONFIRMING):\n${availableSlots}\n` : ''}
-      If the user wants to book, ONLY offer times from the available slots above.
-      If no available slots are shown, ask for their preferred date/time and say you'll check availability.
+      Convert inquiries to bookings quickly and helpfully.
+      
+      ${availableSlots ? `🗓️ REAL-TIME AVAILABLE SLOTS:
+${availableSlots}
+
+**CRITICAL**: When user asks about availability, immediately show these slots. These are REAL available times from the calendar.
+When user picks a time from the list, confirm: "Perfect! I've booked you for [TIME]. Confirmation email coming shortly."
+` : `⚠️ No slots loaded. When user asks about availability, ask their preferred date/time first.`}
       Keep responses concise and professional.
-      Use Markdown formatting (bullet points, bold text).
+      Use Markdown formatting(bullet points, bold text).
       
       Do not make up services that are not in the knowledge base.
     `;
@@ -340,7 +338,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
               const dayName = slotStart.toLocaleDateString('en-US', { weekday: 'short' });
               const dateStr = slotStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
               const timeStr = slotStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-              slots.push(`${dayName}, ${dateStr} at ${timeStr}`);
+              slots.push(`${dayName}, ${dateStr} at ${timeStr} `);
 
               if (slots.length >= 10) break; // Limit to 10 slots
             }
@@ -398,6 +396,32 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
         }
       });
 
+      // Check if AI confirmed a booking and create actual calendar event
+      const bookingIntent = parseBookingConfirmation(responseText);
+      if (bookingIntent.hasIntent && bookingIntent.datetime && leadData.name && leadData.email) {
+        console.log('[ChatWidget] Booking confirmed detected, creating calendar event...', bookingIntent);
+
+        createCalendarBooking(bookingIntent, leadData)
+          .then(result => {
+            if (result.success) {
+              console.log('[ChatWidget] Booking created successfully:', result.bookingId);
+              // Add confirmation message to chat
+              const confirmMsg: Message = {
+                id: `confirm_${Date.now()}`,
+                role: 'model',
+                text: `✅ **Booking Confirmed!** Your appointment has been added to the calendar. You'll receive a confirmation email shortly.`,
+                timestamp: new Date()
+              };
+              setMessages(prev => [...prev, confirmMsg]);
+            } else {
+              console.error('[ChatWidget] Booking creation failed:', result.error);
+            }
+          })
+          .catch(err => {
+            console.error('[ChatWidget] Booking error:', err);
+          });
+      }
+
     } catch (error) {
       console.error("Chat error", error);
       const errorMsg: Message = {
@@ -422,7 +446,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
   const positionClass = widgetConfig.position === 'left' ? 'left-6 items-start' : 'right-6 items-end';
 
   return (
-    <div className={`fixed bottom-6 z-50 flex flex-col ${positionClass}`}>
+    <div className={`fixed bottom - 6 z - 50 flex flex - col ${positionClass} `}>
       {isOpen && (
         <div className="bg-white w-[350px] h-[520px] rounded-2xl shadow-2xl border border-slate-200 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
           {/* Header */}
@@ -451,9 +475,9 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
               {/* New Chat Button */}
               <button
                 onClick={() => {
-                  const newSessionId = `session_${Date.now()}`;
+                  const newSessionId = `session_${Date.now()} `;
                   localStorage.setItem('chatSessionId', newSessionId);
-                  localStorage.removeItem(`chatMessages_${sessionId}`);
+                  localStorage.removeItem(`chatMessages_${sessionId} `);
                   window.location.reload(); // Reload to start fresh
                 }}
                 className="hover:bg-white/20 p-1.5 rounded transition-colors text-xs"
@@ -574,13 +598,13 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
 
                   {messages.map((msg) => (
                     <div key={msg.id}>
-                      <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-none'}`} style={msg.role === 'user' ? { backgroundColor: widgetConfig.color } : {}}>
+                      <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} `}>
+                        <div className={`max - w - [85 %] rounded - 2xl p - 3 text - sm shadow - sm ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-none'} `} style={msg.role === 'user' ? { backgroundColor: widgetConfig.color } : {}}>
                           {msg.role === 'user' ? msg.text : <FormattedMessage text={msg.text} />}
                         </div>
                       </div>
                       {/* Timestamp */}
-                      <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mt-1 px-2`}>
+                      <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mt - 1 px - 2`}>
                         <span className="text-[10px] text-slate-400">{getRelativeTime(msg.timestamp)}</span>
                       </div>
                     </div>
