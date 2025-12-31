@@ -157,7 +157,24 @@ export const fetchCalendars = async (): Promise<CalendarItem[]> => {
     }
 
     if (!gapiInited || !gapi.client.getToken()) {
-        return [];
+        throw new Error('Google Calendar API is not initialized or user is not authenticated');
+    }
+
+    // Ensure the calendar API is loaded
+    if (!gapi.client.calendar) {
+        console.log('Calendar API not loaded, waiting...');
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Give it a second
+
+        // If still not loaded, try to reinitialize
+        if (!gapi.client.calendar) {
+            console.log('Reinitializing GAPI client...');
+            await initializeGapiClient();
+        }
+
+        // Final check
+        if (!gapi.client.calendar) {
+            throw new Error('Failed to load Google Calendar API');
+        }
     }
 
     try {
