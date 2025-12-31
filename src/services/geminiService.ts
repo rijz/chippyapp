@@ -6,10 +6,67 @@ import {
 import { KnowledgeBaseData, KnowledgeConflict, ReviewItem, Sentiment, Message, EnquiryType } from "../types";
 import { getEnv } from "../utils/env";
 
-// Initialize the client
+// ALWAYS use the proxy to keep the API key secure on the backend
+// Never expose the API key in the browser for chat operations
+const USE_PROXY = true;
+
+// Initialize the client for non-chat operations (scanning, classification, etc.)
+// These run in the authenticated app, not in public embeds
 const apiKey = getEnv('VITE_GEMINI_API_KEY');
-console.log('[GeminiService] Initializing with Key:', apiKey ? `${apiKey.substring(0, 4)}...` : 'MISSING');
+console.log('[GeminiService] Using proxy for chat:', USE_PROXY);
 const genAI = new GoogleGenerativeAI(apiKey || '');
+
+// Custom chat session implementation for proxy mode
+class ProxyChatSession {
+  private history: any[] = [];
+  private systemInstruction: string;
+
+  constructor(systemInstruction: string) {
+    this.systemInstruction = systemInstruction;
+  }
+
+  async sendMessage(userMessage: string) {
+    this.history.push({
+      role: 'user',
+      parts: [{ text: userMessage }]
+    });
+
+    const response = await fetch('/api-proxy/v1beta/models/gemini-2.0-flash:generateContent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        system_instruction: {
+          parts: [{ text: this.systemInstruction }]
+        },
+        contents: this.history,
+        generationConfig: {
+          temperature: 0.7,
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to generate response');
+    }
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'I encountered an error. Please try again.';
+
+    this.history.push({
+      role: 'model',
+      parts: [{ text }]
+    });
+
+    return {
+      response: {
+        text: () => text
+      }
+    };
+  }
+}
 
 /**
  * Uses gemini-2.0-flash for high-performance interactions.
@@ -18,6 +75,15 @@ const genAI = new GoogleGenerativeAI(apiKey || '');
 export const createAgentSession = async (
   systemInstruction: string
 ): Promise<any> => {
+  // Use proxy in production, direct SDK in development
+  if (USE_PROXY) {
+    return new ProxyChatSession(systemInstruction);
+  }
+
+  if (!genAI) {
+    throw new Error('Gemini API not initialized');
+  }
+
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.0-flash',
     systemInstruction: systemInstruction,
