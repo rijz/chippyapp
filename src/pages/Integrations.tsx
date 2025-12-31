@@ -49,6 +49,12 @@ export const Integrations = () => {
             // Initial fetch
             const cals = await fetchCalendars();
 
+            if (!cals || cals.length === 0) {
+                showToast('No calendars found. Please check your Google Calendar access.', 'warning');
+                setIsLoading(false);
+                return;
+            }
+
             const settings: CalendarSettings = {
                 email,
                 calendars: cals,
@@ -58,8 +64,11 @@ export const Integrations = () => {
             setCalendarSettings(settings);
             setTenantConfig(prev => ({ ...prev, isConnected: true, bookingPlatform: 'GOOGLE_CALENDAR' }));
             setAvailableCalendars(cals);
-        } catch (err) {
+
+            showToast(`✅ Successfully connected to Google Calendar as ${email}`, 'success');
+        } catch (err: any) {
             console.error("Calendar auth failed", err);
+            showToast(err.message || 'Failed to connect to Google Calendar. Please try again.', 'error');
         } finally {
             setIsLoading(false);
         }
@@ -123,7 +132,7 @@ export const Integrations = () => {
                     )}
                 </div>
 
-                {tenantConfig.isConnected && calendarSettings && (
+                {tenantConfig.isConnected && calendarSettings && calendarSettings.calendars.length > 0 && (
                     <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-12 text-left">
                         {/* Conflict Checking Section */}
                         <div className="space-y-6">

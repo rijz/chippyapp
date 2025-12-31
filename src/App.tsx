@@ -17,6 +17,7 @@ import { ReviewQueue } from './pages/ReviewQueue';
 import { Account } from './pages/Account';
 import { EmbedPage } from './pages/EmbedPage';
 import { BookingPage } from './pages/BookingPage';
+import { FreeTrialPage } from './pages/FreeTrialPage';
 
 // Components
 import { AuthPage } from './components/AuthPage';
@@ -36,6 +37,10 @@ const AppContent = () => {
 
   if (path.startsWith('/book')) {
     return <BookingPage />;
+  }
+
+  if (path.startsWith('/trial')) {
+    return <FreeTrialPage />;
   }
 
   if (loading) {
