@@ -5,6 +5,7 @@
  */
 
 import { providerRegistry, BookingDetails } from './calendarProviders';
+import { isGoogleAuthenticated } from './calendarAuth';
 
 export interface ParsedBookingIntent {
     hasIntent: boolean;
@@ -100,6 +101,11 @@ export const createCalendarBooking = async (
 ): Promise<{ success: boolean; bookingId?: string; error?: string }> => {
     if (!bookingIntent.datetime) {
         return { success: false, error: 'Could not parse booking date/time' };
+    }
+
+    // Check authentication before proceeding
+    if (!isGoogleAuthenticated()) {
+        return { success: false, error: 'AUTHENTICATION_REQUIRED' };
     }
 
     const provider = providerRegistry.getDefaultProvider();

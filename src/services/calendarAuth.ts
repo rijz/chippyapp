@@ -207,7 +207,22 @@ export const handleSignOut = () => {
     }
 };
 
-// --- 7. Check Availability (Check for Conflicts) ---
+// --- 7. Check if User is Authenticated ---
+export const isGoogleAuthenticated = (): boolean => {
+    // MOCK MODE: Always return true in mock mode
+    if (!CLIENT_ID || !API_KEY) {
+        return true; // Mock mode doesn't require auth
+    }
+
+    if (typeof gapi === 'undefined' || !gapi.client) {
+        return false;
+    }
+
+    const token = gapi.client.getToken();
+    return token !== null && token !== undefined;
+};
+
+// --- 8. Check Availability (Check for Conflicts) ---
 export const checkAvailability = async (startTime: Date, endTime: Date): Promise<{ available: boolean; conflicts: number }> => {
     // MOCK MODE
     if (!CLIENT_ID || !API_KEY) {
@@ -245,7 +260,7 @@ export const checkAvailability = async (startTime: Date, endTime: Date): Promise
     }
 };
 
-// --- 8. Get Available Time Slots for a Date ---
+// --- 9. Get Available Time Slots for a Date ---
 export interface TimeSlot {
     time: string;
     datetime: Date;

@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Sparkles, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
 import { Message, TenantConfig, WidgetConfig } from '../types';
 import { createAgentSession, analyzeInteraction } from '../services/geminiService';
-import { checkAvailability } from '../services/calendarAuth';
+import { checkAvailability, loadGoogleScripts, handleAuthClick, isGoogleAuthenticated } from '../services/calendarAuth';
 import { parseBookingConfirmation, createCalendarBooking } from '../services/bookingUtils';
 import { ChatSession } from '@google/generative-ai';
 
@@ -56,6 +56,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
   const [showSuggestedQuestions, setShowSuggestedQuestions] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('chatSoundEnabled') !== 'false');
   const [sessionId] = useState(() => localStorage.getItem('chatSessionId') || `session_${Date.now()}`);
+  const [isCalendarConnected, setIsCalendarConnected] = useState(false);
+  const [pendingBooking, setPendingBooking] = useState<{ intent: any, leadData: any } | null>(null);
 
   // Lead Data
   const [leadData, setLeadData] = useState({ name: '', email: '', phone: '' });
@@ -145,6 +147,21 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
       }]);
     }
   }, [widgetConfig.welcomeMessage, sessionId]);
+
+  // Load Google Scripts and check auth status
+  useEffect(() => {
+    loadGoogleScripts();
+
+    // Check auth status periodically
+    const checkAuth = () => {
+      setIsCalendarConnected(isGoogleAuthenticated());
+    };
+
+    checkAuth();
+    const interval = setInterval(checkAuth, 2000); // Check every 2s
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Save messages to localStorage whenever they change
   useEffect(() => {
@@ -263,6 +280,36 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
       onLeadCapture(leadData);
     }
     initChat(leadData);
+  };
+
+  // Handle Google Calendar authentication
+  const handleConnectCalendar = async () => {
+    try {
+      await handleAuthClick();
+      setIsCalendarConnected(true);
+
+      // If there's a pending booking, retry it now
+      if (pendingBooking) {
+        const { intent, leadData: bookingLeadData } = pendingBooking;
+        console.log('[ChatWidget] Retrying booking after authentication...');
+
+        const result = await createCalendarBooking(intent, bookingLeadData);
+        if (result.success) {
+          const confirmMsg: Message = {
+            id: `confirm_${Date.now()}`,
+            role: 'model',
+            text: `✅ **Booking Confirmed!** Your appointment has been added to the calendar. You'll receive a confirmation email shortly.`,
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, confirmMsg]);
+          setPendingBooking(null); // Clear pending booking
+        } else {
+          console.error('[ChatWidget] Booking failed after auth:', result.error);
+        }
+      }
+    } catch (error) {
+      console.error('[ChatWidget] Authentication failed:', error);
+    }
   };
 
   const scrollToBottom = () => {
@@ -401,6 +448,22 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
       if (bookingIntent.hasIntent && bookingIntent.datetime && leadData.name && leadData.email) {
         console.log('[ChatWidget] Booking confirmed detected, creating calendar event...', bookingIntent);
 
+        // Check if user is authenticated
+        if (!isGoogleAuthenticated()) {
+          console.log('[ChatWidget] User not authenticated, prompting to connect Google Calendar');
+          setPendingBooking({ intent: bookingIntent, leadData });
+
+          // Add message prompting authentication
+          const authPrompt: Message = {
+            id: `auth_${Date.now()}`,
+            role: 'model',
+            text: '⚠️ To complete your booking, please connect your Google Calendar below.',
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, authPrompt]);
+          return; // Stop here, wait for authentication
+        }
+
         createCalendarBooking(bookingIntent, leadData)
           .then(result => {
             if (result.success) {
@@ -415,6 +478,18 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
               setMessages(prev => [...prev, confirmMsg]);
             } else {
               console.error('[ChatWidget] Booking creation failed:', result.error);
+
+              // Show specific error if authentication issue
+              if (result.error === 'AUTHENTICATION_REQUIRED') {
+                setPendingBooking({ intent: bookingIntent, leadData });
+                const authPrompt: Message = {
+                  id: `auth_${Date.now()}`,
+                  role: 'model',
+                  text: '⚠️ To complete your booking, please connect your Google Calendar below.',
+                  timestamp: new Date()
+                };
+                setMessages(prev => [...prev, authPrompt]);
+              }
             }
           })
           .catch(err => {
@@ -646,6 +721,21 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
                           </div>
                         </div>
                       </div>
+                    </div>
+                  )}
+
+                  {/* Connect Google Calendar Button - Show when authentication required */}
+                  {pendingBooking && !isCalendarConnected && (
+                    <div className="flex justify-center my-3">
+                      <button
+                        onClick={handleConnectCalendar}
+                        className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2"
+                      >
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" />
+                        </svg>
+                        Connect Google Calendar
+                      </button>
                     </div>
                   )}
                   <div ref={messagesEndRef} />

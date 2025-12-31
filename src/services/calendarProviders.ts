@@ -82,6 +82,16 @@ export class GoogleCalendarProvider implements CalendarProvider {
     }
 
     async createBooking(details: BookingDetails): Promise<BookingResult> {
+        // Check if user is authenticated with Google
+        if (typeof gapi === 'undefined' || !gapi.client || !gapi.client.getToken()) {
+            return {
+                success: false,
+                bookingId: '',
+                provider: 'google',
+                error: 'AUTHENTICATION_REQUIRED'
+            };
+        }
+
         try {
             const event = {
                 summary: `Appointment with ${details.customerName}`,
@@ -174,6 +184,6 @@ export class CalendarProviderRegistry {
 export const providerRegistry = new CalendarProviderRegistry();
 
 // Register Google Calendar provider by default
-if (typeof window !== 'undefined' && window.gapi) {
+if (typeof window !== 'undefined' && (window as any).gapi) {
     providerRegistry.registerProvider(new GoogleCalendarProvider());
 }
