@@ -39,6 +39,7 @@ RUN npm install --production
 COPY --from=builder /app/dist ./dist
 COPY server.js .
 COPY scraper.js .
+COPY src ./src
 
 ENV PORT=8080
 EXPOSE 8080
