@@ -305,9 +305,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
             <div className="relative z-10 flex flex-col h-full p-8 lg:p-10">
                {/* 1. Brand Header */}
                <div className="flex items-center gap-3 mb-10">
-                  <div className="bg-chippy-coral/10 p-2 rounded-lg border border-chippy-coral/20 backdrop-blur-sm">
-                     <BrainCircuit className="w-6 h-6 text-chippy-coral" />
-                  </div>
+                  <img src="/logo.png" alt="Chippy" className="w-10 h-10 rounded-lg" />
                   <span className="text-xl font-bold tracking-tight text-white">Chippy</span>
                </div>
 

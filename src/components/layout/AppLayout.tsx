@@ -99,7 +99,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             <main className="flex-1 flex flex-col md:ml-64 h-full bg-chippy-gray overflow-y-auto p-6 md:p-10 relative">
                 <header className="flex justify-between items-center mb-8 md:hidden shrink-0">
                     <div className="flex items-center gap-2 text-white">
-                        <BrainCircuit className="w-6 h-6 text-chippy-coral" />
+                        <img src="/logo.png" alt="Chippy" className="w-8 h-8 rounded-lg" />
                         <span className="font-bold text-lg text-chippy-navy">Chippy</span>
                     </div>
                     <button onClick={() => setMobileSidebarOpen(true)} className="p-2 bg-chippy-navy rounded-lg text-white">
