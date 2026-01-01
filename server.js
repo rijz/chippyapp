@@ -3,6 +3,12 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Stripe from 'stripe';
+import {
+  checkGoogleAvailability,
+  createGoogleEvent,
+  refreshGoogleToken,
+  getGoogleAvailableSlots
+} from './src/services/googleCalendarProvider.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -440,6 +446,220 @@ app.post('/api/bookings/create', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to create booking'
+    });
+  }
+});
+
+// =====================
+// Calendar Availability & Booking Endpoints
+// =====================
+
+/**
+ * Helper: Get and refresh calendar connection if needed
+ */
+async function getCalendarConnection(userId, provider = 'google') {
+  // Fetch user's calendar connection
+  const { data: connection, error } = await supabaseAdmin
+    .from('calendar_connections')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('provider', provider)
+    .eq('is_active', true)
+    .single();
+
+  if (error || !connection) {
+    return null;
+  }
+
+  // Check if token needs refresh
+  const now = new Date();
+  const expiresAt = new Date(connection.token_expires_at);
+
+  if (expiresAt < now) {
+    console.log(`[Calendar] Token expired for user ${userId}, refreshing...`);
+
+    try {
+      const { access_token, expires_at } = await refreshGoogleToken(connection.refresh_token);
+
+      // Update token in database
+      await supabaseAdmin
+        .from('calendar_connections')
+        .update({
+          access_token,
+          token_expires_at: expires_at,
+          last_used_at: new Date().toISOString()
+        })
+        .eq('id', connection.id);
+
+      connection.access_token = access_token;
+      connection.token_expires_at = expires_at;
+    } catch (refreshError) {
+      console.error('[Calendar] Token refresh failed:', refreshError);
+      throw new Error('Calendar connection expired. Please reconnect.');
+    }
+  } else {
+    // Update last used timestamp
+    await supabaseAdmin
+      .from('calendar_connections')
+      .update({ last_used_at: new Date().toISOString() })
+      .eq('id', connection.id);
+  }
+
+  return connection;
+}
+
+/**
+ * POST /api/calendar/availability
+ * Check if a specific time slot is available
+ */
+app.post('/api/calendar/availability', async (req, res) => {
+  try {
+    const { userId, startTime, endTime, provider = 'google' } = req.body;
+
+    if (!userId || !startTime || !endTime) {
+      return res.status(400).json({
+        error: 'Missing required fields: userId, startTime, endTime'
+      });
+    }
+
+    // Get calendar connection
+    const connection = await getCalendarConnection(userId, provider);
+
+    if (!connection) {
+      // No calendar connected - return as available (fallback)
+      return res.json({
+        available: true,
+        conflicts: 0,
+        message: 'No calendar connected'
+      });
+    }
+
+    // Check availability using provider
+    if (provider === 'google') {
+      const result = await checkGoogleAvailability(
+        connection.access_token,
+        connection.calendar_id,
+        new Date(startTime),
+        new Date(endTime)
+      );
+
+      res.json(result);
+    } else {
+      res.status(400).json({ error: `Provider '${provider}' not yet supported` });
+    }
+  } catch (error) {
+    console.error('[API] Calendar availability error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to check availability'
+    });
+  }
+});
+
+/**
+ * POST /api/calendar/slots
+ * Get all available time slots for a date range
+ */
+app.post('/api/calendar/slots', async (req, res) => {
+  try {
+    const {
+      userId,
+      startDate,
+      endDate,
+      slotDuration = 60,
+      businessHours = { start: 9, end: 17 },
+      provider = 'google'
+    } = req.body;
+
+    if (!userId || !startDate || !endDate) {
+      return res.status(400).json({
+        error: 'Missing required fields: userId, startDate, endDate'
+      });
+    }
+
+    const connection = await getCalendarConnection(userId, provider);
+
+    if (!connection) {
+      return res.json({
+        slots: [],
+        message: 'No calendar connected'
+      });
+    }
+
+    if (provider === 'google') {
+      const slots = await getGoogleAvailableSlots(
+        connection.access_token,
+        connection.calendar_id,
+        new Date(startDate),
+        new Date(endDate),
+        slotDuration,
+        businessHours
+      );
+
+      res.json({ slots });
+    } else {
+      res.status(400).json({ error: `Provider '${provider}' not yet supported` });
+    }
+  } catch (error) {
+    console.error('[API] Calendar slots error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to fetch available slots'
+    });
+  }
+});
+
+/**
+ * POST /api/calendar/create-event
+ * Create a calendar event using owner's calendar
+ */
+app.post('/api/calendar/create-event', async (req, res) => {
+  try {
+    const {
+      userId,
+      summary,
+      description,
+      startTime,
+      endTime,
+      attendees = [],
+      timezone = 'America/New_York',
+      provider = 'google'
+    } = req.body;
+
+    if (!userId || !summary || !startTime || !endTime) {
+      return res.status(400).json({
+        error: 'Missing required fields: userId, summary, startTime, endTime'
+      });
+    }
+
+    const connection = await getCalendarConnection(userId, provider);
+
+    if (!connection) {
+      return res.status(400).json({
+        error: 'No calendar connected. Please connect your calendar first.'
+      });
+    }
+
+    if (provider === 'google') {
+      const result = await createGoogleEvent(
+        connection.access_token,
+        connection.calendar_id,
+        {
+          summary,
+          description,
+          startTime: new Date(startTime),
+          endTime: new Date(endTime),
+          attendees,
+          timezone
+        }
+      );
+
+      res.json(result);
+    } else {
+      res.status(400).json({ error: `Provider '${provider}' not yet supported` });
+    }
+  } catch (error) {
+    console.error('[API] Calendar event creation error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to create calendar event'
     });
   }
 });

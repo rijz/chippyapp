@@ -21,6 +21,7 @@ export type BusinessType = 'storefront' | 'mobile' | 'online';
 
 export interface TenantConfig {
   id: string;
+  userId: string; // Owner's user ID for backend calendar API
   companyName: string;
   companyUrl: string;
   industry: string;
