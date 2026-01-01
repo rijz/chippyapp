@@ -182,7 +182,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     }
   }, [widgetConfig.leadCaptureMode, hasLeadFields]);
 
-  const initChat = async (userData?: typeof leadData) => {
+  const initChat = async (userData?: typeof leadData): Promise<any> => {
     let structuredInfo = "Standard business hours apply.";
     let correctionsInfo = "";
 
@@ -269,7 +269,32 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
       Do not make up services that are not in the knowledge base.
     `;
     const session = await createAgentSession(systemInstruction);
+
+    // Restore previous conversation history if it exists
+    const savedMessages = localStorage.getItem(`chatMessages_${sessionId}`);
+    if (savedMessages) {
+      try {
+        const parsed = JSON.parse(savedMessages);
+        // Filter out welcome messages and build conversation history
+        const conversationHistory = parsed.filter((m: Message) =>
+          m.id !== 'welcome'
+        ).map((m: Message) => ({
+          role: m.role,
+          text: m.text
+        }));
+
+        // Restore history to session if it has the method
+        if (conversationHistory.length > 0 && typeof (session as any).restoreHistory === 'function') {
+          console.log(`[ChatWidget] Restoring ${conversationHistory.length} messages to session`);
+          (session as any).restoreHistory(conversationHistory);
+        }
+      } catch (e) {
+        console.error('[ChatWidget] Failed to restore chat history:', e);
+      }
+    }
+
     setChatSession(session);
+    return session; // Return the new session so caller can use it immediately
   };
 
   const handleLeadSubmit = (e: React.FormEvent) => {
@@ -360,6 +385,9 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
     const bookingKeywords = ['book', 'appointment', 'schedule', 'availab', 'time', 'when can'];
     const hasBookingIntent = bookingKeywords.some(keyword => currentText.toLowerCase().includes(keyword));
 
+    // Track which session to use for this message
+    let sessionToUse = chatSession;
+
     if (hasBookingIntent && !availableSlots) {
       // Show status message
       setStatusMessage('🔍 Let me check my calendar...');
@@ -401,8 +429,13 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
         await new Promise(resolve => setTimeout(resolve, 800)); // Show success for 800ms
         setStatusMessage('');
         setAvailableSlots(slots.join('\n'));
-        // Reinitialize chat with updated slots
-        await initChat();
+
+        // Reinitialize chat with updated slots and USE the returned session
+        const newSession = await initChat();
+        if (newSession) {
+          sessionToUse = newSession;
+          console.log('[ChatWidget] Using new session with slots for this message');
+        }
       } else {
         setStatusMessage('❌ No availability found in the next 7 days');
         await new Promise(resolve => setTimeout(resolve, 1500));
@@ -411,7 +444,13 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
     }
 
     try {
-      const result = await chatSession.sendMessage(userMsg.text);
+      if (!sessionToUse) {
+        console.error('[ChatWidget] No session available');
+        setIsLoading(false);
+        return;
+      }
+
+      const result = await sessionToUse.sendMessage(userMsg.text);
       const responseText = result.response.text() || "I'm sorry, I'm having trouble connecting to the schedule right now.";
 
       // Add empty message that will be filled with typewriter effect
@@ -521,7 +560,7 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
   const positionClass = widgetConfig.position === 'left' ? 'left-6 items-start' : 'right-6 items-end';
 
   return (
-    <div className={`fixed bottom - 6 z - 50 flex flex - col ${positionClass} `}>
+    <div className={`fixed bottom-6 z-50 flex flex-col ${positionClass}`}>
       {isOpen && (
         <div className="bg-white w-[350px] h-[520px] rounded-2xl shadow-2xl border border-slate-200 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
           {/* Header */}
@@ -673,13 +712,13 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
 
                   {messages.map((msg) => (
                     <div key={msg.id}>
-                      <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} `}>
-                        <div className={`max - w - [85 %] rounded - 2xl p - 3 text - sm shadow - sm ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-none'} `} style={msg.role === 'user' ? { backgroundColor: widgetConfig.color } : {}}>
+                      <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-none'}`} style={msg.role === 'user' ? { backgroundColor: widgetConfig.color } : {}}>
                           {msg.role === 'user' ? msg.text : <FormattedMessage text={msg.text} />}
                         </div>
                       </div>
                       {/* Timestamp */}
-                      <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mt - 1 px - 2`}>
+                      <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mt-1 px-2`}>
                         <span className="text-[10px] text-slate-400">{getRelativeTime(msg.timestamp)}</span>
                       </div>
                     </div>

@@ -18,11 +18,21 @@ const genAI = new GoogleGenerativeAI(apiKey || '');
 
 // Custom chat session implementation for proxy mode
 class ProxyChatSession {
-  private history: any[] = [];
+  public history: any[] = []; // Made public to allow history restoration
   private systemInstruction: string;
 
   constructor(systemInstruction: string) {
     this.systemInstruction = systemInstruction;
+  }
+
+  /**
+   * Restore conversation history from previous session
+   */
+  public restoreHistory(messages: Array<{ role: string, text: string }>) {
+    this.history = messages.map(msg => ({
+      role: msg.role === 'model' ? 'model' : 'user',
+      parts: [{ text: msg.text }]
+    }));
   }
 
   async sendMessage(userMessage: string) {
