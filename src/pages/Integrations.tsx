@@ -45,7 +45,7 @@ export const Integrations = () => {
     const handleConnectCalendar = async () => {
         setIsLoading(true);
         try {
-            const email = await handleAuthClick();
+            const authResult = await handleAuthClick();
             // Initial fetch
             const cals = await fetchCalendars();
 
@@ -56,7 +56,7 @@ export const Integrations = () => {
             }
 
             const settings: CalendarSettings = {
-                email,
+                email: authResult.email,
                 calendars: cals,
                 bookingCalendarId: cals.find(c => c.selected)?.id || cals[0]?.id || 'primary',
                 appointmentDuration: 30
@@ -65,7 +65,31 @@ export const Integrations = () => {
             setTenantConfig(prev => ({ ...prev, isConnected: true, bookingPlatform: 'GOOGLE_CALENDAR' }));
             setAvailableCalendars(cals);
 
-            showToast(`✅ Successfully connected to Google Calendar as ${email}`, 'success');
+            // Save calendar connection to database for backend API
+            if (userId) {
+                const { supabase } = await import('../services/supabaseClient');
+                const { error: dbError } = await supabase
+                    .from('calendar_connections')
+                    .upsert({
+                        user_id: userId,
+                        provider: 'google',
+                        provider_email: authResult.email,
+                        access_token: authResult.access_token,
+                        refresh_token: authResult.refresh_token || null,
+                        token_expires_at: new Date(authResult.expires_at).toISOString(),
+                        calendar_id: settings.bookingCalendarId,
+                        is_active: true
+                    }, { onConflict: 'user_id,provider' });
+
+                if (dbError) {
+                    console.error('Failed to save calendar connection:', dbError);
+                    showToast('⚠️ Calendar connected but backend sync failed. Please reconnect.', 'warning');
+                } else {
+                    console.log('✅ Calendar connection saved to database');
+                }
+            }
+
+            showToast(`✅ Successfully connected to Google Calendar as ${authResult.email}`, 'success');
         } catch (err: any) {
             console.error("Calendar auth failed", err);
             showToast(err.message || 'Failed to connect to Google Calendar. Please try again.', 'error');

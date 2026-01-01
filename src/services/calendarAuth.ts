@@ -99,14 +99,23 @@ function initializeTokenClient() {
 
 // --- 4. Trigger Sign In ---
 // --- 4. Trigger Sign In ---
-export const handleAuthClick = (): Promise<string> => {
+export const handleAuthClick = (): Promise<{
+    email: string;
+    access_token: string;
+    refresh_token?: string;
+    expires_at: number;
+}> => {
     return new Promise((resolve, reject) => {
         // MOCK MODE: If keys are missing, simulate login for demo purposes
         if (!CLIENT_ID || !API_KEY) {
             console.warn("Google Credentials missing. Using MOCK MODE.");
             // Simulate network delay
             setTimeout(() => {
-                resolve("demo@chippy.ai");
+                resolve({
+                    email: "demo@chippy.ai",
+                    access_token: "mock_access_token",
+                    expires_at: Date.now() + 3600 * 1000
+                });
             }, 1000);
             return;
         }
@@ -127,17 +136,28 @@ export const handleAuthClick = (): Promise<string> => {
             }
 
             try {
+                // Get email from calendar list
                 const response = await gapi.client.calendar.calendarList.list();
                 const primaryCal = response.result.items.find((c: any) => c.primary);
                 const email = primaryCal ? primaryCal.id : "Authenticated User";
-                resolve(email);
+
+                // Get token info
+                const token = gapi.client.getToken();
+
+                resolve({
+                    email,
+                    access_token: token.access_token,
+                    refresh_token: resp.refresh_token, // May be undefined on repeat auth
+                    expires_at: token.expires_in ? Date.now() + (token.expires_in * 1000) : Date.now() + 3600000
+                });
             } catch (error) {
                 console.error("Error fetching profile", error);
-                resolve("Google User");
+                reject(error);
             }
         };
 
         if (gapi.client.getToken() === null) {
+            // First time: request both access and refresh tokens
             tokenClient.requestAccessToken({ prompt: 'consent' });
         } else {
             tokenClient.requestAccessToken({ prompt: '' });

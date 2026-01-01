@@ -29,6 +29,7 @@ import {
 // Default Configs (Copied from App.tsx)
 const DEFAULT_TENANT_CONFIG: TenantConfig = {
     id: 'tenant-123',
+    userId: '', // Will be set from session
     companyName: 'Chippy User',
     companyUrl: '',
     industry: 'Service',
@@ -161,7 +162,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
         const settings = await fetchSettings(userId);
         if (settings) {
-            if (settings.tenant_config) setTenantConfig(settings.tenant_config);
+            if (settings.tenant_config) {
+                setTenantConfig({
+                    ...settings.tenant_config,
+                    userId // Always ensure userId is set from session
+                });
+            } else {
+                // If no tenant_config in settings, ensure userId is set
+                setTenantConfig(prev => ({ ...prev, userId }));
+            }
             if (settings.widget_config) {
                 setWidgetConfig(prev => ({
                     ...prev,
@@ -180,6 +189,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                     }
                 }));
             }
+        } else {
+            // No settings found, ensure userId is set
+            setTenantConfig(prev => ({ ...prev, userId }));
         }
 
         const remoteSessions = await fetchChatSessions(userId);
