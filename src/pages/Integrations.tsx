@@ -104,9 +104,6 @@ export const Integrations = () => {
                     </div>
                     {tenantConfig.isConnected ? (
                         <div className="flex items-center gap-4">
-                            <button onClick={refreshCalendars} className="p-2 text-slate-400 hover:text-chippy-navy transition-colors" title="Refresh Calendars">
-                                <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
-                            </button>
                             <div className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold flex items-center gap-2 border border-emerald-100">
                                 <CheckCircle2 className="w-4 h-4" /> Connected as {calendarSettings?.email}
                             </div>
@@ -125,78 +122,6 @@ export const Integrations = () => {
                         </button>
                     )}
                 </div>
-
-                {/* Calendar selection removed - backend uses primary calendar */
-                    <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-12 text-left">
-                        {/* Conflict Checking Section */}
-                        <div className="space-y-6">
-                            <div className="flex items-center gap-3 mb-4">
-                                <CalendarDays className="w-5 h-5 text-chippy-coral" />
-                                <h4 className="font-bold text-lg text-chippy-navy">Check for Conflicts</h4>
-                            </div>
-                            <p className="text-sm text-slate-500">Select which calendars simply block time (e.g. Holidays, Personal).</p>
-
-                            <div className="space-y-3">
-                                {calendarSettings.calendars.map(cal => (
-                                    <label key={cal.id} className="flex items-center p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-all cursor-pointer group">
-                                        <input
-                                            type="checkbox"
-                                            checked={cal.selected}
-                                            onChange={() => toggleCalendarSelection(cal.id)}
-                                            className="w-5 h-5 rounded-md border-slate-300 text-chippy-navy focus:ring-chippy-coral mr-4"
-                                        />
-                                        <div className="w-3 h-3 rounded-full mr-3" style={{ backgroundColor: cal.color }}></div>
-                                        <span className="font-medium text-slate-700 group-hover:text-chippy-navy transition-colors">{cal.name}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Booking Settings Section */}
-                        <div className="space-y-8">
-                            <div>
-                                <div className="flex items-center gap-3 mb-4">
-                                    <Settings className="w-5 h-5 text-chippy-coral" />
-                                    <h4 className="font-bold text-lg text-chippy-navy">Booking Configuration</h4>
-                                </div>
-                                <div className="space-y-6">
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Add New Appointments To</label>
-                                        <select
-                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral font-medium text-chippy-navy"
-                                            value={calendarSettings.bookingCalendarId}
-                                            onChange={(e) => setCalendarSettings({ ...calendarSettings, bookingCalendarId: e.target.value })}
-                                        >
-                                            {calendarSettings.calendars.map(cal => (
-                                                <option key={cal.id} value={cal.id}>{cal.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Default Duration</label>
-                                        <div className="flex items-center gap-4">
-                                            <div className="relative flex-1">
-                                                <Clock className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                                                <select
-                                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral font-medium text-chippy-navy appearance-none"
-                                                    value={calendarSettings.appointmentDuration}
-                                                    onChange={(e) => setCalendarSettings({ ...calendarSettings, appointmentDuration: parseInt(e.target.value) })}
-                                                >
-                                                    <option value={15}>15 Minutes</option>
-                                                    <option value={30}>30 Minutes</option>
-                                                    <option value={45}>45 Minutes</option>
-                                                    <option value={60}>1 Hour</option>
-                                                    <option value={90}>1.5 Hours</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
 
             {/* BOOKING PAGE LINK SECTION - Hidden for V1 (booking page uses mock data)
