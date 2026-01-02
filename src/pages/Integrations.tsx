@@ -16,54 +16,23 @@ export const Integrations = () => {
 
     useEffect(() => {
         loadGoogleScripts();
-        if (tenantConfig.isConnected) {
-            refreshCalendars();
-        }
-    }, [tenantConfig.isConnected]);
-
-    const refreshCalendars = async () => {
-        setIsLoading(true);
-        try {
-            const cals = await fetchCalendars();
-            setAvailableCalendars(cals);
-
-            // If we have calendars but no settings yet, init them
-            if (calendarSettings && calendarSettings.calendars.length === 0 && cals.length > 0) {
-                setCalendarSettings({
-                    ...calendarSettings,
-                    calendars: cals.map(c => ({ ...c, selected: c.selected })),
-                    bookingCalendarId: cals.find(c => c.selected)?.id || cals[0].id
-                });
-            }
-        } catch (e) {
-            console.error("Failed to load calendars", e);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+        // Calendar list fetching removed - backend integration uses owner's primary calendar by default
+    }, []);
 
     const handleConnectCalendar = async () => {
         setIsLoading(true);
         try {
             const authResult = await handleAuthClick();
-            // Initial fetch
-            const cals = await fetchCalendars();
 
-            if (!cals || cals.length === 0) {
-                showToast('No calendars found. Please check your Google Calendar access.', 'warning');
-                setIsLoading(false);
-                return;
-            }
-
+            // Save minimal calendar settings
             const settings: CalendarSettings = {
                 email: authResult.email,
-                calendars: cals,
-                bookingCalendarId: cals.find(c => c.selected)?.id || cals[0]?.id || 'primary',
+                calendars: [], // Not needed for backend integration
+                bookingCalendarId: 'primary',
                 appointmentDuration: 30
             };
             setCalendarSettings(settings);
             setTenantConfig(prev => ({ ...prev, isConnected: true, bookingPlatform: 'GOOGLE_CALENDAR' }));
-            setAvailableCalendars(cals);
 
             // Save calendar connection to database for backend API
             if (userId) {
@@ -77,7 +46,7 @@ export const Integrations = () => {
                         access_token: authResult.access_token,
                         refresh_token: authResult.refresh_token || null,
                         token_expires_at: new Date(authResult.expires_at).toISOString(),
-                        calendar_id: settings.bookingCalendarId,
+                        calendar_id: 'primary',
                         is_active: true
                     }, { onConflict: 'user_id,provider' });
 
@@ -86,10 +55,11 @@ export const Integrations = () => {
                     showToast('⚠️ Calendar connected but backend sync failed. Please reconnect.', 'warning');
                 } else {
                     console.log('✅ Calendar connection saved to database');
+                    showToast(`✅ Successfully connected to Google Calendar as ${authResult.email}`, 'success');
                 }
+            } else {
+                showToast(`✅ Connected as ${authResult.email}`, 'success');
             }
-
-            showToast(`✅ Successfully connected to Google Calendar as ${authResult.email}`, 'success');
         } catch (err: any) {
             console.error("Calendar auth failed", err);
             showToast(err.message || 'Failed to connect to Google Calendar. Please try again.', 'error');
@@ -156,7 +126,7 @@ export const Integrations = () => {
                     )}
                 </div>
 
-                {tenantConfig.isConnected && calendarSettings && calendarSettings.calendars.length > 0 && (
+                {/* Calendar selection removed - backend uses primary calendar */
                     <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-12 text-left">
                         {/* Conflict Checking Section */}
                         <div className="space-y-6">
