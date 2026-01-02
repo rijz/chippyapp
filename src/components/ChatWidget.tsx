@@ -169,7 +169,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     }
   }, [widgetConfig.leadCaptureMode, hasLeadFields]);
 
-  const initChat = async (userData?: typeof leadData): Promise<any> => {
+  const initChat = async (userData?: typeof leadData, overrideSlots?: string): Promise<any> => {
     let structuredInfo = "Standard business hours apply.";
     let correctionsInfo = "";
 
@@ -227,6 +227,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     const systemInstruction = `
       You are an intelligent booking agent for "${tenantConfig.companyName}".
       
+      CURRENT DATE AND TIME:
+      Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
+      Current time is ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}.
+      
       ${userInfoContext}
 
       KNOWLEDGE BASE:
@@ -244,8 +248,8 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       YOUR GOAL:
       Convert inquiries to bookings quickly and helpfully.
       
-      ${availableSlots ? `🗓️ REAL-TIME AVAILABLE SLOTS:
-${availableSlots}
+      ${(overrideSlots || availableSlots) ? `🗓️ REAL-TIME AVAILABLE SLOTS:
+${overrideSlots || availableSlots}
 
 **CRITICAL**: When user asks about availability, immediately show these slots. These are REAL available times from the calendar.
 When user picks a time from the list, confirm: "Perfect! I've booked you for [TIME]. Confirmation email coming shortly."
@@ -404,7 +408,7 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
         setAvailableSlots(slots.join('\n'));
 
         // Reinitialize chat with updated slots and USE the returned session
-        const newSession = await initChat();
+        const newSession = await initChat(undefined, slots.join('\n'));
         if (newSession) {
           sessionToUse = newSession;
           console.log('[ChatWidget] Using new session with slots for this message');

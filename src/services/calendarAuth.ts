@@ -99,69 +99,39 @@ function initializeTokenClient() {
 
 // --- 4. Trigger Sign In ---
 // --- 4. Trigger Sign In ---
-export const handleAuthClick = (): Promise<{
-    email: string;
-    access_token: string;
-    refresh_token?: string;
-    expires_at: number;
-}> => {
+// --- 4. Trigger Sign In (Code Flow for Backend) ---
+export const handleAuthClick = (): Promise<{ code: string }> => {
     return new Promise((resolve, reject) => {
-        // MOCK MODE: If keys are missing, simulate login for demo purposes
+        // MOCK MODE
         if (!CLIENT_ID || !API_KEY) {
             console.warn("Google Credentials missing. Using MOCK MODE.");
-            // Simulate network delay
             setTimeout(() => {
-                resolve({
-                    email: "demo@chippy.ai",
-                    access_token: "mock_access_token",
-                    expires_at: Date.now() + 3600 * 1000
-                });
+                resolve({ code: "mock_auth_code" });
             }, 1000);
             return;
         }
 
-        // If not initialized, try one more time before failing
-        if (!tokenClient || !gapiInited) {
+        if (!google || !google.accounts || !google.accounts.oauth2) {
             console.error("Google Auth not fully initialized.");
             alert("Auth system is still loading. Please wait a moment and try again.");
             reject(new Error("Auth not initialized"));
             return;
         }
 
-        tokenClient.callback = async (resp: any) => {
-            if (resp.error) {
-                console.error("Auth Error:", resp);
-                reject(resp);
-                return;
-            }
+        const codeClient = google.accounts.oauth2.initCodeClient({
+            client_id: CLIENT_ID,
+            scope: SCOPES,
+            ux_mode: 'popup',
+            callback: (response: any) => {
+                if (response.code) {
+                    resolve({ code: response.code });
+                } else {
+                    reject(response);
+                }
+            },
+        });
 
-            try {
-                // Get email from calendar list
-                const response = await gapi.client.calendar.calendarList.list();
-                const primaryCal = response.result.items.find((c: any) => c.primary);
-                const email = primaryCal ? primaryCal.id : "Authenticated User";
-
-                // Get token info
-                const token = gapi.client.getToken();
-
-                resolve({
-                    email,
-                    access_token: token.access_token,
-                    refresh_token: resp.refresh_token, // May be undefined on repeat auth
-                    expires_at: token.expires_in ? Date.now() + (token.expires_in * 1000) : Date.now() + 3600000
-                });
-            } catch (error) {
-                console.error("Error fetching profile", error);
-                reject(error);
-            }
-        };
-
-        if (gapi.client.getToken() === null) {
-            // First time: request both access and refresh tokens
-            tokenClient.requestAccessToken({ prompt: 'consent' });
-        } else {
-            tokenClient.requestAccessToken({ prompt: '' });
-        }
+        codeClient.requestCode();
     });
 };
 

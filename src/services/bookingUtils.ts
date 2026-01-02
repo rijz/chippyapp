@@ -50,43 +50,64 @@ export const parseBookingConfirmation = (aiResponse: string): ParsedBookingInten
  */
 const parseDateTimeFromText = (text: string): Date | undefined => {
     const now = new Date();
+    let targetDate = new Date(now);
+    let dateFound = false;
 
-    // Check for "tomorrow"
-    if (/tomorrow/i.test(text)) {
-        const tomorrow = new Date(now);
-        tomorrow.setDate(now.getDate() + 1);
+    // 1. Check for specific dates like "January 5" or "Jan 5"
+    const dateMatch = text.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?/i);
+    if (dateMatch) {
+        const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+        const monthStr = dateMatch[0].split(' ')[0].substring(0, 3).toLowerCase();
+        const monthIndex = months.indexOf(monthStr);
+        const day = parseInt(dateMatch[1]);
 
-        // Extract time
-        const timeMatch = text.match(/(\d{1,2})\s*(?::(\d{2}))?\s*(AM|PM)/i);
-        if (timeMatch) {
-            let hours = parseInt(timeMatch[1]);
-            const minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
-            const isPM = timeMatch[3].toUpperCase() === 'PM';
+        targetDate.setMonth(monthIndex);
+        targetDate.setDate(day);
 
-            if (isPM && hours !== 12) hours += 12;
-            if (!isPM && hours === 12) hours = 0;
+        // Handle year wrap-around (e.g. booking in Dec for Jan)
+        if (targetDate < now && (now.getMonth() > monthIndex + 6)) {
+            targetDate.setFullYear(now.getFullYear() + 1);
+        }
+        dateFound = true;
+    }
 
-            tomorrow.setHours(hours, minutes, 0, 0);
-            return tomorrow;
+    // 2. Check for relative days "Monday", "Tuesday", etc. IF specific date wasn't found
+    if (!dateFound) {
+        const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const dayMatch = text.match(/(?:next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i);
+
+        if (dayMatch) {
+            const targetDay = days.indexOf(dayMatch[1].toLowerCase());
+            const currentDay = now.getDay();
+            let daysToAdd = targetDay - currentDay;
+            if (daysToAdd <= 0) daysToAdd += 7; // Move to next instance
+            // If "next Monday" usually means the one after the coming one, but mostly users mean "coming Monday".
+            // Let's stick to "coming Monday".
+
+            targetDate.setDate(now.getDate() + daysToAdd);
+            dateFound = true;
+        } else if (/tomorrow/i.test(text)) {
+            targetDate.setDate(now.getDate() + 1);
+            dateFound = true;
+        } else if (/today/i.test(text)) {
+            dateFound = true; // already set to now
         }
     }
 
-    // Check for "today"
-    if (/today/i.test(text)) {
-        const today = new Date(now);
+    if (!dateFound) return undefined;
 
-        const timeMatch = text.match(/(\d{1,2})\s*(?::(\d{2}))?\s*(AM|PM)/i);
-        if (timeMatch) {
-            let hours = parseInt(timeMatch[1]);
-            const minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
-            const isPM = timeMatch[3].toUpperCase() === 'PM';
+    // 3. Extract time (e.g. 10:00 AM, 5 PM)
+    const timeMatch = text.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM|am|pm)/i);
+    if (timeMatch) {
+        let hours = parseInt(timeMatch[1]);
+        const minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+        const isPM = timeMatch[3].toUpperCase() === 'PM';
 
-            if (isPM && hours !== 12) hours += 12;
-            if (!isPM && hours === 12) hours = 0;
+        if (isPM && hours !== 12) hours += 12;
+        if (!isPM && hours === 12) hours = 0;
 
-            today.setHours(hours, minutes, 0, 0);
-            return today;
-        }
+        targetDate.setHours(hours, minutes, 0, 0);
+        return targetDate;
     }
 
     return undefined;

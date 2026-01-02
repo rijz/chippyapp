@@ -477,9 +477,13 @@ async function getCalendarConnection(userId, provider = 'google') {
 
   if (expiresAt < now) {
     console.log(`[Calendar] Token expired for user ${userId}, refreshing...`);
+    console.log(`[Calendar] Using Client ID: ${process.env.VITE_GOOGLE_CLIENT_ID?.substring(0, 10)}...`);
+    console.log(`[Calendar] Using Client Secret: ${process.env.GOOGLE_CLIENT_SECRET ? (process.env.GOOGLE_CLIENT_SECRET.startsWith('GOCSPX') ? 'Valid Format (GOCSPX...)' : 'INVALID FORMAT (' + process.env.GOOGLE_CLIENT_SECRET.substring(0, 5) + '...)') : 'MISSING'}`);
 
     try {
       const { access_token, expires_at } = await refreshGoogleToken(connection.refresh_token);
+
+      console.log('[Calendar] Token refreshed successfully');
 
       // Update token in database
       await supabaseAdmin
@@ -494,7 +498,8 @@ async function getCalendarConnection(userId, provider = 'google') {
       connection.access_token = access_token;
       connection.token_expires_at = expires_at;
     } catch (refreshError) {
-      console.error('[Calendar] Token refresh failed:', refreshError);
+      console.error('[Calendar] Token refresh failed:', refreshError.message);
+      // Don't throw immediately, try with existing token just in case (though likely will fail)
       throw new Error('Calendar connection expired. Please reconnect.');
     }
   } else {
@@ -517,10 +522,13 @@ app.post('/api/calendar/availability', async (req, res) => {
     const { userId, startTime, endTime, provider = 'google' } = req.body;
 
     if (!userId || !startTime || !endTime) {
+      console.log('[API] Missing fields:', { userId, startTime, endTime });
       return res.status(400).json({
         error: 'Missing required fields: userId, startTime, endTime'
       });
     }
+
+    console.log(`[API] Checking availability for user ${userId} from ${startTime} to ${endTime}`);
 
     // Get calendar connection
     const connection = await getCalendarConnection(userId, provider);
@@ -660,6 +668,59 @@ app.post('/api/calendar/create-event', async (req, res) => {
     console.error('[API] Calendar event creation error:', error);
     res.status(500).json({
       error: error.message || 'Failed to create calendar event'
+    });
+  }
+});
+
+/**
+ * POST /api/calendar/connect
+ * Exchange auth code for tokens (Authorization Code Flow)
+ */
+app.post('/api/calendar/connect', async (req, res) => {
+  try {
+    const { code, userId } = req.body;
+
+    if (!code || !userId) {
+      return res.status(400).json({ error: 'Missing required fields: code, userId' });
+    }
+
+    // Exchange code for tokens
+    const { tokens } = await oauth2Client.getToken(code);
+
+    // Set credentials in client to verify they work
+    oauth2Client.setCredentials(tokens);
+
+    // Get user's email to store
+    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+    const userInfo = await oauth2.userinfo.get();
+    const email = userInfo.data.email;
+
+    // Save connection to database
+    const { error } = await supabaseAdmin
+      .from('calendar_connections')
+      .upsert({
+        user_id: userId,
+        provider: 'google',
+        provider_email: email,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token, // This is crucial!
+        token_expires_at: new Date(tokens.expiry_date).toISOString(),
+        calendar_id: 'primary',
+        is_active: true,
+        connected_at: new Date().toISOString()
+      }, { onConflict: 'user_id,provider' });
+
+    if (error) {
+      console.error('[API] Database error saving connection:', error);
+      throw error;
+    }
+
+    res.json({ success: true, email: email });
+
+  } catch (error) {
+    console.error('[API] Auth code exchange error:', error);
+    res.status(500).json({
+      error: 'Failed to connect calendar. ' + error.message
     });
   }
 });

@@ -22,58 +22,74 @@ export const Integrations = () => {
     const handleConnectCalendar = async () => {
         setIsLoading(true);
         try {
-            const authResult = await handleAuthClick();
+            // Get Auth Code (Code Flow)
+            const { code } = await handleAuthClick();
 
-            // Save minimal calendar settings
-            const settings: CalendarSettings = {
-                email: authResult.email,
-                calendars: [], // Not needed for backend integration
-                bookingCalendarId: 'primary',
-                appointmentDuration: 30
-            };
-            setCalendarSettings(settings);
-            setTenantConfig(prev => ({ ...prev, isConnected: true, bookingPlatform: 'GOOGLE_CALENDAR' }));
-
-            // Save calendar connection to database for backend API
             if (userId) {
-                const { supabase } = await import('../services/supabaseClient');
-                const { error: dbError } = await supabase
-                    .from('calendar_connections')
-                    .upsert({
-                        user_id: userId,
-                        provider: 'google',
-                        provider_email: authResult.email,
-                        access_token: authResult.access_token,
-                        refresh_token: authResult.refresh_token || null,
-                        token_expires_at: new Date(authResult.expires_at).toISOString(),
-                        calendar_id: 'primary',
-                        is_active: true
-                    }, { onConflict: 'user_id,provider' });
+                // Exchange code for tokens via backend
+                const response = await fetch('/api/calendar/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, userId })
+                });
 
-                if (dbError) {
-                    console.error('Failed to save calendar connection:', dbError);
-                    showToast('⚠️ Calendar connected but backend sync failed. Please reconnect.', 'warning');
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    // Update local state
+                    const settings: CalendarSettings = {
+                        email: result.email,
+                        calendars: [],
+                        bookingCalendarId: 'primary',
+                        appointmentDuration: 30
+                    };
+                    setCalendarSettings(settings);
+                    setTenantConfig(prev => ({ ...prev, isConnected: true, bookingPlatform: 'GOOGLE_CALENDAR' }));
+
+                    showToast(`✅ Connected to Google Calendar of ${result.email}`, 'success');
                 } else {
-                    console.log('✅ Calendar connection saved to database');
-                    showToast(`✅ Successfully connected to Google Calendar as ${authResult.email}`, 'success');
+                    console.error('Backend connection failed:', result.error);
+                    showToast('❌ Failed to connect calendar: ' + (result.error || 'Unknown error'), 'error');
                 }
             } else {
-                showToast(`✅ Connected as ${authResult.email}`, 'success');
+                showToast('⚠️ Please sign in to save connection', 'warning');
             }
         } catch (err: any) {
-            console.error("Calendar auth failed", err);
-            showToast(err.message || 'Failed to connect to Google Calendar. Please try again.', 'error');
+            console.error('Connection error:', err);
+            showToast('❌ Connection canceled or failed', 'error');
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleDisconnect = () => {
+
+    const handleDisconnect = async () => {
         if (confirm("Are you sure you want to disconnect Google Calendar?")) {
-            handleSignOut();
-            setTenantConfig(prev => ({ ...prev, isConnected: false, bookingPlatform: null }));
-            // We keep the settings in memory/db usually, but here we can keep them or clear them.
-            // Let's clear the active connection flag primarily.
+            try {
+                // Delete from database if userId exists
+                if (userId) {
+                    const { supabase } = await import('../services/supabaseClient');
+                    const { error } = await supabase
+                        .from('calendar_connections')
+                        .delete()
+                        .eq('user_id', userId)
+                        .eq('provider', 'google');
+
+                    if (error) {
+                        console.error('Failed to delete calendar connection:', error);
+                        showToast('⚠️ Failed to disconnect calendar from database', 'error');
+                        return;
+                    }
+                }
+
+                // Update local state
+                setTenantConfig(prev => ({ ...prev, isConnected: false, bookingPlatform: null }));
+                setCalendarSettings(null);
+                showToast('✅ Calendar disconnected successfully', 'success');
+            } catch (err) {
+                console.error('Disconnect error:', err);
+                showToast('❌ Failed to disconnect calendar', 'error');
+            }
         }
     };
 
