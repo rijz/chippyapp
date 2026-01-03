@@ -26,6 +26,14 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 );
 
+// Initialize Google OAuth2 Client (for Calendar connection)
+import { google } from 'googleapis';
+const oauth2Client = new google.auth.OAuth2(
+  process.env.VITE_GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  'postmessage'
+);
+
 // Webhook needs raw body
 app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -686,6 +694,7 @@ app.post('/api/calendar/connect', async (req, res) => {
 
     // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
+    console.log('[API] OAuth Tokens received:', Object.keys(tokens)); // Debug log
 
     // Set credentials in client to verify they work
     oauth2Client.setCredentials(tokens);
@@ -721,6 +730,172 @@ app.post('/api/calendar/connect', async (req, res) => {
     console.error('[API] Auth code exchange error:', error);
     res.status(500).json({
       error: 'Failed to connect calendar. ' + error.message
+    });
+  }
+});
+
+/**
+ * POST /api/calendar/cancel-event
+ * Cancel an existing calendar event
+ */
+app.post('/api/calendar/cancel-event', async (req, res) => {
+  try {
+    const { userId, eventId, customerEmail, reason, provider = 'google' } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing required field: userId' });
+    }
+
+    const connection = await getCalendarConnection(userId, provider);
+
+    if (!connection) {
+      return res.status(400).json({
+        error: 'No calendar connected. Please connect your calendar first.'
+      });
+    }
+
+    if (provider === 'google') {
+      const calendar = google.calendar({ version: 'v3' });
+      const auth = new google.auth.OAuth2();
+      auth.setCredentials({ access_token: connection.access_token });
+
+      // If we have eventId, delete directly
+      if (eventId) {
+        await calendar.events.delete({
+          auth,
+          calendarId: connection.calendar_id || 'primary',
+          eventId: eventId
+        });
+      } else if (customerEmail) {
+        // Find event by attendee email (last 30 days)
+        const now = new Date();
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+        const events = await calendar.events.list({
+          auth,
+          calendarId: connection.calendar_id || 'primary',
+          timeMin: thirtyDaysAgo.toISOString(),
+          q: customerEmail,
+          singleEvents: true
+        });
+
+        const matchingEvent = events.data.items?.find(e =>
+          e.attendees?.some(a => a.email === customerEmail)
+        );
+
+        if (matchingEvent) {
+          await calendar.events.delete({
+            auth,
+            calendarId: connection.calendar_id || 'primary',
+            eventId: matchingEvent.id
+          });
+        } else {
+          return res.status(404).json({ error: 'No matching appointment found for this email' });
+        }
+      } else {
+        return res.status(400).json({ error: 'Please provide eventId or customerEmail to identify the appointment' });
+      }
+
+      res.json({ success: true, message: 'Appointment cancelled successfully' });
+    } else {
+      res.status(400).json({ error: `Provider '${provider}' not yet supported` });
+    }
+
+  } catch (error) {
+    console.error('[API] Cancel event error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to cancel appointment'
+    });
+  }
+});
+
+/**
+ * POST /api/calendar/reschedule-event
+ * Reschedule an existing calendar event
+ */
+app.post('/api/calendar/reschedule-event', async (req, res) => {
+  try {
+    const { userId, eventId, customerEmail, newStartTime, provider = 'google' } = req.body;
+
+    if (!userId || !newStartTime) {
+      return res.status(400).json({ error: 'Missing required fields: userId, newStartTime' });
+    }
+
+    const connection = await getCalendarConnection(userId, provider);
+
+    if (!connection) {
+      return res.status(400).json({
+        error: 'No calendar connected. Please connect your calendar first.'
+      });
+    }
+
+    if (provider === 'google') {
+      const calendar = google.calendar({ version: 'v3' });
+      const auth = new google.auth.OAuth2();
+      auth.setCredentials({ access_token: connection.access_token });
+
+      let targetEventId = eventId;
+
+      // Find event by email if no ID provided
+      if (!targetEventId && customerEmail) {
+        const now = new Date();
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+        const events = await calendar.events.list({
+          auth,
+          calendarId: connection.calendar_id || 'primary',
+          timeMin: thirtyDaysAgo.toISOString(),
+          q: customerEmail,
+          singleEvents: true
+        });
+
+        const matchingEvent = events.data.items?.find(e =>
+          e.attendees?.some(a => a.email === customerEmail)
+        );
+
+        if (matchingEvent) {
+          targetEventId = matchingEvent.id;
+        }
+      }
+
+      if (!targetEventId) {
+        return res.status(404).json({ error: 'No matching appointment found' });
+      }
+
+      // Get original event to preserve duration
+      const originalEvent = await calendar.events.get({
+        auth,
+        calendarId: connection.calendar_id || 'primary',
+        eventId: targetEventId
+      });
+
+      const originalStart = new Date(originalEvent.data.start.dateTime);
+      const originalEnd = new Date(originalEvent.data.end.dateTime);
+      const duration = originalEnd.getTime() - originalStart.getTime();
+
+      const newStart = new Date(newStartTime);
+      const newEnd = new Date(newStart.getTime() + duration);
+
+      // Update the event
+      await calendar.events.patch({
+        auth,
+        calendarId: connection.calendar_id || 'primary',
+        eventId: targetEventId,
+        requestBody: {
+          start: { dateTime: newStart.toISOString(), timeZone: 'America/New_York' },
+          end: { dateTime: newEnd.toISOString(), timeZone: 'America/New_York' }
+        }
+      });
+
+      res.json({ success: true, message: 'Appointment rescheduled successfully' });
+    } else {
+      res.status(400).json({ error: `Provider '${provider}' not yet supported` });
+    }
+
+  } catch (error) {
+    console.error('[API] Reschedule event error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to reschedule appointment'
     });
   }
 });

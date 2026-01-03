@@ -14,8 +14,8 @@ declare var google: any;
 const CLIENT_ID = getEnv('VITE_GOOGLE_CLIENT_ID');
 const API_KEY = getEnv('VITE_GOOGLE_API_KEY');
 
-// Scopes required: Read/Write events, Read Calendar Lists
-const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly';
+// Scopes required: Read/Write events, Read Calendar Lists, User Email
+const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/userinfo.email';
 
 let tokenClient: any;
 let gapiInited = false;

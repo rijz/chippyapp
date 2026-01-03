@@ -16,13 +16,17 @@ const apiKey = getEnv('VITE_GEMINI_API_KEY');
 console.log('[GeminiService] Using proxy for chat:', USE_PROXY);
 const genAI = new GoogleGenerativeAI(apiKey || '');
 
-// Custom chat session implementation for proxy mode
+// Custom chat session implementation for proxy mode with Function Calling support
 class ProxyChatSession {
   public history: any[] = []; // Made public to allow history restoration
   private systemInstruction: string;
+  private tools: any[] = [];
+  private toolExecutor?: (name: string, args: any) => Promise<any>;
 
-  constructor(systemInstruction: string) {
+  constructor(systemInstruction: string, tools?: any[], toolExecutor?: (name: string, args: any) => Promise<any>) {
     this.systemInstruction = systemInstruction;
+    this.tools = tools || [];
+    this.toolExecutor = toolExecutor;
   }
 
   /**
@@ -35,44 +39,102 @@ class ProxyChatSession {
     }));
   }
 
-  async sendMessage(userMessage: string) {
+  async sendMessage(userMessage: string): Promise<{ response: { text: () => string } }> {
     this.history.push({
       role: 'user',
       parts: [{ text: userMessage }]
     });
 
-    const response = await fetch('/api-proxy/v1beta/models/gemini-2.0-flash:generateContent', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    // Build request with tools if available
+    const requestBody: any = {
+      system_instruction: {
+        parts: [{ text: this.systemInstruction }]
       },
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: this.systemInstruction }]
-        },
-        contents: this.history,
-        generationConfig: {
-          temperature: 0.7,
-        }
-      })
-    });
+      contents: this.history,
+      generationConfig: {
+        temperature: 0.7,
+      }
+    };
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to generate response');
+    // Add tools if defined
+    if (this.tools.length > 0) {
+      requestBody.tools = this.tools;
     }
 
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'I encountered an error. Please try again.';
+    let finalText = '';
+    let maxIterations = 5; // Prevent infinite loops
 
-    this.history.push({
-      role: 'model',
-      parts: [{ text }]
-    });
+    while (maxIterations > 0) {
+      maxIterations--;
+
+      const response = await fetch('/api-proxy/v1beta/models/gemini-2.0-flash:generateContent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to generate response');
+      }
+
+      const data = await response.json();
+      const candidate = data.candidates?.[0];
+      const content = candidate?.content;
+
+      if (!content || !content.parts || content.parts.length === 0) {
+        finalText = 'I encountered an error. Please try again.';
+        break;
+      }
+
+      // Check if the response contains a function call
+      const functionCallPart = content.parts.find((p: any) => p.functionCall);
+
+      if (functionCallPart && this.toolExecutor) {
+        const { name, args } = functionCallPart.functionCall;
+        console.log(`[ProxyChatSession] Executing tool: ${name}`, args);
+
+        // Execute the tool
+        const toolResult = await this.toolExecutor(name, args);
+        console.log(`[ProxyChatSession] Tool result:`, toolResult);
+
+        // Add the model's function call to history
+        this.history.push({
+          role: 'model',
+          parts: [{ functionCall: { name, args } }]
+        });
+
+        // Add the function response to history
+        this.history.push({
+          role: 'function',
+          parts: [{
+            functionResponse: {
+              name,
+              response: toolResult
+            }
+          }]
+        });
+
+        // Update request body with new history for next iteration
+        requestBody.contents = this.history;
+
+      } else {
+        // Regular text response - we're done
+        finalText = content.parts.map((p: any) => p.text || '').join('');
+
+        this.history.push({
+          role: 'model',
+          parts: [{ text: finalText }]
+        });
+        break;
+      }
+    }
 
     return {
       response: {
-        text: () => text
+        text: () => finalText
       }
     };
   }
@@ -83,11 +145,13 @@ class ProxyChatSession {
  * This is the "Brain" of Chippy.
  */
 export const createAgentSession = async (
-  systemInstruction: string
+  systemInstruction: string,
+  tools?: any[],
+  toolExecutor?: (name: string, args: any) => Promise<any>
 ): Promise<any> => {
   // Use proxy in production, direct SDK in development
   if (USE_PROXY) {
-    return new ProxyChatSession(systemInstruction);
+    return new ProxyChatSession(systemInstruction, tools, toolExecutor);
   }
 
   if (!genAI) {

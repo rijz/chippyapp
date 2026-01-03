@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Sparkles, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
 import { Message, TenantConfig, WidgetConfig } from '../types';
 import { createAgentSession, analyzeInteraction } from '../services/geminiService';
-import { parseBookingConfirmation } from '../services/bookingUtils';
+import { CALENDAR_TOOLS, executeCalendarTool, ToolContext } from '../services/calendarTools';
 import { ChatSession } from '@google/generative-ai';
 
 // Simple Markdown renderer for chat messages
@@ -50,9 +50,19 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
   const [availableSlots, setAvailableSlots] = useState<string>('');
   const [statusMessage, setStatusMessage] = useState<string>(''); // For showing "Checking calendar..." etc.
+  const [clickableSlots, setClickableSlots] = useState<string[]>([]); // Slots user can click to book
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+
+  // Rotating placeholder messages
+  const placeholderMessages = [
+    "Ask about availability...",
+    "Book an appointment...",
+    "What services do you offer?",
+    "What are your hours?",
+    "Tell me about pricing..."
+  ];
 
   // UX Enhancement States
-  const [showSuggestedQuestions, setShowSuggestedQuestions] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('chatSoundEnabled') !== 'false');
   const [sessionId] = useState(() => localStorage.getItem('chatSessionId') || `session_${Date.now()}`);
   // Removed: isCalendarConnected and pendingBooking - no longer needed with backend API
@@ -67,6 +77,14 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
   const hasLeadFields = widgetConfig.contactFields.name !== 'hidden' ||
     widgetConfig.contactFields.email !== 'hidden' ||
     widgetConfig.contactFields.phone !== 'hidden';
+
+  // Rotate placeholder messages every 3 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPlaceholderIndex(prev => prev + 1);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Sound notification function
   const playNotificationSound = () => {
@@ -128,7 +146,6 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
         // Limit to last 50 messages
         const limitedMessages = parsed.slice(-50);
         setMessages(limitedMessages);
-        setShowSuggestedQuestions(limitedMessages.length <= 1); // Hide if conversation exists
         return;
       } catch (e) {
         console.error('Failed to parse saved messages:', e);
@@ -239,27 +256,70 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
       ${correctionsInfo}
       
       CONTACT COLLECTION RULES:
-      ${userInfoContext ? `✅ You ALREADY HAVE the customer's contact information (see CUSTOMER INFO section above). DO NOT ask for their name, email, or phone again.` : `Collect contact info ONLY when booking:
+      ${userInfoContext ? `✅ You ALREADY HAVE the customer's contact information (see CUSTOMER INFO section above). DO NOT ask for their name, email, or phone again.` : `Collect contact info when booking:
 ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No details required."}
-      - Be conversational. Ask ONLY when booking is confirmed.
-      - REQUIRED fields must be collected before confirming.
-      - OPTIONAL fields: ask once, proceed if user declines.`}
+      - Be conversational. Ask for contact info before confirming booking.
+      - REQUIRED fields must be collected before calling book_appointment.`}
 
-      YOUR GOAL:
-      Convert inquiries to bookings quickly and helpfully.
+      ⚠️ CRITICAL - CALENDAR TOOL REQUIREMENTS:
+      You MUST use these tools. Do NOT recite times from memory. Do NOT make up availability.
       
-      ${(overrideSlots || availableSlots) ? `🗓️ REAL-TIME AVAILABLE SLOTS:
-${overrideSlots || availableSlots}
+      MANDATORY TOOL USAGE:
+      - When user asks about availability, times, or slots → ALWAYS call get_available_slots first
+      - When booking is confirmed → ALWAYS call book_appointment  
+      - When canceling → ALWAYS call cancel_appointment
+      - When rescheduling → ALWAYS call reschedule_appointment
+      
+      NEVER list times without first calling get_available_slots. This is NON-NEGOTIABLE.
 
-**CRITICAL**: When user asks about availability, immediately show these slots. These are REAL available times from the calendar.
-When user picks a time from the list, confirm: "Perfect! I've booked you for [TIME]. Confirmation email coming shortly."
-` : `⚠️ No slots loaded. When user asks about availability, ask their preferred date/time first.`}
-      Keep responses concise and professional.
-      Use Markdown formatting(bullet points, bold text).
+      📅 DATE VERIFICATION (CRITICAL):
+      Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}.
       
-      Do not make up services that are not in the knowledge base.
+      ACTUAL DAY-OF-WEEK REFERENCE (use this!):
+      - January 3, 2026 = Saturday
+      - January 4, 2026 = Sunday  
+      - January 5, 2026 = Monday
+      - January 6, 2026 = Tuesday
+      - January 7, 2026 = Wednesday
+      
+      If user says something like "Monday 6th" - that's WRONG (6th is Tuesday).
+      You MUST ask: "Just to confirm, January 6th is actually a Tuesday. Did you mean Monday January 5th, or Tuesday January 6th?"
+      
+      SLOT SELECTION:
+      When get_available_slots returns, present the slots clearly. Users will see clickable buttons.
+      When user picks a time, call book_appointment with that datetime.
+
+      Keep responses concise. Use Markdown formatting.
+      Do not make up services not in the knowledge base.
     `;
-    const session = await createAgentSession(systemInstruction);
+
+    // Create tool executor with context
+    const toolContext: ToolContext = {
+      userId: tenantConfig.userId,
+      timezone: 'America/New_York',
+      companyName: tenantConfig.companyName
+    };
+
+    const toolExecutor = async (name: string, args: any) => {
+      console.log('[ChatWidget] Tool called:', name, args);
+      setStatusMessage(`🔄 ${name.replace(/_/g, ' ')}...`);
+      const result = await executeCalendarTool(name, args, toolContext);
+      setStatusMessage('');
+
+      // Capture available slots for clickable UI
+      if (name === 'get_available_slots' && result.success && result.data?.slots) {
+        setClickableSlots(result.data.slots);
+      }
+
+      // Clear slots when booking is made
+      if (name === 'book_appointment' && result.success) {
+        setClickableSlots([]);
+      }
+
+      return result;
+    };
+
+    const session = await createAgentSession(systemInstruction, [CALENDAR_TOOLS], toolExecutor);
 
     // Restore previous conversation history if it exists
     const savedMessages = localStorage.getItem(`chatMessages_${sessionId}`);
@@ -330,10 +390,7 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
 
     const currentText = sanitizedText;
 
-    // Hide suggested questions after first message
-    if (showSuggestedQuestions) {
-      setShowSuggestedQuestions(false);
-    }
+
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -459,53 +516,8 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
         }
       });
 
-      // Check if AI confirmed a booking and create actual calendar event
-      const bookingIntent = parseBookingConfirmation(responseText);
-      if (bookingIntent.hasIntent && bookingIntent.datetime && leadData.name && leadData.email) {
-        console.log('[ChatWidget] Booking confirmed detected, creating calendar event...', bookingIntent);
-
-        try {
-          // Create booking via backend API using owner's calendar
-          const response = await fetch('/api/calendar/create-event', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: tenantConfig.userId, // Owner's user ID
-              summary: `Appointment with ${leadData.name}`,
-              description: `Contact: ${leadData.email}${leadData.phone ? ` | ${leadData.phone}` : ''}\n\nBooked via Chippy AI Chat`,
-              startTime: bookingIntent.datetime.toISOString(),
-              endTime: new Date(bookingIntent.datetime.getTime() + 60 * 60 * 1000).toISOString(), // 1 hour default
-              attendees: [leadData.email],
-              timezone: 'America/New_York',
-              provider: 'google'
-            })
-          });
-
-          const result = await response.json();
-
-          if (result.success) {
-            console.log('[ChatWidget] Booking created successfully:', result.eventId);
-            const confirmMsg: Message = {
-              id: `confirm_${Date.now()}`,
-              role: 'model',
-              text: `✅ **Booking Confirmed!** Your appointment has been added to the calendar. You'll receive a confirmation email at ${leadData.email}.`,
-              timestamp: new Date()
-            };
-            setMessages(prev => [...prev, confirmMsg]);
-          } else {
-            console.error('[ChatWidget] Booking failed:', result.error);
-            const errorMsg: Message = {
-              id: `error_${Date.now()}`,
-              role: 'model',
-              text: `⚠️ There was an issue creating your booking. Please contact us directly to schedule.`,
-              timestamp: new Date()
-            };
-            setMessages(prev => [...prev, errorMsg]);
-          }
-        } catch (error) {
-          console.error('[ChatWidget] Booking API error:', error);
-        }
-      }
+      // Note: Calendar booking is now handled via Gemini Function Calling
+      // The AI calls book_appointment directly through the tool executor
 
     } catch (error) {
       console.error("Chat error", error);
@@ -660,26 +672,7 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
             ) : (
               <>
                 <div className="flex-1 p-4 space-y-4">
-                  {/* Suggested Questions */}
-                  {showSuggestedQuestions && messages.length <= 1 && (
-                    <div className="space-y-2">
-                      <p className="text-xs text-slate-500 font-medium">Suggested questions:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {suggestedQuestions.map((question, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => {
-                              setInputText(question);
-                              handleSend();
-                            }}
-                            className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-full hover:border-chippy-coral hover:bg-chippy-coral/5 transition-all shadow-sm"
-                          >
-                            {question}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+
 
                   {messages.map((msg) => (
                     <div key={msg.id}>
@@ -719,6 +712,36 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
                     </div>
                   )}
 
+                  {/* Clickable Time Slots - Show when slots are available */}
+                  {clickableSlots.length > 0 && !isLoading && (
+                    <div className="space-y-2 p-3 bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl">
+                      <p className="text-xs font-semibold text-green-700 flex items-center gap-1">
+                        <span>🗓️</span> Click a time to book:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {clickableSlots.slice(0, 8).map((slot, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => {
+                              // Send the slot selection to the AI
+                              setInputText(`I'd like to book the ${slot} slot`);
+                              setClickableSlots([]); // Clear slots
+                              setTimeout(() => handleSend(), 100);
+                            }}
+                            className="px-3 py-2 text-xs bg-white border border-green-300 text-green-700 rounded-lg hover:bg-green-50 hover:border-green-400 hover:shadow-md transition-all font-medium"
+                          >
+                            {slot}
+                          </button>
+                        ))}
+                      </div>
+                      {clickableSlots.length > 8 && (
+                        <p className="text-[10px] text-green-600 mt-1">
+                          + {clickableSlots.length - 8} more slots available
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {isLoading && (
                     <div className="flex justify-start">
                       <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm">
@@ -745,7 +768,7 @@ When user picks a time from the list, confirm: "Perfect! I've booked you for [TI
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                      placeholder="Type a message..."
+                      placeholder={placeholderMessages[placeholderIndex % placeholderMessages.length]}
                       className="bg-transparent flex-1 outline-none text-sm text-slate-700 placeholder-slate-400"
                     />
                     <button onClick={handleSend} disabled={isLoading || !inputText.trim() || !chatSession} className="hover:opacity-80 disabled:opacity-50" style={{ color: widgetConfig.color }}>
