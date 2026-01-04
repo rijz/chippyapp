@@ -38,10 +38,11 @@ interface ChatWidgetProps {
   onInteraction?: (query: string, response: string, analysis: any) => void;
   onSessionUpdate?: (messages: Message[]) => void;
   onLeadCapture?: (leadData: { name: string; email: string; phone: string }) => void;
+  onBookingComplete?: (customerEmail: string) => void;
   showPoweredBy?: boolean; // Show "Powered by Chippy" badge for free users
 }
 
-export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture, showPoweredBy = false }) => {
+export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture, onBookingComplete, showPoweredBy = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showLeadForm, setShowLeadForm] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -321,6 +322,10 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       // Clear slots when booking is made
       if (name === 'book_appointment' && result.success) {
         setClickableSlots([]);
+        // Update lead status to Booked
+        if (onBookingComplete && args.customer_email) {
+          onBookingComplete(args.customer_email);
+        }
       }
 
       return result;

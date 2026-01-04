@@ -90,6 +90,7 @@ interface DataContextType {
     leads: Lead[];
     setLeads: React.Dispatch<React.SetStateAction<Lead[]>>;
     addLead: (lead: Omit<Lead, 'id' | 'date'>) => void;
+    updateLeadStatus: (email: string, status: Lead['status']) => void;
     isFeatureEnabled: (feature: string) => boolean;
     getOverageCost: () => number;
     refreshData: () => Promise<void>;
@@ -150,6 +151,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             date: new Date()
         };
         setLeads(prev => [newLead, ...prev]);
+    };
+
+    // Update lead status by email (for when bookings are made)
+    const updateLeadStatus = (email: string, status: Lead['status']) => {
+        setLeads(prev => prev.map(lead =>
+            lead.email.toLowerCase() === email.toLowerCase()
+                ? { ...lead, status }
+                : lead
+        ));
     };
 
     const refreshData = async () => {
@@ -292,7 +302,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             reviewItems, setReviewItems,
             subscription: { ...subscription, usage: currentUsage },
             setSubscription,
-            leads, setLeads, addLead,
+            leads, setLeads, addLead, updateLeadStatus,
             isFeatureEnabled,
             getOverageCost,
             refreshData

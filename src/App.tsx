@@ -74,6 +74,7 @@ const AuthenticatedApp = () => {
     setReviewItems,
     setDashboardData,
     addLead,
+    updateLeadStatus,
     subscription
   } = useData();
 
@@ -172,6 +173,10 @@ const AuthenticatedApp = () => {
           });
         }}
         showPoweredBy={subscription.status !== 'active'}
+        onBookingComplete={(customerEmail) => {
+          // Update lead status to Booked when appointment is made
+          updateLeadStatus(customerEmail, 'Booked');
+        }}
       />
     </BrowserRouter>
   );

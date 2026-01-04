@@ -52,7 +52,7 @@
             'bottom: 0',
             positionStyles,
             'width: 400px',
-            'height: 600px',
+            'height: 700px',
             'max-height: 90vh',
             'border: none',
             'background: transparent',
@@ -86,7 +86,7 @@
                 iframe.style.borderRadius = '0';
             } else {
                 iframe.style.width = '400px';
-                iframe.style.height = '600px';
+                iframe.style.height = '700px';
                 iframe.style.maxHeight = '90vh';
                 if (config.position === 'left') {
                     iframe.style.left = '0';
