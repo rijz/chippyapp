@@ -9,6 +9,7 @@ export const KnowledgeOverview = () => {
 
     // Temp state for editing
     const [summary, setSummary] = useState('');
+    const [category, setCategory] = useState('');
     const [website, setWebsite] = useState('');
     const [phone, setPhone] = useState('');
     const [hours, setHours] = useState('');
@@ -16,7 +17,8 @@ export const KnowledgeOverview = () => {
     if (!knowledgeData) return null;
 
     const startEditing = () => {
-        setSummary(knowledgeData.summary);
+        setSummary(knowledgeData.summary || '');
+        setCategory(knowledgeData.businessCategory || '');
         setWebsite(tenantConfig.companyUrl);
         setPhone(knowledgeData.phoneNumber || '');
         setHours(knowledgeData.businessHours || '');
@@ -31,6 +33,7 @@ export const KnowledgeOverview = () => {
         setKnowledgeData({
             ...knowledgeData,
             summary,
+            businessCategory: category,
             phoneNumber: phone,
             businessHours: hours
         });
@@ -74,7 +77,17 @@ export const KnowledgeOverview = () => {
                     <div className="space-y-4 max-w-2xl w-full">
                         <div>
                             <h2 className="text-3xl font-bold text-chippy-navy">{tenantConfig.companyName}</h2>
-                            <p className="text-slate-500 font-medium">{knowledgeData.businessCategory || 'Business Category Unspecified'}</p>
+                            {isEditing ? (
+                                <input
+                                    type="text"
+                                    value={category}
+                                    onChange={(e) => setCategory(e.target.value)}
+                                    className="mt-1 w-full max-w-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 focus:ring-2 focus:ring-chippy-coral outline-none"
+                                    placeholder="e.g., Hair Salon, Dental Clinic"
+                                />
+                            ) : (
+                                <p className="text-slate-500 font-medium">{knowledgeData.businessCategory || 'Business Category Unspecified'}</p>
+                            )}
                         </div>
 
                         {isEditing ? (

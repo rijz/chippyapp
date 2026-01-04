@@ -131,6 +131,55 @@ app.use(express.static(distPath));
 app.use(express.static(publicPath));
 app.use(express.static(servePath));
 
+// =====================
+// Public Widget Config API (for embeds - bypasses RLS)
+// =====================
+app.get('/api/widget-config/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+
+    // Fetch settings using admin client (bypasses RLS)
+    const { data: settings, error: settingsError } = await supabaseAdmin
+      .from('settings')
+      .select('tenant_config, widget_config')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (settingsError) {
+      console.error('[API] Settings fetch error:', settingsError);
+    }
+
+    // Fetch knowledge base using admin client
+    const { data: knowledge, error: knowledgeError } = await supabaseAdmin
+      .from('knowledge_bases')
+      .select('content')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (knowledgeError) {
+      console.error('[API] Knowledge fetch error:', knowledgeError);
+    }
+
+    if (!settings && !knowledge) {
+      return res.status(404).json({ error: 'Widget not found' });
+    }
+
+    res.json({
+      tenantConfig: settings?.tenant_config || null,
+      widgetConfig: settings?.widget_config || null,
+      knowledgeData: knowledge?.content || null
+    });
+
+  } catch (error) {
+    console.error('[API] Widget config error:', error);
+    res.status(500).json({ error: 'Failed to load widget configuration' });
+  }
+});
+
 // Serve runtime environment configuration
 app.get('/env-config.js', (req, res) => {
   const env = {

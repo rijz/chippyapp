@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ChatWidget } from '../components/ChatWidget';
 import { TenantConfig, WidgetConfig, KnowledgeBaseData } from '../types';
-import { fetchSettings, fetchKnowledgeBase } from '../services/supabaseStorage';
 import { Loader2 } from 'lucide-react';
 
 export const EmbedPage = () => {
@@ -10,6 +9,7 @@ export const EmbedPage = () => {
 
     const [tenantConfig, setTenantConfig] = useState<TenantConfig>({
         id: 'public-embed',
+        userId: '', // Will be set from URL params
         industry: 'General',
         companyName: 'Support Agent',
         companyUrl: '',
@@ -33,7 +33,7 @@ export const EmbedPage = () => {
 
     const [knowledgeData, setKnowledgeData] = useState<KnowledgeBaseData | null>(null);
 
-    // Load config from Supabase using userId from URL params
+    // Load config from backend API using userId from URL params
     useEffect(() => {
         const loadConfig = async () => {
             try {
@@ -62,20 +62,24 @@ export const EmbedPage = () => {
 
                 console.log('[EmbedPage] Loading config for userId:', userId);
 
-                // Fetch settings from Supabase
-                const settings = await fetchSettings(userId);
-                if (settings) {
-                    if (settings.tenant_config) setTenantConfig(settings.tenant_config);
-                    if (settings.widget_config) setWidgetConfig(settings.widget_config);
+                // Fetch from backend API (bypasses RLS)
+                const response = await fetch(`/api/widget-config/${userId}`);
+
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        setError('Widget not found. Please check your embed code.');
+                    } else {
+                        setError('Failed to load widget configuration.');
+                    }
+                    setIsLoading(false);
+                    return;
                 }
 
-                // Fetch knowledge base from Supabase
-                const knowledge = await fetchKnowledgeBase(userId);
-                if (knowledge) setKnowledgeData(knowledge);
+                const data = await response.json();
 
-                if (!settings && !knowledge) {
-                    setError('Widget not found. Please check your embed code.');
-                }
+                if (data.tenantConfig) setTenantConfig(data.tenantConfig);
+                if (data.widgetConfig) setWidgetConfig(data.widgetConfig);
+                if (data.knowledgeData) setKnowledgeData(data.knowledgeData);
 
                 setIsLoading(false);
             } catch (e) {
