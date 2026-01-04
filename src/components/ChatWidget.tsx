@@ -302,7 +302,14 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
 
     const toolExecutor = async (name: string, args: any) => {
       console.log('[ChatWidget] Tool called:', name, args);
-      setStatusMessage(`🔄 ${name.replace(/_/g, ' ')}...`);
+      // Custom status messages for different tools
+      const statusMessages: Record<string, string> = {
+        'get_available_slots': '🔍 Finding open spots...',
+        'book_appointment': '📅 Booking your appointment...',
+        'cancel_appointment': '❌ Canceling appointment...',
+        'reschedule_appointment': '🔄 Rescheduling...',
+      };
+      setStatusMessage(statusMessages[name] || '🔄 Processing...');
       const result = await executeCalendarTool(name, args, toolContext);
       setStatusMessage('');
 
@@ -688,29 +695,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                     </div>
                   ))}
 
-                  {/* Quick Reply Buttons - Show after last bot message */}
-                  {messages.length > 0 && messages[messages.length - 1].role === 'model' && !isLoading && (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => { setInputText('Can I book an appointment?'); handleSend(); }}
-                        className="px-3 py-1.5 text-xs bg-chippy-coral/10 text-chippy-coral border border-chippy-coral/30 rounded-full hover:bg-chippy-coral/20 transition-all"
-                      >
-                        📅 Book Now
-                      </button>
-                      <button
-                        onClick={() => { setInputText("What's your pricing?"); handleSend(); }}
-                        className="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded-full hover:bg-blue-100 transition-all"
-                      >
-                        💰 Pricing
-                      </button>
-                      <button
-                        onClick={() => { setInputText('How can I contact you?'); handleSend(); }}
-                        className="px-3 py-1.5 text-xs bg-green-50 text-green-600 border border-green-200 rounded-full hover:bg-green-100 transition-all"
-                      >
-                        📞 Contact
-                      </button>
-                    </div>
-                  )}
+
 
                   {/* Clickable Time Slots - Show when slots are available */}
                   {clickableSlots.length > 0 && !isLoading && (
@@ -746,7 +731,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                     <div className="flex justify-start">
                       <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-500">Chippy is thinking</span>
+                          <span className="text-sm text-slate-500">thinking..</span>
                           <div className="flex gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }}></span>
                             <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }}></span>

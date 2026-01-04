@@ -193,21 +193,22 @@ export const Integrations = () => {
                         </div>
                         <div>
                             <h3 className="font-bold text-2xl text-chippy-navy">Website Embed</h3>
-                            <p className="text-slate-500">Add the AI agent to your own website.</p>
+                            <p className="text-slate-500">Add the AI agent to your own website with one line of code.</p>
                         </div>
                     </div>
                 </div>
                 <div className="p-10 text-left">
-                    <p className="text-sm text-slate-500 mb-4">Copy and paste this code into your website's HTML before the closing <code>&lt;/body&gt;</code> tag.</p>
+                    <p className="text-sm text-slate-500 mb-4">Copy and paste this code anywhere in your website's HTML (before <code>&lt;/body&gt;</code> is recommended).</p>
                     <div className="relative group">
-                        <textarea
-                            className="w-full h-32 p-4 bg-slate-900 text-slate-300 font-mono text-xs rounded-xl border border-slate-700 outline-none resize-none"
-                            readOnly
-                            value={`<iframe \n  src="https://app.hellochippy.com/embed?u=${userId}" \n  style="position: fixed; bottom: 20px; right: 20px; width: 400px; height: 600px; border: none; z-index: 9999; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"\n></iframe>`}
-                        />
+                        <div className="w-full p-4 bg-slate-900 text-slate-300 font-mono text-sm rounded-xl border border-slate-700 overflow-x-auto">
+                            <span className="text-purple-400">&lt;script</span>
+                            <span className="text-sky-400"> src</span>=<span className="text-emerald-400">"https://app.hellochippy.com/widget.js"</span>
+                            <span className="text-sky-400"> data-chippy-id</span>=<span className="text-emerald-400">"{userId}"</span>
+                            <span className="text-purple-400">&gt;&lt;/script&gt;</span>
+                        </div>
                         <button
                             onClick={() => {
-                                navigator.clipboard.writeText(`<iframe src="https://app.hellochippy.com/embed?u=${userId}" style="position: fixed; bottom: 20px; right: 20px; width: 400px; height: 600px; border: none; z-index: 9999; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></iframe>`);
+                                navigator.clipboard.writeText(`<script src="https://app.hellochippy.com/widget.js" data-chippy-id="${userId}"></script>`);
                                 showToast("Copied to clipboard!", 'success');
                             }}
                             className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all border border-white/10"
@@ -215,6 +216,7 @@ export const Integrations = () => {
                             Copy Code
                         </button>
                     </div>
+                    <p className="text-xs text-slate-400 mt-3">Works with any website: WordPress, Shopify, Squarespace, Wix, custom HTML, and more.</p>
                 </div>
             </div>
         </div>

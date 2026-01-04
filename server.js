@@ -121,11 +121,14 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
 app.use(express.json());
 
 // Serve static files from 'dist' if it exists (standard build)
+// Then 'public' for embed widget.js
 // Fallback to serving the root directory (for runtime-transpilation environments)
 const distPath = path.join(__dirname, 'dist');
+const publicPath = path.join(__dirname, 'public');
 const servePath = path.join(__dirname);
 
 app.use(express.static(distPath));
+app.use(express.static(publicPath));
 app.use(express.static(servePath));
 
 // Serve runtime environment configuration
