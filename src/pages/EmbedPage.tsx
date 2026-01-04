@@ -33,6 +33,14 @@ export const EmbedPage = () => {
 
     const [knowledgeData, setKnowledgeData] = useState<KnowledgeBaseData | null>(null);
 
+    // Set transparent background for embed mode
+    useEffect(() => {
+        document.body.classList.add('embed-mode');
+        return () => {
+            document.body.classList.remove('embed-mode');
+        };
+    }, []);
+
     // Load config from backend API using userId from URL params
     useEffect(() => {
         const loadConfig = async () => {

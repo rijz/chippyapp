@@ -8,6 +8,11 @@
     body {
         @apply font-sans bg-chippy-gray text-chippy-navy antialiased;
     }
+
+    /* Transparent background for embed/iframe mode */
+    body.embed-mode {
+        background: transparent !important;
+    }
 }
 
 @layer components {
