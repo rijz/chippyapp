@@ -3,11 +3,27 @@ import { Users, Search, Filter, Download, Calendar, Mail, Phone, MoreHorizontal,
 import { checkAvailability } from '../services/calendarAuth';
 import { useData } from '../contexts/DataContext';
 import { Lead } from '../types';
+import { useSearchParams } from 'react-router-dom';
 
 export const Leads = () => {
     const { leads, setLeads } = useData();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [searchTerm, setSearchTerm] = useState('');
-    const [currentView, setCurrentView] = useState<'All' | 'Appointments' | 'CallBacks'>('All');
+
+    // Read view from URL query params
+    const viewParam = searchParams.get('view');
+    const getInitialView = (): 'All' | 'Appointments' | 'CallBacks' => {
+        if (viewParam === 'appointments') return 'Appointments';
+        if (viewParam === 'callbacks') return 'CallBacks';
+        return 'All';
+    };
+    const [currentView, setCurrentView] = useState<'All' | 'Appointments' | 'CallBacks'>(getInitialView());
+
+    // Update view when URL params change
+    useEffect(() => {
+        setCurrentView(getInitialView());
+    }, [viewParam]);
+
     const [editingLead, setEditingLead] = useState<Lead | null>(null);
     const [conflict, setConflict] = useState<boolean>(false);
 
@@ -282,7 +298,10 @@ export const Leads = () => {
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Appointment Date</label>
                                 <input
                                     type="datetime-local"
-                                    value={new Date(editingLead.date.getTime() - (editingLead.date.getTimezoneOffset() * 60000)).toISOString().slice(0, 16)}
+                                    value={(() => {
+                                        const d = editingLead.date instanceof Date ? editingLead.date : new Date(editingLead.date);
+                                        return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+                                    })()}
                                     onChange={e => setEditingLead({ ...editingLead, date: new Date(e.target.value) })}
                                     className={`w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 transition-all ${conflict ? 'border-amber-400 focus:ring-amber-400 bg-amber-50' : 'border-slate-200 focus:ring-chippy-coral'}`}
                                 />

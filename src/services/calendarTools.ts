@@ -168,8 +168,6 @@ async function getAvailableSlots(
     timezone: string
 ): Promise<ToolResult> {
     try {
-        console.log('[getAvailableSlots] Args received:', args);
-
         // Parse date string as local date (avoid UTC interpretation)
         // Input format: "2026-01-03" -> should be Jan 3 in local time
         const parseLocalDate = (dateStr: string): Date => {
@@ -184,18 +182,11 @@ async function getAvailableSlots(
         const startDate = parseLocalDate(args.start_date);
         const endDate = args.end_date ? parseLocalDate(args.end_date) : new Date(startDate);
 
-        console.log('[getAvailableSlots] Parsed dates:', {
-            startDate: startDate.toDateString(),
-            endDate: endDate.toDateString()
-        });
-
         // Generate time slots for the date range
         const slots: string[] = [];
         const currentDate = new Date(startDate);
 
         while (currentDate <= endDate) {
-            console.log('[getAvailableSlots] Checking day:', currentDate.toDateString());
-
             // Check each hour slot from 9am to 5pm
             for (let hour = 9; hour < 17; hour++) {
                 const slotStart = new Date(currentDate);

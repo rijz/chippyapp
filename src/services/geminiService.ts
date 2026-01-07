@@ -13,7 +13,6 @@ const USE_PROXY = true;
 // Initialize the client for non-chat operations (scanning, classification, etc.)
 // These run in the authenticated app, not in public embeds
 const apiKey = getEnv('VITE_GEMINI_API_KEY');
-console.log('[GeminiService] Using proxy for chat:', USE_PROXY);
 const genAI = new GoogleGenerativeAI(apiKey || '');
 
 // Custom chat session implementation for proxy mode with Function Calling support
@@ -94,11 +93,9 @@ class ProxyChatSession {
 
       if (functionCallPart && this.toolExecutor) {
         const { name, args } = functionCallPart.functionCall;
-        console.log(`[ProxyChatSession] Executing tool: ${name}`, args);
 
         // Execute the tool
         const toolResult = await this.toolExecutor(name, args);
-        console.log(`[ProxyChatSession] Tool result:`, toolResult);
 
         // Add the model's function call to history
         this.history.push({
@@ -256,8 +253,6 @@ export const analyzeInteraction = async (query: string, response: string): Promi
  */
 export const analyzeCompanyContent = async (url: string): Promise<KnowledgeBaseData | null> => {
   try {
-    console.log(`[GeminiService] Calling /api/scrape for: ${url}`);
-
     const response = await fetch('/api/scrape', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -271,8 +266,6 @@ export const analyzeCompanyContent = async (url: string): Promise<KnowledgeBaseD
 
     const data = await response.json() as KnowledgeBaseData;
     data.lastUpdated = new Date(); // Ensure it's a Date object
-
-    console.log(`[GeminiService] Successfully received data for: ${data.companyName}`);
     return data;
 
   } catch (error: any) {

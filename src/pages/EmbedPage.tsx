@@ -51,7 +51,6 @@ export const EmbedPage = () => {
 
                 if (!userId) {
                     // Fallback to localStorage for backwards compatibility
-                    console.log('[EmbedPage] No userId in URL, falling back to localStorage');
                     try {
                         const storedTenant = localStorage.getItem('tenantConfig');
                         if (storedTenant) setTenantConfig(JSON.parse(storedTenant));
@@ -67,8 +66,6 @@ export const EmbedPage = () => {
                     setIsLoading(false);
                     return;
                 }
-
-                console.log('[EmbedPage] Loading config for userId:', userId);
 
                 // Fetch from backend API (bypasses RLS)
                 const response = await fetch(`/api/widget-config/${userId}`);
@@ -100,9 +97,9 @@ export const EmbedPage = () => {
         loadConfig();
     }, []);
 
-    // Mock interaction handler
+    // Interaction handler (can be extended for analytics)
     const handleInteraction = (query: string, response: string, analysis: any) => {
-        console.log("Embed Interaction:", query, response);
+        // Can add analytics tracking here in production
     };
 
     // Loading state

@@ -152,12 +152,10 @@ export const fetchCalendars = async (): Promise<CalendarItem[]> => {
 
     // Ensure the calendar API is loaded
     if (!gapi.client.calendar) {
-        console.log('Calendar API not loaded, waiting...');
         await new Promise(resolve => setTimeout(resolve, 1000)); // Give it a second
 
         // If still not loaded, try to reinitialize
         if (!gapi.client.calendar) {
-            console.log('Reinitializing GAPI client...');
             await initializeGapiClient();
         }
 
@@ -189,9 +187,7 @@ export const handleSignOut = () => {
     if (typeof gapi !== 'undefined' && gapi.client) {
         const token = gapi.client.getToken();
         if (token !== null) {
-            google.accounts.oauth2.revoke(token.access_token, () => {
-                console.log('Access token revoked');
-            });
+            google.accounts.oauth2.revoke(token.access_token, () => { });
             gapi.client.setToken(null);
         }
     }
@@ -290,7 +286,6 @@ export const getAvailableSlots = async (
 
     // MOCK MODE - return all slots as available
     if (!CLIENT_ID || !API_KEY) {
-        console.log('[Calendar] Mock mode: returning all slots as available');
         return slots;
     }
 

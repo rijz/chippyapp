@@ -38,11 +38,12 @@ interface ChatWidgetProps {
   onInteraction?: (query: string, response: string, analysis: any) => void;
   onSessionUpdate?: (messages: Message[]) => void;
   onLeadCapture?: (leadData: { name: string; email: string; phone: string }) => void;
-  onBookingComplete?: (customerEmail: string) => void;
+  onBookingComplete?: (customerEmail: string, customerName?: string, customerPhone?: string) => void;
+  onCancellation?: (customerEmail: string) => void;
   showPoweredBy?: boolean; // Show "Powered by Chippy" badge for free users
 }
 
-export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture, onBookingComplete, showPoweredBy = false }) => {
+export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture, onBookingComplete, onCancellation, showPoweredBy = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showLeadForm, setShowLeadForm] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -191,17 +192,9 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
     let structuredInfo = "Standard business hours apply.";
     let correctionsInfo = "";
 
-    console.log('[ChatWidget] initChat called');
-    console.log('[ChatWidget] knowledgeSummary received:', knowledgeSummary ? `${knowledgeSummary.substring(0, 100)}...` : 'EMPTY');
-
     try {
       if (knowledgeSummary) {
         const parsed = JSON.parse(knowledgeSummary);
-        console.log('[ChatWidget] Parsed knowledge:', {
-          companyName: parsed.companyName,
-          pricing: parsed.pricing ? 'HAS PRICING' : 'NO PRICING',
-          services: parsed.services?.length || 0
-        });
         structuredInfo = `
           Business Category: ${parsed.businessCategory}
           Summary: ${parsed.summary}
@@ -302,7 +295,6 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     };
 
     const toolExecutor = async (name: string, args: any) => {
-      console.log('[ChatWidget] Tool called:', name, args);
       // Custom status messages for different tools
       const statusMessages: Record<string, string> = {
         'get_available_slots': '🔍 Finding open spots...',
@@ -322,9 +314,16 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       // Clear slots when booking is made
       if (name === 'book_appointment' && result.success) {
         setClickableSlots([]);
-        // Update lead status to Booked
+        // Create/update lead with booking status
         if (onBookingComplete && args.customer_email) {
-          onBookingComplete(args.customer_email);
+          onBookingComplete(args.customer_email, args.customer_name, args.customer_phone);
+        }
+      }
+
+      // Update lead status when appointment is cancelled
+      if (name === 'cancel_appointment' && result.success) {
+        if (onCancellation && args.customer_email) {
+          onCancellation(args.customer_email);
         }
       }
 
@@ -348,7 +347,6 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
 
         // Restore history to session if it has the method
         if (conversationHistory.length > 0 && typeof (session as any).restoreHistory === 'function') {
-          console.log(`[ChatWidget] Restoring ${conversationHistory.length} messages to session`);
           (session as any).restoreHistory(conversationHistory);
         }
       } catch (e) {
@@ -480,7 +478,6 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         const newSession = await initChat(undefined, slots.join('\n'));
         if (newSession) {
           sessionToUse = newSession;
-          console.log('[ChatWidget] Using new session with slots for this message');
         }
       } else {
         setStatusMessage('❌ No availability found in the next 7 days');
@@ -542,6 +539,18 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
+      // Save session after each message exchange
+      if (onSessionUpdate) {
+        // Use setTimeout to get latest messages state
+        setTimeout(() => {
+          setMessages(currentMessages => {
+            if (currentMessages.length > 0) {
+              onSessionUpdate(currentMessages);
+            }
+            return currentMessages;
+          });
+        }, 100);
+      }
     }
   };
 

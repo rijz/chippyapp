@@ -26,7 +26,15 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     const navItems = [
         { id: '/', label: 'Dashboard', icon: LayoutDashboard },
         { id: '/inbox', label: 'Inbox', icon: InboxIcon },
-        { id: '/leads', label: 'Leads', icon: Users },
+        {
+            id: '/leads',
+            label: 'Leads',
+            icon: Users,
+            subItems: [
+                { id: '/leads?view=appointments', label: 'Appointments' },
+                { id: '/leads?view=callbacks', label: 'Call Backs' }
+            ]
+        },
         { id: '/knowledge', label: 'Knowledge Base', icon: BookOpen },
         { id: '/widget', label: 'Widget Studio', icon: MessageCircle },
         { id: '/integrations', label: 'Integrations', icon: Settings },
@@ -65,23 +73,45 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
 
                     <nav className="flex-1 space-y-1">
                         {navItems.map((item) => {
-                            const isActive = location.pathname === item.id || (item.id !== '/' && location.pathname.startsWith(item.id));
+                            const isActive = location.pathname === item.id || (item.id !== '/' && location.pathname.startsWith(item.id.split('?')[0]));
+                            const hasSubItems = 'subItems' in item && item.subItems;
                             return (
-                                <Link
-                                    key={item.id}
-                                    to={item.id}
-                                    onClick={() => setMobileSidebarOpen(false)}
-                                    className={clsx(
-                                        "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all",
-                                        isActive ? 'bg-chippy-coral/10 text-chippy-coral' : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                <div key={item.id}>
+                                    <Link
+                                        to={item.id.split('?')[0]}
+                                        onClick={() => setMobileSidebarOpen(false)}
+                                        className={clsx(
+                                            "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all",
+                                            isActive ? 'bg-chippy-coral/10 text-chippy-coral' : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <item.icon className="w-5 h-5" />
+                                            {item.label}
+                                        </div>
+                                        {'badge' in item && item.badge ? <span className="bg-chippy-coral text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{item.badge}</span> : null}
+                                    </Link>
+                                    {/* Sub-items - always visible */}
+                                    {hasSubItems && (
+                                        <div className="ml-8 mt-1 space-y-1 border-l border-slate-700 pl-3">
+                                            {item.subItems.map(sub => (
+                                                <Link
+                                                    key={sub.id}
+                                                    to={sub.id}
+                                                    onClick={() => setMobileSidebarOpen(false)}
+                                                    className={clsx(
+                                                        "block px-3 py-2 rounded-lg text-xs font-medium transition-all",
+                                                        location.search.includes(sub.id.split('?')[1] || '')
+                                                            ? 'text-chippy-coral bg-chippy-coral/5'
+                                                            : 'text-slate-500 hover:text-white hover:bg-white/5'
+                                                    )}
+                                                >
+                                                    {sub.label}
+                                                </Link>
+                                            ))}
+                                        </div>
                                     )}
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <item.icon className="w-5 h-5" />
-                                        {item.label}
-                                    </div>
-                                    {item.badge ? <span className="bg-chippy-coral text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{item.badge}</span> : null}
-                                </Link>
+                                </div>
                             );
                         })}
                     </nav>

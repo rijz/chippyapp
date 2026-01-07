@@ -73,13 +73,18 @@ const AuthenticatedApp = () => {
     setTotalBookings,
     setReviewItems,
     setDashboardData,
+    setChatSessions,
     addLead,
     updateLeadStatus,
+    leads,
     subscription
   } = useData();
 
   const { session } = useAuth();
   const [showWizard, setShowWizard] = useState(false);
+
+  // Use a stable session ID for the current chat
+  const chatSessionIdRef = React.useRef<string>(`session_${Date.now()}`);
 
   // Trigger wizard if no knowledge data is found on load
   React.useEffect(() => {
@@ -173,9 +178,49 @@ const AuthenticatedApp = () => {
           });
         }}
         showPoweredBy={subscription.status !== 'active'}
-        onBookingComplete={(customerEmail) => {
-          // Update lead status to Booked when appointment is made
-          updateLeadStatus(customerEmail, 'Booked');
+        onSessionUpdate={(messages) => {
+          // Save chat session to Inbox using stable session ID
+          const sessionRecord = {
+            id: chatSessionIdRef.current,
+            customerName: 'Visitor',
+            messages: messages,
+            summary: `Chat with ${messages.length} messages`,
+            type: 'General' as const,
+            sentiment: 'neutral' as const,
+            timestamp: new Date(),
+            status: 'Opened' as const
+          };
+          setChatSessions(prev => {
+            // Update existing session or add new one
+            const existingIndex = prev.findIndex(s => s.id === chatSessionIdRef.current);
+            if (existingIndex >= 0) {
+              const updated = [...prev];
+              updated[existingIndex] = sessionRecord;
+              return updated;
+            }
+            return [sessionRecord, ...prev];
+          });
+        }}
+        onBookingComplete={(customerEmail, customerName, customerPhone) => {
+          // Check if lead exists
+          const existingLead = leads.find(l => l.email.toLowerCase() === customerEmail.toLowerCase());
+          if (!existingLead) {
+            // Create new lead with Booked status
+            addLead({
+              name: customerName || 'Customer',
+              email: customerEmail,
+              phone: customerPhone || '',
+              status: 'Booked',
+              source: 'AI Chat',
+              notes: 'Booked via chat widget'
+            });
+          } else {
+            // Update existing lead to Booked status
+            updateLeadStatus(customerEmail, 'Booked');
+          }
+        }}
+        onCancellation={(customerEmail) => {
+          updateLeadStatus(customerEmail, 'Cancelled');
         }}
       />
     </BrowserRouter>

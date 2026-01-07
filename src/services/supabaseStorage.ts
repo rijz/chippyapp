@@ -84,7 +84,6 @@ export const deleteKnowledgeBase = async (userId: string) => {
       }, { onConflict: 'user_id' });
 
     if (error) throw error;
-    console.log('[Supabase] Knowledge base cleared for user:', userId);
   } catch (error) {
     console.error('Knowledge Delete Error:', error);
   }
