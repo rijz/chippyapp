@@ -13,8 +13,94 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// =====================
+// DDoS & Security Protection
+// =====================
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import cors from 'cors';
+
 const app = express();
 const PORT = process.env.PORT || 8080;
+
+// Trust proxy for Cloud Run / load balancers
+app.set('trust proxy', 1);
+
+// Security headers (XSS, clickjacking, etc.)
+app.use(helmet({
+  contentSecurityPolicy: false, // Disable for SPA compatibility
+  crossOriginEmbedderPolicy: false, // Allow widget embedding
+}));
+
+// CORS - Allow your domains + localhost
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:8080',
+  'https://chippyai.com',
+  'https://www.chippyai.com',
+  process.env.VITE_APP_URL,
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like server-side or Postman)
+    // But in production, you may want to restrict this
+    if (!origin || allowedOrigins.some(allowed => origin.startsWith(allowed.replace(/\/$/, '')))) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] Blocked request from: ${origin}`);
+      callback(null, true); // Allow but log - change to callback(new Error('Not allowed by CORS')) to block
+    }
+  },
+  credentials: true,
+}));
+
+// Global rate limiter - prevents basic DDoS
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute per IP
+  message: { error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+});
+app.use(globalLimiter);
+
+// Strict rate limiter for expensive API endpoints (Gemini, scraping)
+const expensiveApiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20, // Only 20 requests per minute for expensive APIs
+  message: { error: 'AI request limit reached. Please wait before sending more messages.' },
+  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+});
+
+// Very strict limiter for the Gemini proxy (costs money per request!)
+const geminiProxyLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 AI requests per minute per IP
+  message: { error: 'Chat limit reached. Please wait a moment.' },
+  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+});
+
+// Calendar endpoint limiter
+const calendarLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 calendar requests per minute
+  message: { error: 'Too many calendar requests. Please wait.' },
+  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+});
+
+// Widget config limiter (semi-public endpoint)
+const widgetConfigLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60, // 60 requests per minute (generous for widget loading)
+  message: { error: 'Widget rate limit exceeded.' },
+  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+});
+
+// Request size limit - prevent large payload attacks
+app.use(express.json({ limit: '100kb' })); // Limit JSON body to 100KB
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
@@ -117,8 +203,7 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
   res.json({ received: true });
 });
 
-// Regular JSON body for other routes
-app.use(express.json());
+// Note: JSON body parsing is handled above with size limits (100kb)
 
 // Serve static files from 'dist' if it exists (standard build)
 // Then 'public' for embed widget.js
@@ -134,7 +219,7 @@ app.use(express.static(servePath));
 // =====================
 // Public Widget Config API (for embeds - bypasses RLS)
 // =====================
-app.get('/api/widget-config/:userId', async (req, res) => {
+app.get('/api/widget-config/:userId', widgetConfigLimiter, async (req, res) => {
   try {
     const { userId } = req.params;
 
@@ -220,7 +305,8 @@ app.post('/api/create-checkout-session', async (req, res) => {
 // Gemini API Proxy for Chat Widget
 // =====================
 // This proxies chat requests through the backend to keep the API key secure
-app.all('/api-proxy/*', async (req, res) => {
+// CRITICAL: This endpoint costs money per request! Strict rate limiting applied.
+app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
   try {
     const geminiPath = req.params[0]; // e.g., "v1beta/models/gemini-2.0-flash:generateContent"
     const geminiUrl = `https://generativelanguage.googleapis.com/${geminiPath}?key=${process.env.VITE_GEMINI_API_KEY}`;
@@ -577,7 +663,7 @@ async function getCalendarConnection(userId, provider = 'google') {
  * POST /api/calendar/availability
  * Check if a specific time slot is available
  */
-app.post('/api/calendar/availability', async (req, res) => {
+app.post('/api/calendar/availability', calendarLimiter, async (req, res) => {
   try {
     const { userId, startTime, endTime, provider = 'google' } = req.body;
 
@@ -627,7 +713,7 @@ app.post('/api/calendar/availability', async (req, res) => {
  * POST /api/calendar/slots
  * Get all available time slots for a date range
  */
-app.post('/api/calendar/slots', async (req, res) => {
+app.post('/api/calendar/slots', calendarLimiter, async (req, res) => {
   try {
     const {
       userId,
@@ -679,7 +765,7 @@ app.post('/api/calendar/slots', async (req, res) => {
  * POST /api/calendar/create-event
  * Create a calendar event using owner's calendar
  */
-app.post('/api/calendar/create-event', async (req, res) => {
+app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
   try {
     const {
       userId,
@@ -736,7 +822,7 @@ app.post('/api/calendar/create-event', async (req, res) => {
  * POST /api/calendar/connect
  * Exchange auth code for tokens (Authorization Code Flow)
  */
-app.post('/api/calendar/connect', async (req, res) => {
+app.post('/api/calendar/connect', calendarLimiter, async (req, res) => {
   try {
     const { code, userId } = req.body;
 
@@ -790,7 +876,7 @@ app.post('/api/calendar/connect', async (req, res) => {
  * POST /api/calendar/cancel-event
  * Cancel an existing calendar event
  */
-app.post('/api/calendar/cancel-event', async (req, res) => {
+app.post('/api/calendar/cancel-event', calendarLimiter, async (req, res) => {
   try {
     const { userId, eventId, customerEmail, reason, provider = 'google' } = req.body;
 
@@ -865,7 +951,7 @@ app.post('/api/calendar/cancel-event', async (req, res) => {
  * POST /api/calendar/reschedule-event
  * Reschedule an existing calendar event
  */
-app.post('/api/calendar/reschedule-event', async (req, res) => {
+app.post('/api/calendar/reschedule-event', calendarLimiter, async (req, res) => {
   try {
     const { userId, eventId, customerEmail, newStartTime, provider = 'google' } = req.body;
 
