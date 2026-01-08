@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Sparkles, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
 import { Message, TenantConfig, WidgetConfig } from '../types';
 import { createAgentSession, analyzeInteraction } from '../services/geminiService';
-import { CALENDAR_TOOLS, executeCalendarTool, ToolContext } from '../services/calendarTools';
+import { CALENDAR_TOOLS, executeCalendarTool, ToolContext, CallbackRequestData } from '../services/calendarTools';
 import { ChatSession } from '@google/generative-ai';
 
 // Simple Markdown renderer for chat messages
@@ -38,12 +38,13 @@ interface ChatWidgetProps {
   onInteraction?: (query: string, response: string, analysis: any) => void;
   onSessionUpdate?: (messages: Message[]) => void;
   onLeadCapture?: (leadData: { name: string; email: string; phone: string }) => void;
-  onBookingComplete?: (customerEmail: string, customerName?: string, customerPhone?: string) => void;
+  onBookingComplete?: (customerEmail: string, customerName?: string, customerPhone?: string, service?: string) => void;
   onCancellation?: (customerEmail: string) => void;
+  onCallbackRequest?: (data: CallbackRequestData) => void;
   showPoweredBy?: boolean; // Show "Powered by Chippy" badge for free users
 }
 
-export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture, onBookingComplete, onCancellation, showPoweredBy = false }) => {
+export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture, onBookingComplete, onCancellation, onCallbackRequest, showPoweredBy = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showLeadForm, setShowLeadForm] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -263,8 +264,34 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       - When booking is confirmed → ALWAYS call book_appointment  
       - When canceling → ALWAYS call cancel_appointment
       - When rescheduling → ALWAYS call reschedule_appointment
+      - When user wants a callback instead of booking → call request_callback
       
       NEVER list times without first calling get_available_slots. This is NON-NEGOTIABLE.
+
+      🎯 SERVICE MATCHING (IMPORTANT):
+      When a user wants to book or request a callback:
+      1. First ask: "What are you looking for help with?" or "What brings you in today?"
+      2. Listen to their response and match it to one of the available services in your knowledge base
+      3. Confirm: "It sounds like you're interested in [matched service]. Is that correct?"
+      4. Only proceed after they confirm the service
+      
+      If their need doesn't match any service, say: "I'm not sure that's something we offer. Our services include: [list services]. Which of these best fits what you're looking for?"
+
+      📞 CALLBACK REQUESTS:
+      If a user prefers to receive a callback instead of booking directly:
+      1. First, match their need to a SERVICE (see service matching above)
+      2. Confirm the service with them
+      3. Collect their NAME (required) and PHONE NUMBER (required)
+      4. Email is optional but helpful
+      5. Ask if they have a preferred time for the callback
+      6. Then call request_callback with the collected information
+
+      📅 BOOKING FLOW:
+      1. First, match their need to a SERVICE
+      2. Confirm the service with them
+      3. Check availability using get_available_slots
+      4. Collect contact info (name, email required; phone as configured)
+      5. Book with book_appointment including service_type
 
       📅 DATE VERIFICATION (CRITICAL):
       Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}.
@@ -291,7 +318,8 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     const toolContext: ToolContext = {
       userId: tenantConfig.userId,
       timezone: 'America/New_York',
-      companyName: tenantConfig.companyName
+      companyName: tenantConfig.companyName,
+      onCallbackRequest: onCallbackRequest
     };
 
     const toolExecutor = async (name: string, args: any) => {
@@ -301,6 +329,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         'book_appointment': '📅 Booking your appointment...',
         'cancel_appointment': '❌ Canceling appointment...',
         'reschedule_appointment': '🔄 Rescheduling...',
+        'request_callback': '📞 Submitting callback request...',
       };
       setStatusMessage(statusMessages[name] || '🔄 Processing...');
       const result = await executeCalendarTool(name, args, toolContext);
@@ -316,7 +345,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         setClickableSlots([]);
         // Create/update lead with booking status
         if (onBookingComplete && args.customer_email) {
-          onBookingComplete(args.customer_email, args.customer_name, args.customer_phone);
+          onBookingComplete(args.customer_email, args.customer_name, args.customer_phone, args.service_type);
         }
       }
 

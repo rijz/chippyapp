@@ -201,7 +201,7 @@ const AuthenticatedApp = () => {
             return [sessionRecord, ...prev];
           });
         }}
-        onBookingComplete={(customerEmail, customerName, customerPhone) => {
+        onBookingComplete={(customerEmail, customerName, customerPhone, service) => {
           // Check if lead exists
           const existingLead = leads.find(l => l.email.toLowerCase() === customerEmail.toLowerCase());
           if (!existingLead) {
@@ -212,7 +212,8 @@ const AuthenticatedApp = () => {
               phone: customerPhone || '',
               status: 'Booked',
               source: 'AI Chat',
-              notes: 'Booked via chat widget'
+              notes: 'Booked via chat widget',
+              service: service
             });
           } else {
             // Update existing lead to Booked status
@@ -221,6 +222,29 @@ const AuthenticatedApp = () => {
         }}
         onCancellation={(customerEmail) => {
           updateLeadStatus(customerEmail, 'Cancelled');
+        }}
+        onCallbackRequest={(data) => {
+          // Check if lead exists by phone or email
+          const existingLead = data.customerEmail
+            ? leads.find(l => l.email.toLowerCase() === data.customerEmail!.toLowerCase())
+            : leads.find(l => l.phone === data.customerPhone);
+
+          if (!existingLead) {
+            // Create new lead with Call Back status
+            addLead({
+              name: data.customerName,
+              email: data.customerEmail || '',
+              phone: data.customerPhone,
+              status: 'Call Back',
+              source: 'AI Chat',
+              notes: data.purpose || 'Callback requested via chat',
+              service: data.service,
+              purpose: data.purpose
+            });
+          } else {
+            // Update existing lead to Call Back status
+            updateLeadStatus(existingLead.email, 'Call Back');
+          }
         }}
       />
     </BrowserRouter>

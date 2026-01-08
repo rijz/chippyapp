@@ -15,6 +15,8 @@ export interface Lead {
   source: 'Booking Page' | 'AI Chat';
   date: Date;
   notes: string;
+  service?: string; // Selected service for the appointment/callback
+  purpose?: string; // Purpose of callback (if applicable)
 }
 
 export type BusinessType = 'storefront' | 'mobile' | 'online';

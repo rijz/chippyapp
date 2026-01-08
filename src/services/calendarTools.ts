@@ -113,6 +113,40 @@ export const CALENDAR_TOOLS = {
                 },
                 required: ["customer_email", "new_datetime"]
             }
+        },
+        {
+            name: "request_callback",
+            description: "Request a callback from the business. Use this when the user wants someone to call them back instead of booking an appointment directly. Collect phone number and name (required), email (optional), and the purpose/service they need help with.",
+            parameters: {
+                type: "object",
+                properties: {
+                    customer_name: {
+                        type: "string",
+                        description: "Full name of the customer (required)"
+                    },
+                    customer_phone: {
+                        type: "string",
+                        description: "Phone number to call back (required)"
+                    },
+                    customer_email: {
+                        type: "string",
+                        description: "Email address of the customer (optional but recommended)"
+                    },
+                    service: {
+                        type: "string",
+                        description: "The service they are interested in (if mentioned during chat)"
+                    },
+                    purpose: {
+                        type: "string",
+                        description: "The purpose or reason for the callback request"
+                    },
+                    preferred_time: {
+                        type: "string",
+                        description: "Preferred time for callback (e.g., 'morning', 'afternoon', 'anytime')"
+                    }
+                },
+                required: ["customer_name", "customer_phone"]
+            }
         }
     ]
 };
@@ -122,6 +156,17 @@ export interface ToolContext {
     userId: string;
     timezone: string;
     companyName: string;
+    onCallbackRequest?: (data: CallbackRequestData) => void;
+}
+
+// Callback request data structure
+export interface CallbackRequestData {
+    customerName: string;
+    customerPhone: string;
+    customerEmail?: string;
+    service?: string;
+    purpose?: string;
+    preferredTime?: string;
 }
 
 // Tool execution results
@@ -153,6 +198,9 @@ export async function executeCalendarTool(
 
         case 'reschedule_appointment':
             return await rescheduleAppointment(userId, args, timezone);
+
+        case 'request_callback':
+            return await requestCallback(args, context);
 
         default:
             return { success: false, error: `Unknown tool: ${toolName}` };
@@ -401,5 +449,55 @@ async function rescheduleAppointment(
 
     } catch (error: any) {
         return { success: false, error: error.message || 'Reschedule request failed' };
+    }
+}
+
+/**
+ * Request a callback from the business
+ */
+async function requestCallback(
+    args: any,
+    context: ToolContext
+): Promise<ToolResult> {
+    try {
+        const callbackData: CallbackRequestData = {
+            customerName: args.customer_name,
+            customerPhone: args.customer_phone,
+            customerEmail: args.customer_email,
+            service: args.service,
+            purpose: args.purpose,
+            preferredTime: args.preferred_time
+        };
+
+        // Call the callback handler if provided
+        if (context.onCallbackRequest) {
+            context.onCallbackRequest(callbackData);
+        }
+
+        // Build confirmation message
+        let confirmMessage = `Callback request submitted for ${args.customer_name}. `;
+        confirmMessage += `We will call you at ${args.customer_phone}`;
+
+        if (args.preferred_time) {
+            confirmMessage += ` (${args.preferred_time})`;
+        }
+        confirmMessage += '. ';
+
+        if (args.service) {
+            confirmMessage += `Regarding: ${args.service}. `;
+        }
+
+        confirmMessage += `Thank you for reaching out to ${context.companyName}!`;
+
+        return {
+            success: true,
+            data: {
+                message: confirmMessage,
+                callbackData
+            }
+        };
+
+    } catch (error: any) {
+        return { success: false, error: error.message || 'Callback request failed' };
     }
 }

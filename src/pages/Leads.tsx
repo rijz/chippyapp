@@ -170,7 +170,12 @@ export const Leads = () => {
                                                 </div>
                                                 <div>
                                                     <div className="font-bold text-chippy-navy">{lead.name}</div>
-                                                    <div className="text-xs text-slate-400 max-w-[150px] truncate">{lead.notes}</div>
+                                                    {lead.service && (
+                                                        <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                                                            {lead.service}
+                                                        </span>
+                                                    )}
+                                                    <div className="text-xs text-slate-400 max-w-[150px] truncate mt-0.5">{lead.notes || lead.purpose}</div>
                                                 </div>
                                             </div>
                                         </td>
