@@ -22,7 +22,8 @@ export const MultiLocationCalendarManager: React.FC = () => {
         setCalendarConnections,
         knowledgeData,
         subscription,
-        canAddMoreCalendars
+        canAddMoreCalendars,
+        refreshData
     } = useData();
     const { session } = useAuth();
     const { showToast } = useToast();
@@ -76,9 +77,7 @@ export const MultiLocationCalendarManager: React.FC = () => {
 
                     if (createResult.success) {
                         // Refresh connections
-                        const { fetchCalendarConnections } = await import('../services/calendarConnections');
-                        const updated = await fetchCalendarConnections(userId);
-                        setCalendarConnections(updated);
+                        await refreshData();
                         showToast(`✅ Connected calendar: ${result.email}`, 'success');
                     } else {
                         showToast(`❌ Failed to save connection: ${createResult.error}`, 'error');
@@ -148,8 +147,8 @@ export const MultiLocationCalendarManager: React.FC = () => {
                     onClick={handleConnectNewCalendar}
                     disabled={isConnecting || activeCount >= limit}
                     className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 ${activeCount >= limit
-                            ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                            : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'
+                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'
                         }`}
                 >
                     <Plus className="w-4 h-4" />

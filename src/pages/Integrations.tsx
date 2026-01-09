@@ -8,7 +8,7 @@ import { CalendarSettings, CalendarItem } from '../types';
 import { MultiLocationCalendarManager } from '../components/MultiLocationCalendarManager';
 
 export const Integrations = () => {
-    const { tenantConfig, setTenantConfig, calendarSettings, setCalendarSettings } = useData();
+    const { tenantConfig, setTenantConfig, calendarSettings, setCalendarSettings, refreshData } = useData();
     const { session } = useAuth();
     const { showToast } = useToast();
     const userId = session?.user?.id || '';
@@ -136,6 +136,9 @@ export const Integrations = () => {
                     setTenantConfig(prev => ({ ...prev, isConnected: true, bookingPlatform: 'GOOGLE_CALENDAR' }));
 
                     showToast(`✅ Connected to Google Calendar of ${result.email}`, 'success');
+
+                    // Refresh data to show the new connection immediately
+                    await refreshData();
                 } else {
                     console.error('Backend connection failed:', result.error);
                     showToast('❌ Failed to connect calendar: ' + (result.error || 'Unknown error'), 'error');

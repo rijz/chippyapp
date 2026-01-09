@@ -1015,7 +1015,7 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
  */
 app.post('/api/calendar/connect', calendarLimiter, async (req, res) => {
   try {
-    const { code, userId } = req.body;
+    const { code, userId, locationId, locationName } = req.body;
 
     if (!code || !userId) {
       return res.status(400).json({ error: 'Missing required fields: code, userId' });
@@ -1033,27 +1033,76 @@ app.post('/api/calendar/connect', calendarLimiter, async (req, res) => {
     const userInfo = await oauth2.userinfo.get();
     const email = userInfo.data.email;
 
-    // Save connection to database
-    const { error } = await supabaseAdmin
+    // Check if there's already a connection for this user + provider + location
+    // For multi-location, each location can have its own calendar
+    // Note: For null location_id, we need to use .is('location_id', null) instead of .eq()
+    let existingQuery = supabaseAdmin
       .from('calendar_connections')
-      .upsert({
-        user_id: userId,
-        provider: 'google',
-        provider_email: email,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token, // This is crucial!
-        token_expires_at: new Date(tokens.expiry_date).toISOString(),
-        calendar_id: 'primary',
-        is_active: true,
-        connected_at: new Date().toISOString()
-      }, { onConflict: 'user_id,provider' });
+      .select('id')
+      .eq('user_id', userId)
+      .eq('provider', 'google');
 
-    if (error) {
-      console.error('[API] Database error saving connection:', error);
-      throw error;
+    if (locationId) {
+      existingQuery = existingQuery.eq('location_id', locationId);
+    } else {
+      existingQuery = existingQuery.is('location_id', null);
     }
 
-    res.json({ success: true, email: email });
+    const { data: existingConnections } = await existingQuery;
+
+    let connectionId;
+
+    if (existingConnections && existingConnections.length > 0) {
+      // Update existing connection
+      connectionId = existingConnections[0].id;
+      const { error } = await supabaseAdmin
+        .from('calendar_connections')
+        .update({
+          provider_email: email,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          token_expires_at: new Date(tokens.expiry_date).toISOString(),
+          calendar_id: 'primary',
+          is_active: true,
+          connected_at: new Date().toISOString(),
+          location_name: locationName || null
+        })
+        .eq('id', connectionId);
+
+      if (error) {
+        console.error('[API] Database error updating connection:', error);
+        throw error;
+      }
+    } else {
+      // Insert new connection
+      const { data, error } = await supabaseAdmin
+        .from('calendar_connections')
+        .insert({
+          user_id: userId,
+          provider: 'google',
+          provider_email: email,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          token_expires_at: new Date(tokens.expiry_date).toISOString(),
+          calendar_id: 'primary',
+          is_active: true,
+          connected_at: new Date().toISOString(),
+          location_id: locationId || null,
+          location_name: locationName || null,
+          display_order: 0
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        console.error('[API] Database error saving connection:', error);
+        throw error;
+      }
+
+      connectionId = data.id;
+    }
+
+    res.json({ success: true, email: email, connectionId });
 
   } catch (error) {
     console.error('[API] Auth code exchange error:', error);
