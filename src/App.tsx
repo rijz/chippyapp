@@ -24,6 +24,7 @@ import { AuthPage } from './components/AuthPage';
 import { ChatWidget } from './components/ChatWidget';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { ReviewItem } from './types';
+import { capitalizeName } from './utils/stringUtils';
 
 const AppContent = () => {
   const { session, loading } = useAuth();
@@ -77,7 +78,8 @@ const AuthenticatedApp = () => {
     addLead,
     updateLeadStatus,
     leads,
-    subscription
+    subscription,
+    calendarConnections
   } = useData();
 
   const { session } = useAuth();
@@ -169,7 +171,7 @@ const AuthenticatedApp = () => {
         onInteraction={handleChatInteraction}
         onLeadCapture={(leadData) => {
           addLead({
-            name: leadData.name,
+            name: capitalizeName(leadData.name),
             email: leadData.email,
             phone: leadData.phone,
             status: 'New',
@@ -178,6 +180,8 @@ const AuthenticatedApp = () => {
           });
         }}
         showPoweredBy={subscription.status !== 'active'}
+        locations={knowledgeData?.locations || []}
+        calendarConnections={calendarConnections}
         onSessionUpdate={(messages) => {
           // Save chat session to Inbox using stable session ID
           const sessionRecord = {
@@ -201,19 +205,21 @@ const AuthenticatedApp = () => {
             return [sessionRecord, ...prev];
           });
         }}
-        onBookingComplete={(customerEmail, customerName, customerPhone, service) => {
+        onBookingComplete={(customerEmail, customerName, customerPhone, service, locationId, locationName) => {
           // Check if lead exists
           const existingLead = leads.find(l => l.email.toLowerCase() === customerEmail.toLowerCase());
           if (!existingLead) {
             // Create new lead with Booked status
             addLead({
-              name: customerName || 'Customer',
+              name: capitalizeName(customerName || 'Customer'),
               email: customerEmail,
               phone: customerPhone || '',
               status: 'Booked',
               source: 'AI Chat',
               notes: 'Booked via chat widget',
-              service: service
+              service: service,
+              locationId: locationId,
+              locationName: locationName
             });
           } else {
             // Update existing lead to Booked status
@@ -232,14 +238,16 @@ const AuthenticatedApp = () => {
           if (!existingLead) {
             // Create new lead with Call Back status
             addLead({
-              name: data.customerName,
+              name: capitalizeName(data.customerName),
               email: data.customerEmail || '',
               phone: data.customerPhone,
               status: 'Call Back',
               source: 'AI Chat',
               notes: data.purpose || 'Callback requested via chat',
               service: data.service,
-              purpose: data.purpose
+              purpose: data.purpose,
+              preferredTime: data.preferredTime,
+              requestedCallbackDate: data.requestedDateTime ? new Date(data.requestedDateTime) : undefined
             });
           } else {
             // Update existing lead to Call Back status

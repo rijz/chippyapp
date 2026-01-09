@@ -128,6 +128,8 @@ export const EmbedPage = () => {
                 knowledgeSummary={knowledgeData ? JSON.stringify(knowledgeData) : ""}
                 onInteraction={handleInteraction}
                 showPoweredBy={true}
+                locations={knowledgeData?.locations || []}
+                calendarConnections={[]} // Embed mode doesn't need this - backend handles routing
             />
         </div>
     );

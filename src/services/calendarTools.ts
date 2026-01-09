@@ -12,7 +12,7 @@ export const CALENDAR_TOOLS = {
     functionDeclarations: [
         {
             name: "get_available_slots",
-            description: "Get available appointment time slots for a specific date range. Use this when the user asks about availability, open times, or when they can book.",
+            description: "Get available appointment time slots for a specific date range and location. Use this when the user asks about availability, open times, or when they can book. For multi-location businesses, ALWAYS specify the location_id.",
             parameters: {
                 type: "object",
                 properties: {
@@ -27,6 +27,10 @@ export const CALENDAR_TOOLS = {
                     duration_minutes: {
                         type: "number",
                         description: "Appointment duration in minutes. Default is 30."
+                    },
+                    location_id: {
+                        type: "string",
+                        description: "Location ID (e.g., 'loc-0', 'loc-1'). Required for multi-location businesses. Check available locations first."
                     }
                 },
                 required: ["start_date"]
@@ -34,7 +38,7 @@ export const CALENDAR_TOOLS = {
         },
         {
             name: "book_appointment",
-            description: "Book an appointment at a specific date and time. Use this when the user confirms they want to book a specific slot.",
+            description: "Book an appointment at a specific date, time, and location. Use this when the user confirms they want to book a specific slot. For multi-location businesses, location_id is REQUIRED.",
             parameters: {
                 type: "object",
                 properties: {
@@ -65,6 +69,14 @@ export const CALENDAR_TOOLS = {
                     notes: {
                         type: "string",
                         description: "Additional notes for the appointment (optional)"
+                    },
+                    location_id: {
+                        type: "string",
+                        description: "Location ID where appointment should be booked (e.g., 'loc-0'). Required for multi-location businesses."
+                    },
+                    location_name: {
+                        type: "string",
+                        description: "Name of the location for confirmation (e.g., 'Downtown Office')"
                     }
                 },
                 required: ["datetime", "customer_name", "customer_email"]
@@ -142,7 +154,11 @@ export const CALENDAR_TOOLS = {
                     },
                     preferred_time: {
                         type: "string",
-                        description: "Preferred time for callback (e.g., 'morning', 'afternoon', 'anytime')"
+                        description: "Preferred time description (e.g., 'morning', 'afternoon', 'evening', 'anytime')"
+                    },
+                    requested_datetime: {
+                        type: "string",
+                        description: "Specific date and time for callback in ISO 8601 format (e.g., '2026-01-09T14:00:00'). Ask the user for a specific date/time if they prefer."
                     }
                 },
                 required: ["customer_name", "customer_phone"]
@@ -157,6 +173,21 @@ export interface ToolContext {
     timezone: string;
     companyName: string;
     onCallbackRequest?: (data: CallbackRequestData) => void;
+    calendarConnections?: Array<{
+        id: string;
+        locationId?: string;
+        locationName?: string;
+        providerEmail: string;
+        calendarId: string;
+        isActive: boolean;
+    }>;
+    locations?: Array<{
+        name: string;
+        address: string;
+        city: string;
+        state: string;
+        zip: string;
+    }>;
 }
 
 // Callback request data structure
@@ -167,6 +198,7 @@ export interface CallbackRequestData {
     service?: string;
     purpose?: string;
     preferredTime?: string;
+    requestedDateTime?: string; // ISO 8601 datetime string
 }
 
 // Tool execution results
@@ -188,10 +220,10 @@ export async function executeCalendarTool(
 
     switch (toolName) {
         case 'get_available_slots':
-            return await getAvailableSlots(userId, args, timezone);
+            return await getAvailableSlots(userId, args, timezone, context);
 
         case 'book_appointment':
-            return await bookAppointment(userId, args, timezone, context.companyName);
+            return await bookAppointment(userId, args, timezone, context.companyName, context);
 
         case 'cancel_appointment':
             return await cancelAppointment(userId, args);
@@ -213,7 +245,8 @@ export async function executeCalendarTool(
 async function getAvailableSlots(
     userId: string,
     args: any,
-    timezone: string
+    timezone: string,
+    context?: ToolContext
 ): Promise<ToolResult> {
     try {
         // Parse date string as local date (avoid UTC interpretation)
@@ -245,6 +278,20 @@ async function getAvailableSlots(
 
                 const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
 
+                // Find target calendar for location (if specified)
+                let calendarInfo = {};
+                if (args.location_id && context?.calendarConnections) {
+                    const targetCalendar = context.calendarConnections.find(
+                        c => c.locationId === args.location_id && c.isActive
+                    );
+                    if (targetCalendar) {
+                        calendarInfo = {
+                            calendarId: targetCalendar.calendarId,
+                            providerEmail: targetCalendar.providerEmail
+                        };
+                    }
+                }
+
                 // Check availability via backend
                 const response = await fetch('/api/calendar/availability', {
                     method: 'POST',
@@ -253,7 +300,9 @@ async function getAvailableSlots(
                         userId,
                         startTime: slotStart.toISOString(),
                         endTime: slotEnd.toISOString(),
-                        provider: 'google'
+                        provider: 'google',
+                        locationId: args.location_id,
+                        ...calendarInfo
                     })
                 });
 
@@ -307,12 +356,28 @@ async function bookAppointment(
     userId: string,
     args: any,
     timezone: string,
-    companyName: string
+    companyName: string,
+    context?: ToolContext
 ): Promise<ToolResult> {
     try {
         const startTime = new Date(args.datetime);
         const duration = args.duration_minutes || 60;
         const endTime = new Date(startTime.getTime() + duration * 60 * 1000);
+
+        // Find the calendar connection for this location (if specified)
+        let targetCalendar = null;
+        if (args.location_id && context?.calendarConnections) {
+            targetCalendar = context.calendarConnections.find(
+                c => c.locationId === args.location_id && c.isActive
+            );
+
+            if (!targetCalendar) {
+                return {
+                    success: false,
+                    error: `No calendar configured for ${args.location_name || 'that location'}. Please contact support.`
+                };
+            }
+        }
 
         const response = await fetch('/api/calendar/create-event', {
             method: 'POST',
@@ -324,6 +389,7 @@ async function bookAppointment(
                     `Customer: ${args.customer_name}`,
                     `Email: ${args.customer_email}`,
                     args.customer_phone ? `Phone: ${args.customer_phone}` : '',
+                    args.location_name ? `Location: ${args.location_name}` : '',
                     args.notes ? `Notes: ${args.notes}` : '',
                     '',
                     `Booked via ${companyName} AI Assistant`
@@ -332,7 +398,12 @@ async function bookAppointment(
                 endTime: endTime.toISOString(),
                 attendees: [args.customer_email],
                 timezone,
-                provider: 'google'
+                provider: 'google',
+                // Location-specific routing
+                locationId: args.location_id,
+                locationName: args.location_name,
+                calendarId: targetCalendar?.calendarId,
+                providerEmail: targetCalendar?.providerEmail
             })
         });
 
@@ -349,13 +420,20 @@ async function bookAppointment(
                 timeZone: timezone
             });
 
+            let confirmMessage = `Appointment confirmed for ${confirmTime}`;
+            if (args.location_name) {
+                confirmMessage += ` at ${args.location_name}`;
+            }
+
             return {
                 success: true,
                 data: {
-                    message: `Appointment confirmed for ${confirmTime}`,
+                    message: confirmMessage,
                     eventId: result.eventId,
                     eventLink: result.eventLink,
-                    customerEmail: args.customer_email
+                    customerEmail: args.customer_email,
+                    locationId: args.location_id,
+                    locationName: args.location_name
                 }
             };
         } else {
@@ -466,7 +544,8 @@ async function requestCallback(
             customerEmail: args.customer_email,
             service: args.service,
             purpose: args.purpose,
-            preferredTime: args.preferred_time
+            preferredTime: args.preferred_time,
+            requestedDateTime: args.requested_datetime
         };
 
         // Call the callback handler if provided
@@ -478,7 +557,17 @@ async function requestCallback(
         let confirmMessage = `Callback request submitted for ${args.customer_name}. `;
         confirmMessage += `We will call you at ${args.customer_phone}`;
 
-        if (args.preferred_time) {
+        if (args.requested_datetime) {
+            const callbackDate = new Date(args.requested_datetime);
+            confirmMessage += ` on ${callbackDate.toLocaleString('en-US', {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            })}`;
+        } else if (args.preferred_time) {
             confirmMessage += ` (${args.preferred_time})`;
         }
         confirmMessage += '. ';

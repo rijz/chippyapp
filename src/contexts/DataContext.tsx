@@ -10,7 +10,8 @@ import {
     ReviewItem,
     Subscription,
     PLAN_DETAILS,
-    Lead
+    Lead,
+    CalendarConnection
 } from '../types';
 import { storage } from '../services/storage';
 import {
@@ -25,6 +26,7 @@ import {
     syncLeads,
     fetchLeads
 } from '../services/supabaseStorage';
+import { fetchCalendarConnections, canAddCalendar } from '../services/calendarConnections';
 
 // Default Configs (Copied from App.tsx)
 const DEFAULT_TENANT_CONFIG: TenantConfig = {
@@ -73,6 +75,8 @@ interface DataContextType {
     setWidgetConfig: React.Dispatch<React.SetStateAction<WidgetConfig>>;
     calendarSettings: CalendarSettings | null;
     setCalendarSettings: React.Dispatch<React.SetStateAction<CalendarSettings | null>>;
+    calendarConnections: CalendarConnection[];
+    setCalendarConnections: React.Dispatch<React.SetStateAction<CalendarConnection[]>>;
     knowledgeData: KnowledgeBaseData | null;
     setKnowledgeData: React.Dispatch<React.SetStateAction<KnowledgeBaseData | null>>;
     dashboardData: ChartDataPoint[];
@@ -93,6 +97,7 @@ interface DataContextType {
     updateLeadStatus: (email: string, status: Lead['status']) => void;
     isFeatureEnabled: (feature: string) => boolean;
     getOverageCost: () => number;
+    canAddMoreCalendars: () => Promise<{ allowed: boolean; current: number; limit: number }>;
     refreshData: () => Promise<void>;
 }
 
@@ -126,6 +131,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     });
 
     const [calendarSettings, setCalendarSettings] = useState<CalendarSettings | null>(() => storage.getCalendarSettings(null));
+    const [calendarConnections, setCalendarConnections] = useState<CalendarConnection[]>([]);
     const [knowledgeData, setKnowledgeData] = useState<KnowledgeBaseData | null>(() => storage.getKnowledgeData(null));
 
     const [dashboardData, setDashboardData] = useState<ChartDataPoint[]>(() => {
@@ -169,6 +175,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         // Always update knowledge data from Supabase (even if null - means it was reset)
         const remoteKnowledge = await fetchKnowledgeBase(userId);
         setKnowledgeData(remoteKnowledge);
+
+        // Fetch calendar connections
+        const connections = await fetchCalendarConnections(userId);
+        setCalendarConnections(connections);
 
         const settings = await fetchSettings(userId);
         if (settings) {
@@ -263,9 +273,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             conversations: chatSessions.length,
             locations: subscription.usage?.locations || 1,
             admins: subscription.usage?.admins || 1,
-            calendars: calendarSettings?.calendars.filter(c => c.selected).length || 0
+            calendars: calendarConnections.filter(c => c.isActive).length
         };
-    }, [chatSessions, subscription.usage, calendarSettings]);
+    }, [chatSessions, subscription.usage, calendarConnections]);
 
     const isFeatureEnabled = (feature: string) => {
         const details = PLAN_DETAILS[subscription.plan];
@@ -290,11 +300,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         return total;
     };
 
+    const canAddMoreCalendars = async () => {
+        if (!session?.user?.id) return { allowed: false, current: 0, limit: 0 };
+        const details = PLAN_DETAILS[subscription.plan];
+        if (!details) return { allowed: false, current: 0, limit: 0 };
+
+        return canAddCalendar(session.user.id, details.limits);
+    };
+
     return (
         <DataContext.Provider value={{
             tenantConfig, setTenantConfig,
             widgetConfig, setWidgetConfig,
             calendarSettings, setCalendarSettings,
+            calendarConnections, setCalendarConnections,
             knowledgeData, setKnowledgeData,
             dashboardData, setDashboardData,
             totalChats, setTotalChats,
@@ -306,6 +325,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             leads, setLeads, addLead, updateLeadStatus,
             isFeatureEnabled,
             getOverageCost,
+            canAddMoreCalendars,
             refreshData
         }}>
             {children}

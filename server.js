@@ -30,6 +30,7 @@ app.set('trust proxy', 1);
 app.use(helmet({
   contentSecurityPolicy: false, // Disable for SPA compatibility
   crossOriginEmbedderPolicy: false, // Allow widget embedding
+  frameguard: false, // Allow embedding in iframes on other domains (for chat widget)
 }));
 
 // CORS - Allow your domains + localhost
@@ -217,6 +218,69 @@ app.use(express.static(publicPath));
 app.use(express.static(servePath));
 
 // =====================
+// Embed Security - Dynamic frame-ancestors CSP
+// =====================
+// Middleware to set CSP header for embed pages based on user's allowed domains
+app.get('/embed', async (req, res, next) => {
+  try {
+    const userId = req.query.u;
+
+    if (userId) {
+      // Fetch user's allowed embed domains from settings
+      const { data: settings } = await supabaseAdmin
+        .from('settings')
+        .select('allowed_embed_domains, tenant_config')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      // Get allowed domains - fallback to tenant's website URL, then allow all
+      let allowedDomains = settings?.allowed_embed_domains || [];
+
+      // If no explicit domains, try to get from tenant config's website
+      if (allowedDomains.length === 0 && settings?.tenant_config?.companyUrl) {
+        try {
+          const url = new URL(settings.tenant_config.companyUrl);
+          allowedDomains = [url.origin];
+        } catch (e) {
+          // Invalid URL, skip
+        }
+      }
+
+      // Also fetch from knowledge base if still empty
+      if (allowedDomains.length === 0) {
+        const { data: knowledge } = await supabaseAdmin
+          .from('knowledge_bases')
+          .select('content')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (knowledge?.content?.website) {
+          try {
+            const url = new URL(knowledge.content.website);
+            allowedDomains = [url.origin];
+          } catch (e) {
+            // Invalid URL, skip
+          }
+        }
+      }
+
+      // Set CSP header if we have allowed domains
+      if (allowedDomains.length > 0) {
+        // Always include 'self' for preview in dashboard
+        const frameAncestors = ["'self'", ...allowedDomains].join(' ');
+        res.setHeader('Content-Security-Policy', `frame-ancestors ${frameAncestors}`);
+      }
+      // If no domains configured, don't set CSP (allow all - for initial setup)
+    }
+
+    next();
+  } catch (error) {
+    console.error('[Embed CSP] Error:', error);
+    next(); // Continue without CSP on error
+  }
+});
+
+// =====================
 // Public Widget Config API (for embeds - bypasses RLS)
 // =====================
 app.get('/api/widget-config/:userId', widgetConfigLimiter, async (req, res) => {
@@ -276,6 +340,133 @@ app.get('/env-config.js', (req, res) => {
   };
   res.type('application/javascript');
   res.send(`window.__ENV__ = ${JSON.stringify(env)};`);
+});
+
+// =====================
+// Allowed Embed Domains API
+// =====================
+
+// Get allowed embed domains for a user
+app.get('/api/embed-domains/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+
+    // Fetch settings
+    const { data: settings, error: settingsError } = await supabaseAdmin
+      .from('settings')
+      .select('allowed_embed_domains, tenant_config')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (settingsError) {
+      console.error('[API] Settings fetch error:', settingsError);
+      return res.status(500).json({ error: 'Failed to fetch settings' });
+    }
+
+    // Get allowed domains
+    let allowedDomains = settings?.allowed_embed_domains || [];
+    let defaultDomain = null;
+
+    // If no explicit domains, try to get website URL as default
+    if (allowedDomains.length === 0 && settings?.tenant_config?.companyUrl) {
+      try {
+        const url = new URL(settings.tenant_config.companyUrl);
+        defaultDomain = url.origin;
+      } catch (e) {
+        // Invalid URL
+      }
+    }
+
+    // Also check knowledge base
+    if (!defaultDomain) {
+      const { data: knowledge } = await supabaseAdmin
+        .from('knowledge_bases')
+        .select('content')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (knowledge?.content?.website) {
+        try {
+          const url = new URL(knowledge.content.website);
+          defaultDomain = url.origin;
+        } catch (e) {
+          // Invalid URL
+        }
+      }
+    }
+
+    res.json({
+      allowedDomains,
+      defaultDomain, // Suggested domain from their website
+      isConfigured: allowedDomains.length > 0
+    });
+
+  } catch (error) {
+    console.error('[API] Embed domains error:', error);
+    res.status(500).json({ error: 'Failed to fetch embed domains' });
+  }
+});
+
+// Update allowed embed domains
+app.put('/api/embed-domains/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { domains } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+
+    if (!Array.isArray(domains)) {
+      return res.status(400).json({ error: 'domains must be an array' });
+    }
+
+    // Validate and normalize domains
+    const validDomains = [];
+    for (const domain of domains) {
+      if (typeof domain !== 'string' || domain.trim() === '') continue;
+
+      try {
+        // Try to parse as URL, extract origin
+        let normalized = domain.trim();
+        if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+          normalized = 'https://' + normalized;
+        }
+        const url = new URL(normalized);
+        validDomains.push(url.origin);
+      } catch (e) {
+        // Skip invalid domains
+        console.warn(`[API] Invalid domain skipped: ${domain}`);
+      }
+    }
+
+    // Update settings
+    const { error: updateError } = await supabaseAdmin
+      .from('settings')
+      .upsert({
+        user_id: userId,
+        allowed_embed_domains: validDomains,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' });
+
+    if (updateError) {
+      console.error('[API] Update error:', updateError);
+      return res.status(500).json({ error: 'Failed to update embed domains' });
+    }
+
+    res.json({
+      success: true,
+      allowedDomains: validDomains
+    });
+
+  } catch (error) {
+    console.error('[API] Embed domains update error:', error);
+    res.status(500).json({ error: 'Failed to update embed domains' });
+  }
 });
 
 // Create Stripe Checkout Session

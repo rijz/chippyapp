@@ -1,9 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Sparkles, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
-import { Message, TenantConfig, WidgetConfig } from '../types';
+import { Message, TenantConfig, WidgetConfig, BusinessLocation, CalendarConnection } from '../types';
 import { createAgentSession, analyzeInteraction } from '../services/geminiService';
 import { CALENDAR_TOOLS, executeCalendarTool, ToolContext, CallbackRequestData } from '../services/calendarTools';
+import { LOCATION_TOOL, executeFindClosestLocation, getLocationSelectionPrompt } from '../services/locationTools';
 import { ChatSession } from '@google/generative-ai';
 
 // Simple Markdown renderer for chat messages
@@ -38,13 +39,29 @@ interface ChatWidgetProps {
   onInteraction?: (query: string, response: string, analysis: any) => void;
   onSessionUpdate?: (messages: Message[]) => void;
   onLeadCapture?: (leadData: { name: string; email: string; phone: string }) => void;
-  onBookingComplete?: (customerEmail: string, customerName?: string, customerPhone?: string, service?: string) => void;
+  onBookingComplete?: (customerEmail: string, customerName?: string, customerPhone?: string, service?: string, locationId?: string, locationName?: string) => void;
   onCancellation?: (customerEmail: string) => void;
   onCallbackRequest?: (data: CallbackRequestData) => void;
   showPoweredBy?: boolean; // Show "Powered by Chippy" badge for free users
+  locations?: BusinessLocation[]; // Business locations for multi-location support
+  calendarConnections?: CalendarConnection[]; // Calendar connections per location
 }
 
-export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConfig, knowledgeSummary, onInteraction, onSessionUpdate, onLeadCapture, onBookingComplete, onCancellation, onCallbackRequest, showPoweredBy = false }) => {
+
+export const ChatWidget: React.FC<ChatWidgetProps> = ({
+  tenantConfig,
+  widgetConfig,
+  knowledgeSummary,
+  onInteraction,
+  onSessionUpdate,
+  onLeadCapture,
+  onBookingComplete,
+  onCancellation,
+  onCallbackRequest,
+  showPoweredBy = false,
+  locations = [],
+  calendarConnections = []
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showLeadForm, setShowLeadForm] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -250,6 +267,30 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ tenantConfig, widgetConf
 
       ${correctionsInfo}
       
+      ${getLocationSelectionPrompt(locations, calendarConnections)}
+      
+      📍 COMMON LOCATION QUESTIONS (IMPORTANT):
+      When users ask questions like:
+      - "Where are you located?"
+      - "What locations do you have?"
+      - "Where are you?"
+      - "Do you have multiple locations?"
+      - "Which locations do you service?"
+      
+      They are asking about THE BUSINESS LOCATIONS, NOT your location as an AI.
+      
+      ✅ CORRECT Response Examples:
+      - "We have [number] locations: [list locations with addresses]"
+      - "We're located at [address] in [city]"
+      - "We serve customers at our [location names] locations"
+      
+      ❌ NEVER say:
+      - "I do not have the functionality to share my location"
+      - "I am an AI and don't have a physical location"
+      - "I cannot share location data"
+      
+      YOU REPRESENT ${tenantConfig.companyName}. When asked about location, always share the business location information from your knowledge base.
+      
       CONTACT COLLECTION RULES:
       ${userInfoContext ? `✅ You ALREADY HAVE the customer's contact information (see CUSTOMER INFO section above). DO NOT ask for their name, email, or phone again.` : `Collect contact info when booking:
 ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No details required."}
@@ -260,11 +301,12 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       You MUST use these tools. Do NOT recite times from memory. Do NOT make up availability.
       
       MANDATORY TOOL USAGE:
-      - When user asks about availability, times, or slots → ALWAYS call get_available_slots first
-      - When booking is confirmed → ALWAYS call book_appointment  
+      - When user asks about availability, times, or slots → ALWAYS call get_available_slots first (with location_id if multi-location)
+      - When booking is confirmed → ALWAYS call book_appointment (with location_id and location_name if multi-location)
       - When canceling → ALWAYS call cancel_appointment
       - When rescheduling → ALWAYS call reschedule_appointment
       - When user wants a callback instead of booking → call request_callback
+      - When user provides address for location finding → call find_closest_location
       
       NEVER list times without first calling get_available_slots. This is NON-NEGOTIABLE.
 
@@ -283,15 +325,17 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       2. Confirm the service with them
       3. Collect their NAME (required) and PHONE NUMBER (required)
       4. Email is optional but helpful
-      5. Ask if they have a preferred time for the callback
-      6. Then call request_callback with the collected information
+      5. Ask: "When would you like us to call you back?" - Try to get a SPECIFIC date and time (e.g., "Tomorrow at 2pm", "Friday morning at 10am")
+      6. If they give a specific date/time, use requested_datetime. If they give a general time (e.g., "morning", "afternoon"), use preferred_time
+      7. Then call request_callback with the collected information
 
       📅 BOOKING FLOW:
       1. First, match their need to a SERVICE
       2. Confirm the service with them
-      3. Check availability using get_available_slots
-      4. Collect contact info (name, email required; phone as configured)
-      5. Book with book_appointment including service_type
+      3. For multi-location: Ask which location or if they want closest to their address
+      4. Check availability using get_available_slots (with location_id)
+      5. Collect contact info (name, email required; phone as configured)
+      6. Book with book_appointment including service_type, location_id, and location_name
 
       📅 DATE VERIFICATION (CRITICAL):
       Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}.
@@ -319,7 +363,22 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       userId: tenantConfig.userId,
       timezone: 'America/New_York',
       companyName: tenantConfig.companyName,
-      onCallbackRequest: onCallbackRequest
+      onCallbackRequest: onCallbackRequest,
+      calendarConnections: calendarConnections.map(c => ({
+        id: c.id,
+        locationId: c.locationId,
+        locationName: c.locationName,
+        providerEmail: c.providerEmail,
+        calendarId: c.calendarId,
+        isActive: c.isActive
+      })),
+      locations: locations.map(loc => ({
+        name: loc.name,
+        address: loc.address,
+        city: loc.city,
+        state: loc.state,
+        zip: loc.zip
+      }))
     };
 
     const toolExecutor = async (name: string, args: any) => {
@@ -330,8 +389,18 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         'cancel_appointment': '❌ Canceling appointment...',
         'reschedule_appointment': '🔄 Rescheduling...',
         'request_callback': '📞 Submitting callback request...',
+        'find_closest_location': '📍 Finding closest location...',
       };
       setStatusMessage(statusMessages[name] || '🔄 Processing...');
+
+      // Handle location tool
+      if (name === 'find_closest_location') {
+        const result = await executeFindClosestLocation(args, locations);
+        setStatusMessage('');
+        return result;
+      }
+
+      // Handle calendar tools
       const result = await executeCalendarTool(name, args, toolContext);
       setStatusMessage('');
 
@@ -345,7 +414,14 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         setClickableSlots([]);
         // Create/update lead with booking status
         if (onBookingComplete && args.customer_email) {
-          onBookingComplete(args.customer_email, args.customer_name, args.customer_phone, args.service_type);
+          onBookingComplete(
+            args.customer_email,
+            args.customer_name,
+            args.customer_phone,
+            args.service_type,
+            args.location_id,
+            args.location_name
+          );
         }
       }
 
@@ -359,7 +435,13 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       return result;
     };
 
-    const session = await createAgentSession(systemInstruction, [CALENDAR_TOOLS], toolExecutor);
+    // Combine calendar tools and location tool
+    const allTools = [
+      CALENDAR_TOOLS,
+      { functionDeclarations: [LOCATION_TOOL] }
+    ];
+
+    const session = await createAgentSession(systemInstruction, allTools, toolExecutor);
 
     // Restore previous conversation history if it exists
     const savedMessages = localStorage.getItem(`chatMessages_${sessionId}`);

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Calendar, CheckCircle2, RefreshCw, Clock, CalendarDays, Settings, LogOut, ChevronRight } from 'lucide-react';
+import { Calendar, CheckCircle2, RefreshCw, Clock, CalendarDays, Settings, LogOut, ChevronRight, Globe, Plus, X, Shield, AlertCircle, Loader2 } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { handleAuthClick, loadGoogleScripts, fetchCalendars, handleSignOut } from '../services/calendarAuth';
 import { CalendarSettings, CalendarItem } from '../types';
+import { MultiLocationCalendarManager } from '../components/MultiLocationCalendarManager';
 
 export const Integrations = () => {
     const { tenantConfig, setTenantConfig, calendarSettings, setCalendarSettings } = useData();
@@ -14,10 +15,98 @@ export const Integrations = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [availableCalendars, setAvailableCalendars] = useState<CalendarItem[]>([]);
 
+    // Embed domain state
+    const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
+    const [defaultDomain, setDefaultDomain] = useState<string | null>(null);
+    const [newDomain, setNewDomain] = useState('');
+    const [isLoadingDomains, setIsLoadingDomains] = useState(true);
+    const [isSavingDomains, setIsSavingDomains] = useState(false);
+    const [hasChanges, setHasChanges] = useState(false);
+
     useEffect(() => {
         loadGoogleScripts();
         // Calendar list fetching removed - backend integration uses owner's primary calendar by default
     }, []);
+
+    // Load allowed embed domains
+    useEffect(() => {
+        const loadEmbedDomains = async () => {
+            if (!userId) return;
+
+            try {
+                const response = await fetch(`/api/embed-domains/${userId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setAllowedDomains(data.allowedDomains || []);
+                    setDefaultDomain(data.defaultDomain);
+                }
+            } catch (error) {
+                console.error('[Integrations] Failed to load embed domains:', error);
+            } finally {
+                setIsLoadingDomains(false);
+            }
+        };
+
+        loadEmbedDomains();
+    }, [userId]);
+
+    const addDomain = () => {
+        if (!newDomain.trim()) return;
+
+        // Normalize domain
+        let domain = newDomain.trim();
+        if (!domain.startsWith('http://') && !domain.startsWith('https://')) {
+            domain = 'https://' + domain;
+        }
+
+        try {
+            const url = new URL(domain);
+            const origin = url.origin;
+
+            if (!allowedDomains.includes(origin)) {
+                setAllowedDomains(prev => [...prev, origin]);
+                setHasChanges(true);
+            }
+            setNewDomain('');
+        } catch (e) {
+            showToast('Invalid domain format', 'error');
+        }
+    };
+
+    const removeDomain = (domain: string) => {
+        setAllowedDomains(prev => prev.filter(d => d !== domain));
+        setHasChanges(true);
+    };
+
+    const saveDomains = async () => {
+        setIsSavingDomains(true);
+        try {
+            const response = await fetch(`/api/embed-domains/${userId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ domains: allowedDomains })
+            });
+
+            if (response.ok) {
+                showToast('Allowed domains saved successfully!', 'success');
+                setHasChanges(false);
+            } else {
+                throw new Error('Failed to save');
+            }
+        } catch (error) {
+            console.error('[Integrations] Failed to save embed domains:', error);
+            showToast('Failed to save allowed domains', 'error');
+        } finally {
+            setIsSavingDomains(false);
+        }
+    };
+
+    const useDefaultDomain = () => {
+        if (defaultDomain && !allowedDomains.includes(defaultDomain)) {
+            setAllowedDomains(prev => [...prev, defaultDomain]);
+            setHasChanges(true);
+        }
+    };
 
     const handleConnectCalendar = async () => {
         setIsLoading(true);
@@ -104,9 +193,10 @@ export const Integrations = () => {
         <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500 pb-20">
             <header>
                 <h2 className="text-3xl font-bold text-chippy-navy tracking-tight">Integrations</h2>
-                <p className="text-slate-500">Connect Chippy to your primary calendar.</p>
+                <p className="text-slate-500">Connect Chippy to your calendars and locations.</p>
             </header>
 
+            {/* Multi-Location Calendar Manager */}
             <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
                 <div className="p-10 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                     <div className="flex items-center gap-6">
@@ -115,28 +205,12 @@ export const Integrations = () => {
                         </div>
                         <div>
                             <h3 className="font-bold text-2xl text-chippy-navy">Google Calendar</h3>
-                            <p className="text-slate-500">Sync availability and book appointments automatically.</p>
+                            <p className="text-slate-500">Manage multiple calendars for different locations.</p>
                         </div>
                     </div>
-                    {tenantConfig.isConnected ? (
-                        <div className="flex items-center gap-4">
-                            <div className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold flex items-center gap-2 border border-emerald-100">
-                                <CheckCircle2 className="w-4 h-4" /> Connected as {calendarSettings?.email}
-                            </div>
-                            <button onClick={handleDisconnect} className="p-2 text-slate-400 hover:text-red-500 transition-colors" title="Disconnect">
-                                <LogOut className="w-5 h-5" />
-                            </button>
-                        </div>
-                    ) : (
-                        <button
-                            onClick={handleConnectCalendar}
-                            disabled={isLoading}
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-blue-200 transition-all flex items-center gap-2"
-                        >
-                            {isLoading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Calendar className="w-5 h-5" />}
-                            Connect Google
-                        </button>
-                    )}
+                </div>
+                <div className="p-10">
+                    <MultiLocationCalendarManager />
                 </div>
             </div>
 
@@ -197,26 +271,145 @@ export const Integrations = () => {
                         </div>
                     </div>
                 </div>
-                <div className="p-10 text-left">
-                    <p className="text-sm text-slate-500 mb-4">Copy and paste this code anywhere in your website's HTML (before <code>&lt;/body&gt;</code> is recommended).</p>
-                    <div className="relative group">
-                        <div className="w-full p-4 bg-slate-900 text-slate-300 font-mono text-sm rounded-xl border border-slate-700 overflow-x-auto">
-                            <span className="text-purple-400">&lt;script</span>
-                            <span className="text-sky-400"> src</span>=<span className="text-emerald-400">"https://app.hellochippy.com/widget.js"</span>
-                            <span className="text-sky-400"> data-chippy-id</span>=<span className="text-emerald-400">"{userId}"</span>
-                            <span className="text-purple-400">&gt;&lt;/script&gt;</span>
+                <div className="p-10 text-left space-y-8">
+                    {/* Embed Code */}
+                    <div>
+                        <p className="text-sm text-slate-500 mb-4">Copy and paste this code anywhere in your website's HTML (before <code>&lt;/body&gt;</code> is recommended).</p>
+                        <div className="relative group">
+                            <div className="w-full p-4 bg-slate-900 text-slate-300 font-mono text-sm rounded-xl border border-slate-700 overflow-x-auto">
+                                <span className="text-purple-400">&lt;script</span>
+                                <span className="text-sky-400"> src</span>=<span className="text-emerald-400">"https://app.hellochippy.com/widget.js"</span>
+                                <span className="text-sky-400"> data-chippy-id</span>=<span className="text-emerald-400">"{userId}"</span>
+                                <span className="text-purple-400">&gt;&lt;/script&gt;</span>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard.writeText(`<script src="https://app.hellochippy.com/widget.js" data-chippy-id="${userId}"></script>`);
+                                    showToast("Copied to clipboard!", 'success');
+                                }}
+                                className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all border border-white/10"
+                            >
+                                Copy Code
+                            </button>
                         </div>
-                        <button
-                            onClick={() => {
-                                navigator.clipboard.writeText(`<script src="https://app.hellochippy.com/widget.js" data-chippy-id="${userId}"></script>`);
-                                showToast("Copied to clipboard!", 'success');
-                            }}
-                            className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all border border-white/10"
-                        >
-                            Copy Code
-                        </button>
+                        <p className="text-xs text-slate-400 mt-3">Works with any website: WordPress, Shopify, Squarespace, Wix, custom HTML, and more.</p>
                     </div>
-                    <p className="text-xs text-slate-400 mt-3">Works with any website: WordPress, Shopify, Squarespace, Wix, custom HTML, and more.</p>
+
+                    {/* Allowed Domains Section */}
+                    <div className="border-t border-slate-100 pt-8">
+                        <div className="flex items-center gap-3 mb-4">
+                            <Shield className="w-5 h-5 text-chippy-coral" />
+                            <h4 className="font-bold text-lg text-chippy-navy">Allowed Embed Domains</h4>
+                        </div>
+                        <p className="text-sm text-slate-500 mb-4">
+                            For security, specify which websites can embed your chat widget. Only these domains will be able to display your widget in an iframe.
+                        </p>
+
+                        {isLoadingDomains ? (
+                            <div className="flex items-center justify-center py-8">
+                                <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                            </div>
+                        ) : (
+                            <>
+                                {/* Current Domains List */}
+                                <div className="space-y-2 mb-4">
+                                    {allowedDomains.length === 0 ? (
+                                        <div className="flex items-center gap-2 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                                            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                                            <p className="text-sm text-amber-800">
+                                                No domains configured. Your widget can currently be embedded on any website.
+                                                {defaultDomain && (
+                                                    <button
+                                                        onClick={useDefaultDomain}
+                                                        className="ml-2 text-amber-700 underline hover:text-amber-900 font-medium"
+                                                    >
+                                                        Add {defaultDomain}
+                                                    </button>
+                                                )}
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        allowedDomains.map((domain, index) => (
+                                            <div key={index} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl group">
+                                                <Globe className="w-4 h-4 text-slate-400" />
+                                                <span className="flex-1 text-sm font-medium text-slate-700">{domain}</span>
+                                                <button
+                                                    onClick={() => removeDomain(domain)}
+                                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 rounded-lg transition-all"
+                                                >
+                                                    <X className="w-4 h-4 text-red-500" />
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                {/* Add New Domain */}
+                                <div className="flex gap-2 mb-4">
+                                    <input
+                                        type="text"
+                                        value={newDomain}
+                                        onChange={(e) => setNewDomain(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && addDomain()}
+                                        placeholder="https://yourwebsite.com"
+                                        className="flex-1 p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-chippy-coral focus:border-transparent"
+                                    />
+                                    <button
+                                        onClick={addDomain}
+                                        className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all flex items-center gap-2 font-medium"
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                        Add
+                                    </button>
+                                </div>
+
+                                {/* Default Domain Suggestion */}
+                                {defaultDomain && !allowedDomains.includes(defaultDomain) && allowedDomains.length > 0 && (
+                                    <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
+                                        <Globe className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                        <p className="text-sm text-blue-800 flex-1">
+                                            Your website <strong>{defaultDomain}</strong> is not in the list.
+                                        </p>
+                                        <button
+                                            onClick={useDefaultDomain}
+                                            className="text-blue-700 hover:text-blue-900 text-sm font-medium underline"
+                                        >
+                                            Add it
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Save Button */}
+                                {hasChanges && (
+                                    <button
+                                        onClick={saveDomains}
+                                        disabled={isSavingDomains}
+                                        className="w-full py-3 bg-chippy-coral hover:bg-chippy-coral/90 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                                    >
+                                        {isSavingDomains ? (
+                                            <>
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                Saving...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <CheckCircle2 className="w-4 h-4" />
+                                                Save Changes
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+
+                                {/* Security Note */}
+                                {allowedDomains.length > 0 && (
+                                    <p className="text-xs text-slate-400 mt-4 flex items-center gap-1">
+                                        <Shield className="w-3 h-3" />
+                                        Your widget is protected. Only the domains listed above can embed it.
+                                    </p>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

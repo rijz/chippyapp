@@ -17,6 +17,10 @@ export interface Lead {
   notes: string;
   service?: string; // Selected service for the appointment/callback
   purpose?: string; // Purpose of callback (if applicable)
+  preferredTime?: string; // Preferred time for callback (e.g., "morning", "afternoon")
+  requestedCallbackDate?: Date; // Specific date/time requested for callback
+  locationId?: string; // Location where appointment is booked
+  locationName?: string; // Name of the location (for display)
 }
 
 export type BusinessType = 'storefront' | 'mobile' | 'online';
@@ -138,6 +142,26 @@ export interface LogEntry {
   timestamp: Date;
 }
 
+export interface CalendarConnection {
+  id: string;
+  provider: 'google' | 'calendly' | 'outlook';
+  providerEmail: string;
+  calendarId: string;
+  locationId?: string; // Link to BusinessLocation
+  locationName?: string; // Cached location name for display
+  calendarName?: string; // Custom name (e.g., "Downtown Office Calendar")
+  isActive: boolean;
+  connectedAt: Date;
+  lastUsedAt?: Date;
+  appointmentDuration?: number; // Minutes
+  metadata?: {
+    workingHours?: string;
+    bufferTime?: number;
+    [key: string]: any;
+  };
+}
+
+// Legacy support - keeping for backward compatibility
 export interface CalendarItem {
   id: string;
   name: string;
@@ -150,6 +174,7 @@ export interface CalendarSettings {
   calendars: CalendarItem[];
   bookingCalendarId: string;
   appointmentDuration: number;
+  connections?: CalendarConnection[]; // New multi-location connections
 }
 
 export interface Subscription {
