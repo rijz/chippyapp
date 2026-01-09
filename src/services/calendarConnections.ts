@@ -127,6 +127,13 @@ export async function deleteCalendarConnection(
     connectionId: string
 ): Promise<{ success: boolean; error?: string }> {
     try {
+        // First get the connection details to know user_id and email
+        const { data: connection } = await supabase
+            .from('calendar_connections')
+            .select('user_id, provider_email')
+            .eq('id', connectionId)
+            .single();
+
         const { error } = await supabase
             .from('calendar_connections')
             .delete()
@@ -135,6 +142,29 @@ export async function deleteCalendarConnection(
         if (error) {
             console.error('Error deleting calendar connection:', error);
             return { success: false, error: error.message };
+        }
+
+        // Cleanup legacy settings if this was the connected email
+        if (connection && connection.user_id) {
+            const { data: settings } = await supabase
+                .from('settings')
+                .select('calendar_settings')
+                .eq('user_id', connection.user_id)
+                .single();
+
+            if (settings?.calendar_settings?.email === connection.provider_email) {
+                // Clear the legacy setting
+                await supabase
+                    .from('settings')
+                    .update({
+                        calendar_settings: {
+                            ...settings.calendar_settings,
+                            email: null,
+                            calendars: []
+                        }
+                    })
+                    .eq('user_id', connection.user_id);
+            }
         }
 
         return { success: true };

@@ -15,6 +15,7 @@ import {
     deleteCalendarConnection
 } from '../services/calendarConnections';
 import { handleAuthClick } from '../services/calendarAuth';
+import { supabase } from '../services/supabaseClient';
 
 export const MultiLocationCalendarManager: React.FC = () => {
     const {
@@ -23,7 +24,10 @@ export const MultiLocationCalendarManager: React.FC = () => {
         knowledgeData,
         subscription,
         canAddMoreCalendars,
-        refreshData
+
+        refreshData,
+        calendarSettings,
+        setCalendarSettings
     } = useData();
     const { session } = useAuth();
     const { showToast } = useToast();
@@ -62,26 +66,24 @@ export const MultiLocationCalendarManager: React.FC = () => {
                 const result = await response.json();
 
                 if (response.ok && result.success) {
-                    // Create new connection in database
-                    const newConnection: Omit<CalendarConnection, 'id' | 'connectedAt' | 'lastUsedAt'> = {
-                        provider: 'google',
-                        providerEmail: result.email,
-                        calendarId: 'primary',
-                        isActive: true,
+                    // Update legacy settings in DB explicitly to ensure persistence
+                    const newSettings = {
+                        email: result.email,
+                        calendars: [],
+                        bookingCalendarId: 'primary',
                         appointmentDuration: 30,
-                        calendarName: `Calendar - ${result.email}`,
-                        metadata: {}
+                        ...(calendarSettings || {})
                     };
+                    newSettings.email = result.email;
 
-                    const createResult = await createCalendarConnection(userId, newConnection);
+                    await supabase
+                        .from('settings')
+                        .update({ calendar_settings: newSettings })
+                        .eq('user_id', userId);
 
-                    if (createResult.success) {
-                        // Refresh connections
-                        await refreshData();
-                        showToast(`✅ Connected calendar: ${result.email}`, 'success');
-                    } else {
-                        showToast(`❌ Failed to save connection: ${createResult.error}`, 'error');
-                    }
+                    // Refresh data to fetch both the new connection and the updated settings
+                    await refreshData();
+                    showToast(`✅ Connected calendar: ${result.email}`, 'success');
                 } else {
                     showToast('❌ Failed to connect calendar: ' + (result.error || 'Unknown error'), 'error');
                 }

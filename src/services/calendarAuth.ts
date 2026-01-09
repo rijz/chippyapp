@@ -122,6 +122,7 @@ export const handleAuthClick = (): Promise<{ code: string }> => {
             client_id: CLIENT_ID,
             scope: SCOPES,
             ux_mode: 'popup',
+            select_account: true, // Force account selection
             callback: (response: any) => {
                 if (response.code) {
                     resolve({ code: response.code });
