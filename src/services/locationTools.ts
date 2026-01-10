@@ -124,37 +124,117 @@ export function getLocationSelectionPrompt(
     locations: BusinessLocation[],
     calendarConnections: CalendarConnection[]
 ): string {
-    if (locations.length === 0) {
+    // Check if there are any active calendar connections
+    const hasActiveCalendar = calendarConnections.some(c => c.isActive);
+
+    // No locations AND no calendars = no booking
+    if (locations.length === 0 && !hasActiveCalendar) {
         return '';
     }
 
+    // No locations defined but there IS an active calendar = single unnamed location
+    // This handles the case where business hasn't added locations to knowledge base yet
+    if (locations.length === 0 && hasActiveCalendar) {
+        return `
+**BOOKING AVAILABLE:**
+✅ Online booking is enabled. Use get_available_slots (no location_id needed) when the customer wants to book.
+
+📅 **BOOKING FLOW:**
+1. Ask what service they need
+2. Call get_available_slots to check availability
+3. Collect contact info (name, email, phone as configured)
+4. Book with book_appointment
+`;
+    }
+
+    // Helper: check if a location has a connected calendar
+    const isLocationBookable = (locIndex: number): boolean => {
+        const locId = `loc-${locIndex}`;
+        // Check for explicit location match first
+        const hasExplicitMatch = calendarConnections.some(c =>
+            c.locationId === locId && c.isActive
+        );
+        if (hasExplicitMatch) return true;
+
+        // For single-location businesses: if there's a calendar without locationId, 
+        // consider the single location bookable
+        if (locations.length === 1) {
+            return calendarConnections.some(c =>
+                c.isActive && (!c.locationId || c.locationId === '' || c.locationId === 'loc-0')
+            );
+        }
+
+        return false;
+    };
+
     // Filter to only locations with active calendars (bookable)
-    const bookableLocations = locations.filter((loc, idx) => {
-        const locId = `loc-${idx}`;
-        return calendarConnections.some(c => c.locationId === locId && c.isActive);
-    });
+    const bookableLocations = locations.filter((_, idx) => isLocationBookable(idx));
 
     // For single location businesses
     if (locations.length === 1) {
         const loc = locations[0];
-        const isBookable = bookableLocations.length === 1;
-        return `\n\n**Location Information:**\nWe are located at: ${loc.name} - ${loc.address}, ${loc.city}, ${loc.state} ${loc.zip}${!isBookable ? '\n⚠️ Note: Online booking not yet available at this location. Customer should call for appointments.' : ''}`;
+        const isBookable = bookableLocations.length === 1 || hasActiveCalendar;
+        return `
+
+**Location Information:**
+We are located at: ${loc.name} - ${loc.address}, ${loc.city}, ${loc.state} ${loc.zip}
+${isBookable ? '✅ Online booking is available at this location.' : '⚠️ Note: Online booking not yet available at this location. Customer should call for appointments.'}`;
     }
 
-    // Show ALL locations for general location questions
+    // Multi-location: Show ALL locations for general location questions
     const allLocationsList = locations.map((loc, idx) => {
-        const locId = `loc-${idx}`;
-        const isBookable = calendarConnections.some(c => c.locationId === locId && c.isActive);
-        return `${idx + 1}. **${loc.name}**${!isBookable ? ' _(call to book)_' : ''}\n   Address: ${loc.address}, ${loc.city}, ${loc.state} ${loc.zip}`;
+        const isBookable = isLocationBookable(idx);
+        return `${idx + 1}. **${loc.name}**${!isBookable ? ' _(call to book)_' : ''}
+   Address: ${loc.address}, ${loc.city}, ${loc.state} ${loc.zip}`;
     }).join('\n\n');
 
     // Show only BOOKABLE locations for appointment context
     const bookableLocationsList = bookableLocations.map((loc) => {
         const originalIndex = locations.indexOf(loc);
-        return `${originalIndex + 1}. **${loc.name}**\n   Address: ${loc.address}, ${loc.city}, ${loc.state} ${loc.zip}`;
+        return `${originalIndex + 1}. **${loc.name}**
+   Address: ${loc.address}, ${loc.city}, ${loc.state} ${loc.zip}
+   location_id: loc-${originalIndex}`;
     }).join('\n\n');
 
-    return `\n\n**Business Locations:**\n\nWe have ${locations.length} location${locations.length > 1 ? 's' : ''}:\n\n${allLocationsList}\n\n**IMPORTANT - LOCATION HANDLING**:\n\n📍 **When asked general location questions** (e.g., "where are you located?", "what locations do you have?"):\n- List ALL ${locations.length} locations above\n- This is for informational purposes\n\n📅 **When booking an appointment:**\n${bookableLocations.length === 0 ? '- Currently no locations have online booking enabled\n- Direct customer to call for appointments' : `- Only offer the ${bookableLocations.length} location${bookableLocations.length > 1 ? 's' : ''} with online booking enabled:\n\n${bookableLocationsList}\n\n- Ask which bookable location they prefer\n- If they mention an address, use find_closest_location tool to suggest the nearest BOOKABLE location\n- Once confirmed, use that location's location_id when checking availability`}\n\n**BOOKING FLOW FOR IN-PERSON APPOINTMENTS:**\n1. Customer asks to book → Ask which location they prefer from the BOOKABLE ones\n2. If they give an address → Use find_closest_location to suggest nearest bookable location\n3. They confirm location → Check availability with that location_id\n4. Show times → Book with location_id and location_name\n\n**For virtual/phone appointments:** Location selection not needed.`;
+    // If no locations have calendars but there IS an active calendar without a location assigned
+    const hasUnassignedCalendar = calendarConnections.some(c => c.isActive && !c.locationId);
+
+    return `
+
+**Business Locations:**
+
+We have ${locations.length} location${locations.length > 1 ? 's' : ''}:
+
+${allLocationsList}
+
+**IMPORTANT - LOCATION HANDLING**:
+
+📍 **When asked general location questions** (e.g., "where are you located?", "what locations do you have?"):
+- List ALL ${locations.length} locations above
+- This is for informational purposes
+
+📅 **When booking an appointment:**
+${bookableLocations.length === 0
+            ? hasUnassignedCalendar
+                ? `- Online booking is available but not yet assigned to a specific location
+- Ask which location they prefer, then book using get_available_slots (location_id optional)`
+                : `- Currently no locations have online booking enabled
+- Direct customer to call for appointments`
+            : `- Only offer the ${bookableLocations.length} location${bookableLocations.length > 1 ? 's' : ''} with online booking enabled:
+
+${bookableLocationsList}
+
+- Ask which bookable location they prefer
+- If they mention an address, use find_closest_location tool to suggest the nearest BOOKABLE location
+- Once confirmed, use that location's location_id when checking availability`}
+
+**BOOKING FLOW FOR IN-PERSON APPOINTMENTS:**
+1. Customer asks to book → Ask which location they prefer from the BOOKABLE ones
+2. If they give an address → Use find_closest_location to suggest nearest bookable location
+3. They confirm location → Check availability with that location_id
+4. Show times → Book with location_id and location_name
+
+**For virtual/phone appointments:** Location selection not needed.`;
 }
 
 /**
