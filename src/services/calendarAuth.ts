@@ -123,12 +123,13 @@ export const handleAuthClick = (): Promise<{ code: string }> => {
         }
 
         console.log('[Google Auth] Initializing code client...');
+        console.log('[Google Auth] Current origin:', window.location.origin);
 
         const codeClient = google.accounts.oauth2.initCodeClient({
             client_id: CLIENT_ID,
             scope: SCOPES,
             ux_mode: 'popup',
-            select_account: true,
+            // Note: select_account removed - can cause popup issues in some browsers
             callback: (response: any) => {
                 console.log('[Google Auth] Callback triggered!');
                 console.log('[Google Auth] Response keys:', Object.keys(response || {}));
@@ -149,7 +150,12 @@ export const handleAuthClick = (): Promise<{ code: string }> => {
             },
             error_callback: (error: any) => {
                 console.error('[Google Auth] Error callback triggered:', error);
-                reject(new Error(error.type || 'Google Auth Error'));
+                // Provide more helpful error message for popup_closed
+                if (error.type === 'popup_closed') {
+                    reject(new Error('Authentication popup was closed. Please try again and complete the sign-in process.'));
+                } else {
+                    reject(new Error(error.message || error.type || 'Google Auth Error'));
+                }
             }
         });
 
