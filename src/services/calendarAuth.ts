@@ -116,26 +116,44 @@ export const handleAuthClick = (): Promise<{ code: string }> => {
         }
 
         if (!google || !google.accounts || !google.accounts.oauth2) {
-            console.error("Google Auth not fully initialized.");
+            console.error("[Google Auth] Google Auth not fully initialized.");
             alert("Auth system is still loading. Please wait a moment and try again.");
             reject(new Error("Auth not initialized"));
             return;
         }
 
+        console.log('[Google Auth] Initializing code client...');
+
         const codeClient = google.accounts.oauth2.initCodeClient({
             client_id: CLIENT_ID,
             scope: SCOPES,
             ux_mode: 'popup',
-            select_account: true, // Force account selection
+            select_account: true,
             callback: (response: any) => {
+                console.log('[Google Auth] Callback triggered!');
+                console.log('[Google Auth] Response keys:', Object.keys(response || {}));
+
+                if (response.error) {
+                    console.error('[Google Auth] Error in response:', response.error, response.error_description);
+                    reject(new Error(response.error_description || response.error));
+                    return;
+                }
+
                 if (response.code) {
+                    console.log('[Google Auth] Got authorization code, length:', response.code.length);
                     resolve({ code: response.code });
                 } else {
-                    reject(response);
+                    console.error('[Google Auth] No code in response:', response);
+                    reject(new Error('No authorization code received'));
                 }
             },
+            error_callback: (error: any) => {
+                console.error('[Google Auth] Error callback triggered:', error);
+                reject(new Error(error.type || 'Google Auth Error'));
+            }
         });
 
+        console.log('[Google Auth] Requesting code (popup should open)...');
         codeClient.requestCode();
     });
 };
