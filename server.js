@@ -1033,8 +1033,23 @@ app.post('/api/calendar/connect', calendarLimiter, async (req, res) => {
     }
 
     // Exchange code for tokens
+    // For redirect flow, we need to provide the same redirect_uri that was used to get the code
     console.log('[API /calendar/connect] Exchanging auth code for tokens...');
-    const { tokens } = await oauth2Client.getToken(code);
+
+    // Create a new OAuth client with the correct redirect_uri for this request
+    const redirectUri = process.env.VITE_APP_URL
+      ? process.env.VITE_APP_URL.replace(/\/$/, '') + '/integrations'
+      : 'https://app.hellochippy.com/integrations';
+
+    console.log('[API /calendar/connect] Using redirect_uri:', redirectUri);
+
+    const tokenExchangeClient = new google.auth.OAuth2(
+      process.env.VITE_GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      redirectUri
+    );
+
+    const { tokens } = await tokenExchangeClient.getToken(code);
     console.log('[API /calendar/connect] OAuth Tokens received:', Object.keys(tokens));
 
     // Set credentials in client to verify they work
