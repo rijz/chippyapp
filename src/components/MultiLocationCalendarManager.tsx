@@ -14,7 +14,7 @@ import {
     updateCalendarConnection,
     deleteCalendarConnection
 } from '../services/calendarConnections';
-import { handleAuthClick } from '../services/calendarAuth';
+import { handleAuthClick, handleOAuthRedirect } from '../services/calendarAuth';
 import { supabase } from '../services/supabaseClient';
 
 export const MultiLocationCalendarManager: React.FC = () => {
@@ -40,6 +40,59 @@ export const MultiLocationCalendarManager: React.FC = () => {
     const locations = knowledgeData?.locations || [];
     const planDetails = PLAN_DETAILS[subscription.plan];
 
+    // Handle OAuth redirect callback when returning from Google
+    useEffect(() => {
+        const completeOAuthFlow = async () => {
+            const oauthResult = handleOAuthRedirect();
+            if (oauthResult && oauthResult.code && userId) {
+                console.log('[Calendar Connect] Detected OAuth redirect, completing connection...');
+                setIsConnecting(true);
+
+                try {
+                    const response = await fetch('/api/calendar/connect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code: oauthResult.code, userId })
+                    });
+
+                    console.log('[Calendar Connect] Server response status:', response.status);
+                    const result = await response.json();
+                    console.log('[Calendar Connect] Server response:', result);
+
+                    if (response.ok && result.success) {
+                        // Update legacy settings
+                        const newSettings = {
+                            email: result.email,
+                            calendars: [],
+                            bookingCalendarId: 'primary',
+                            appointmentDuration: 30,
+                            ...(calendarSettings || {})
+                        };
+                        newSettings.email = result.email;
+
+                        await supabase
+                            .from('settings')
+                            .update({ calendar_settings: newSettings })
+                            .eq('user_id', userId);
+
+                        await refreshData();
+                        showToast(`✅ Connected calendar: ${result.email}`, 'success');
+                    } else {
+                        console.error('[Calendar Connect] Server error:', result.error);
+                        showToast('❌ Failed to connect calendar: ' + (result.error || 'Unknown error'), 'error');
+                    }
+                } catch (err: any) {
+                    console.error('[Calendar Connect] Exception:', err);
+                    showToast('❌ Connection failed: ' + (err.message || 'Unknown error'), 'error');
+                } finally {
+                    setIsConnecting(false);
+                }
+            }
+        };
+
+        completeOAuthFlow();
+    }, [userId]); // Run when userId becomes available
+
     const handleConnectNewCalendar = async () => {
         // Check plan limits
         const { allowed, current, limit } = await canAddMoreCalendars();
@@ -52,56 +105,28 @@ export const MultiLocationCalendarManager: React.FC = () => {
             return;
         }
 
+        if (!userId) {
+            console.error('[Calendar Connect] No userId available - user may not be logged in');
+            showToast('❌ Please log in to connect your calendar', 'error');
+            return;
+        }
+
         setIsConnecting(true);
         try {
-            console.log('[Calendar Connect] Starting... userId:', userId);
+            console.log('[Calendar Connect] Starting redirect flow... userId:', userId);
 
-            if (!userId) {
-                console.error('[Calendar Connect] No userId available - user may not be logged in');
-                showToast('❌ Please log in to connect your calendar', 'error');
-                return;
-            }
+            // This will redirect to Google - the page will reload when Google redirects back
+            // The useEffect above will handle completing the connection
+            await handleAuthClick();
 
-            const { code } = await handleAuthClick();
-            console.log('[Calendar Connect] Got auth code, sending to server...');
-
-            const response = await fetch('/api/calendar/connect', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code, userId })
-            });
-
-            console.log('[Calendar Connect] Server response status:', response.status);
-            const result = await response.json();
-            console.log('[Calendar Connect] Server response:', result);
-
-            if (response.ok && result.success) {
-                // Update legacy settings in DB explicitly to ensure persistence
-                const newSettings = {
-                    email: result.email,
-                    calendars: [],
-                    bookingCalendarId: 'primary',
-                    appointmentDuration: 30,
-                    ...(calendarSettings || {})
-                };
-                newSettings.email = result.email;
-
-                await supabase
-                    .from('settings')
-                    .update({ calendar_settings: newSettings })
-                    .eq('user_id', userId);
-
-                // Refresh data to fetch both the new connection and the updated settings
-                await refreshData();
-                showToast(`✅ Connected calendar: ${result.email}`, 'success');
-            } else {
-                console.error('[Calendar Connect] Server error:', result.error);
-                showToast('❌ Failed to connect calendar: ' + (result.error || 'Unknown error'), 'error');
-            }
+            // If we get here without redirect, show a message
+            showToast('Redirecting to Google...', 'info');
         } catch (err: any) {
-            console.error('[Calendar Connect] Exception:', err);
-            showToast('❌ Connection canceled or failed: ' + (err.message || 'Unknown error'), 'error');
-        } finally {
+            // The redirect flow throws an error when it redirects, which is expected
+            if (err.message !== 'Redirecting to Google...') {
+                console.error('[Calendar Connect] Exception:', err);
+                showToast('❌ Connection failed: ' + (err.message || 'Unknown error'), 'error');
+            }
             setIsConnecting(false);
         }
     };

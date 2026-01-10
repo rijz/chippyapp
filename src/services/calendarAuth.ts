@@ -97,9 +97,8 @@ function initializeTokenClient() {
     }
 }
 
-// --- 4. Trigger Sign In ---
-// --- 4. Trigger Sign In ---
 // --- 4. Trigger Sign In (Code Flow for Backend) ---
+// Using redirect flow instead of popup for better reliability
 export const handleAuthClick = (): Promise<{ code: string }> => {
     return new Promise((resolve, reject) => {
         console.log('[Google Auth] CLIENT_ID present:', !!CLIENT_ID);
@@ -122,46 +121,60 @@ export const handleAuthClick = (): Promise<{ code: string }> => {
             return;
         }
 
-        console.log('[Google Auth] Initializing code client...');
+        console.log('[Google Auth] Using REDIRECT flow for better reliability...');
         console.log('[Google Auth] Current origin:', window.location.origin);
+
+        // Save state to know we're in the middle of OAuth when we return
+        localStorage.setItem('oauth_pending', 'true');
+        localStorage.setItem('oauth_return_path', window.location.pathname);
 
         const codeClient = google.accounts.oauth2.initCodeClient({
             client_id: CLIENT_ID,
             scope: SCOPES,
-            ux_mode: 'popup',
-            // Note: select_account removed - can cause popup issues in some browsers
-            callback: (response: any) => {
-                console.log('[Google Auth] Callback triggered!');
-                console.log('[Google Auth] Response keys:', Object.keys(response || {}));
-
-                if (response.error) {
-                    console.error('[Google Auth] Error in response:', response.error, response.error_description);
-                    reject(new Error(response.error_description || response.error));
-                    return;
-                }
-
-                if (response.code) {
-                    console.log('[Google Auth] Got authorization code, length:', response.code.length);
-                    resolve({ code: response.code });
-                } else {
-                    console.error('[Google Auth] No code in response:', response);
-                    reject(new Error('No authorization code received'));
-                }
-            },
-            error_callback: (error: any) => {
-                console.error('[Google Auth] Error callback triggered:', error);
-                // Provide more helpful error message for popup_closed
-                if (error.type === 'popup_closed') {
-                    reject(new Error('Authentication popup was closed. Please try again and complete the sign-in process.'));
-                } else {
-                    reject(new Error(error.message || error.type || 'Google Auth Error'));
-                }
-            }
+            ux_mode: 'redirect',
+            redirect_uri: window.location.origin + '/integrations',
+            state: 'calendar_connect',
         });
 
-        console.log('[Google Auth] Requesting code (popup should open)...');
+        // This will redirect the page - the promise won't resolve here
+        // The code will be handled when the user returns
         codeClient.requestCode();
+
+        // This reject is just to prevent the promise from hanging
+        // In reality, the page will redirect before this runs
+        setTimeout(() => {
+            reject(new Error('Redirecting to Google...'));
+        }, 5000);
     });
+};
+
+// Handle OAuth redirect callback - call this on app initialization
+export const handleOAuthRedirect = (): { code: string } | null => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const state = urlParams.get('state');
+    const error = urlParams.get('error');
+
+    // Check if we have an OAuth response in the URL
+    if (error) {
+        console.error('[Google Auth] OAuth error:', error);
+        localStorage.removeItem('oauth_pending');
+        localStorage.removeItem('oauth_return_path');
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return null;
+    }
+
+    if (code && state === 'calendar_connect') {
+        console.log('[Google Auth] Found OAuth code in URL, length:', code.length);
+        localStorage.removeItem('oauth_pending');
+        localStorage.removeItem('oauth_return_path');
+        // Clean up the URL to remove the code
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return { code };
+    }
+
+    return null;
 };
 
 // --- 5. Fetch Real Calendars ---
