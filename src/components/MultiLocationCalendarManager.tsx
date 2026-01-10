@@ -45,7 +45,6 @@ export const MultiLocationCalendarManager: React.FC = () => {
         const completeOAuthFlow = async () => {
             const oauthResult = handleOAuthRedirect();
             if (oauthResult && oauthResult.code && userId) {
-                console.log('[Calendar Connect] Detected OAuth redirect, completing connection...');
                 setIsConnecting(true);
 
                 try {
@@ -55,9 +54,8 @@ export const MultiLocationCalendarManager: React.FC = () => {
                         body: JSON.stringify({ code: oauthResult.code, userId })
                     });
 
-                    console.log('[Calendar Connect] Server response status:', response.status);
+
                     const result = await response.json();
-                    console.log('[Calendar Connect] Server response:', result);
 
                     if (response.ok && result.success) {
                         // Update legacy settings
@@ -113,8 +111,6 @@ export const MultiLocationCalendarManager: React.FC = () => {
 
         setIsConnecting(true);
         try {
-            console.log('[Calendar Connect] Starting redirect flow... userId:', userId);
-
             // This will redirect to Google - the page will reload when Google redirects back
             // The useEffect above will handle completing the connection
             await handleAuthClick();

@@ -101,8 +101,6 @@ function initializeTokenClient() {
 // Using redirect flow instead of popup for better reliability
 export const handleAuthClick = (): Promise<{ code: string }> => {
     return new Promise((resolve, reject) => {
-        console.log('[Google Auth] CLIENT_ID present:', !!CLIENT_ID);
-        console.log('[Google Auth] API_KEY present:', !!API_KEY);
 
         // MOCK MODE
         if (!CLIENT_ID || !API_KEY) {
@@ -121,8 +119,7 @@ export const handleAuthClick = (): Promise<{ code: string }> => {
             return;
         }
 
-        console.log('[Google Auth] Using REDIRECT flow for better reliability...');
-        console.log('[Google Auth] Current origin:', window.location.origin);
+
 
         // Save state to know we're in the middle of OAuth when we return
         localStorage.setItem('oauth_pending', 'true');
@@ -166,7 +163,7 @@ export const handleOAuthRedirect = (): { code: string } | null => {
     }
 
     if (code && state === 'calendar_connect') {
-        console.log('[Google Auth] Found OAuth code in URL, length:', code.length);
+
         localStorage.removeItem('oauth_pending');
         localStorage.removeItem('oauth_return_path');
         // Clean up the URL to remove the code
