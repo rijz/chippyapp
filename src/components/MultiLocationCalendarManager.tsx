@@ -54,43 +54,53 @@ export const MultiLocationCalendarManager: React.FC = () => {
 
         setIsConnecting(true);
         try {
+            console.log('[Calendar Connect] Starting... userId:', userId);
+
+            if (!userId) {
+                console.error('[Calendar Connect] No userId available - user may not be logged in');
+                showToast('❌ Please log in to connect your calendar', 'error');
+                return;
+            }
+
             const { code } = await handleAuthClick();
+            console.log('[Calendar Connect] Got auth code, sending to server...');
 
-            if (userId) {
-                const response = await fetch('/api/calendar/connect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ code, userId })
-                });
+            const response = await fetch('/api/calendar/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, userId })
+            });
 
-                const result = await response.json();
+            console.log('[Calendar Connect] Server response status:', response.status);
+            const result = await response.json();
+            console.log('[Calendar Connect] Server response:', result);
 
-                if (response.ok && result.success) {
-                    // Update legacy settings in DB explicitly to ensure persistence
-                    const newSettings = {
-                        email: result.email,
-                        calendars: [],
-                        bookingCalendarId: 'primary',
-                        appointmentDuration: 30,
-                        ...(calendarSettings || {})
-                    };
-                    newSettings.email = result.email;
+            if (response.ok && result.success) {
+                // Update legacy settings in DB explicitly to ensure persistence
+                const newSettings = {
+                    email: result.email,
+                    calendars: [],
+                    bookingCalendarId: 'primary',
+                    appointmentDuration: 30,
+                    ...(calendarSettings || {})
+                };
+                newSettings.email = result.email;
 
-                    await supabase
-                        .from('settings')
-                        .update({ calendar_settings: newSettings })
-                        .eq('user_id', userId);
+                await supabase
+                    .from('settings')
+                    .update({ calendar_settings: newSettings })
+                    .eq('user_id', userId);
 
-                    // Refresh data to fetch both the new connection and the updated settings
-                    await refreshData();
-                    showToast(`✅ Connected calendar: ${result.email}`, 'success');
-                } else {
-                    showToast('❌ Failed to connect calendar: ' + (result.error || 'Unknown error'), 'error');
-                }
+                // Refresh data to fetch both the new connection and the updated settings
+                await refreshData();
+                showToast(`✅ Connected calendar: ${result.email}`, 'success');
+            } else {
+                console.error('[Calendar Connect] Server error:', result.error);
+                showToast('❌ Failed to connect calendar: ' + (result.error || 'Unknown error'), 'error');
             }
         } catch (err: any) {
-            console.error('Connection error:', err);
-            showToast('❌ Connection canceled or failed', 'error');
+            console.error('[Calendar Connect] Exception:', err);
+            showToast('❌ Connection canceled or failed: ' + (err.message || 'Unknown error'), 'error');
         } finally {
             setIsConnecting(false);
         }

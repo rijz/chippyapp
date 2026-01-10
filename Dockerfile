@@ -3,6 +3,22 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
+
+# Build arguments for Vite - these MUST be passed during docker build
+# Cloud Run: use --build-arg or set in cloudbuild.yaml
+ARG VITE_GOOGLE_CLIENT_ID
+ARG VITE_GOOGLE_API_KEY
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+ARG VITE_APP_URL
+
+# Make build args available as environment variables for npm run build
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
+ENV VITE_GOOGLE_API_KEY=$VITE_GOOGLE_API_KEY
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+ENV VITE_APP_URL=$VITE_APP_URL
+
 RUN npm run build
 
 FROM node:20-slim

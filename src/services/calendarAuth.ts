@@ -102,9 +102,13 @@ function initializeTokenClient() {
 // --- 4. Trigger Sign In (Code Flow for Backend) ---
 export const handleAuthClick = (): Promise<{ code: string }> => {
     return new Promise((resolve, reject) => {
+        console.log('[Google Auth] CLIENT_ID present:', !!CLIENT_ID);
+        console.log('[Google Auth] API_KEY present:', !!API_KEY);
+
         // MOCK MODE
         if (!CLIENT_ID || !API_KEY) {
-            console.warn("Google Credentials missing. Using MOCK MODE.");
+            console.warn("[Google Auth] Credentials missing! Using MOCK MODE. This will NOT work in production.");
+            console.warn("[Google Auth] Make sure VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY are set during build.");
             setTimeout(() => {
                 resolve({ code: "mock_auth_code" });
             }, 1000);

@@ -1016,14 +1016,26 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
 app.post('/api/calendar/connect', calendarLimiter, async (req, res) => {
   try {
     const { code, userId, locationId, locationName } = req.body;
+    console.log('[API /calendar/connect] Request received for user:', userId);
 
     if (!code || !userId) {
+      console.log('[API /calendar/connect] Missing required fields');
       return res.status(400).json({ error: 'Missing required fields: code, userId' });
     }
 
+    // Check for mock code - means frontend doesn't have VITE credentials
+    if (code === 'mock_auth_code') {
+      console.error('[API /calendar/connect] Received MOCK auth code! Frontend is missing VITE_GOOGLE_CLIENT_ID or VITE_GOOGLE_API_KEY at build time.');
+      return res.status(400).json({
+        error: 'Configuration error: Google credentials not available. Please ensure VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY are set during the build process.',
+        code: 'MOCK_MODE'
+      });
+    }
+
     // Exchange code for tokens
+    console.log('[API /calendar/connect] Exchanging auth code for tokens...');
     const { tokens } = await oauth2Client.getToken(code);
-    console.log('[API] OAuth Tokens received:', Object.keys(tokens)); // Debug log
+    console.log('[API /calendar/connect] OAuth Tokens received:', Object.keys(tokens));
 
     // Set credentials in client to verify they work
     oauth2Client.setCredentials(tokens);
