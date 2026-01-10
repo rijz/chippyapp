@@ -99,6 +99,7 @@ interface DataContextType {
     getOverageCost: () => number;
     canAddMoreCalendars: () => Promise<{ allowed: boolean; current: number; limit: number }>;
     refreshData: () => Promise<void>;
+    isLoading: boolean; // True while initial data fetch is in progress
 }
 
 const DEFAULT_SUBSCRIPTION: Subscription = {
@@ -148,6 +149,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const [reviewItems, setReviewItems] = useState<ReviewItem[]>(() => storage.getReviewItems([]));
     const [subscription, setSubscription] = useState<Subscription>(DEFAULT_SUBSCRIPTION);
     const [leads, setLeads] = useState<Lead[]>(() => storage.getLeads([]));
+    const [isLoading, setIsLoading] = useState(true); // Track initial data loading
 
     // Helper to add a new lead
     const addLead = (leadData: Omit<Lead, 'id' | 'date'>) => {
@@ -234,7 +236,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     };
 
     useEffect(() => {
-        refreshData();
+        const loadData = async () => {
+            setIsLoading(true);
+            await refreshData();
+            setIsLoading(false);
+        };
+        loadData();
     }, [session?.user?.id]);
 
     // Sync Effects - Persist to localStorage AND Supabase
@@ -326,7 +333,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             isFeatureEnabled,
             getOverageCost,
             canAddMoreCalendars,
-            refreshData
+            refreshData,
+            isLoading
         }}>
             {children}
         </DataContext.Provider>

@@ -79,7 +79,8 @@ const AuthenticatedApp = () => {
     updateLeadStatus,
     leads,
     subscription,
-    calendarConnections
+    calendarConnections,
+    isLoading
   } = useData();
 
   const { session } = useAuth();
@@ -88,18 +89,13 @@ const AuthenticatedApp = () => {
   // Use a stable session ID for the current chat
   const chatSessionIdRef = React.useRef<string>(`session_${Date.now()}`);
 
-  // Trigger wizard if no knowledge data is found on load
+  // Automatically show wizard for new users once data loading is complete
   React.useEffect(() => {
-    if (knowledgeData === null && session?.user?.id) {
-      // Give it a moment to load? knowledgeData starts as null in context.
-      // But context fetch is async. We might show wizard prematurely.
-      // DataContext has initial state null.
-      // We should rely on a "loaded" flag or similar. 
-      // For now, let's assume if it remains null for 2s? 
-      // Better: DataContext could expose `isLoading`.
-      // Ignoring for MVP strict parity.
+    if (!isLoading && knowledgeData === null && session?.user?.id) {
+      // Loading is complete and user has no knowledge data - show onboarding
+      setShowWizard(true);
     }
-  }, [knowledgeData]);
+  }, [isLoading, knowledgeData, session?.user?.id]);
 
   const handleChatInteraction = (query: string, response: string, analysis: any) => {
     setTotalChats(prev => prev + 1);
