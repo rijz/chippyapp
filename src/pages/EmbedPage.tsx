@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ChatWidget } from '../components/ChatWidget';
-import { TenantConfig, WidgetConfig, KnowledgeBaseData } from '../types';
+import { TenantConfig, WidgetConfig, KnowledgeBaseData, CalendarConnection } from '../types';
 import { Loader2 } from 'lucide-react';
 
 export const EmbedPage = () => {
@@ -32,6 +32,7 @@ export const EmbedPage = () => {
     });
 
     const [knowledgeData, setKnowledgeData] = useState<KnowledgeBaseData | null>(null);
+    const [calendarConnections, setCalendarConnections] = useState<CalendarConnection[]>([]);
 
     // Set transparent background for embed mode
     useEffect(() => {
@@ -85,6 +86,7 @@ export const EmbedPage = () => {
                 if (data.tenantConfig) setTenantConfig(data.tenantConfig);
                 if (data.widgetConfig) setWidgetConfig(data.widgetConfig);
                 if (data.knowledgeData) setKnowledgeData(data.knowledgeData);
+                if (data.calendarConnections) setCalendarConnections(data.calendarConnections);
 
                 setIsLoading(false);
             } catch (e) {
@@ -129,7 +131,7 @@ export const EmbedPage = () => {
                 onInteraction={handleInteraction}
                 showPoweredBy={true}
                 locations={knowledgeData?.locations || []}
-                calendarConnections={[]} // Embed mode doesn't need this - backend handles routing
+                calendarConnections={calendarConnections}
             />
         </div>
     );

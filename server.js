@@ -313,14 +313,36 @@ app.get('/api/widget-config/:userId', widgetConfigLimiter, async (req, res) => {
       console.error('[API] Knowledge fetch error:', knowledgeError);
     }
 
+    // Fetch calendar connections (for booking availability)
+    const { data: calendarConnections, error: calendarError } = await supabaseAdmin
+      .from('calendar_connections')
+      .select('id, provider, location_id, location_name, calendar_name, is_active')
+      .eq('user_id', userId)
+      .eq('is_active', true);
+
+    if (calendarError) {
+      console.error('[API] Calendar connections fetch error:', calendarError);
+    }
+
     if (!settings && !knowledge) {
       return res.status(404).json({ error: 'Widget not found' });
     }
 
+    // Map calendar connections to frontend format (excluding sensitive tokens)
+    const safeCalendarConnections = (calendarConnections || []).map(c => ({
+      id: c.id,
+      provider: c.provider,
+      locationId: c.location_id,
+      locationName: c.location_name,
+      calendarName: c.calendar_name,
+      isActive: c.is_active
+    }));
+
     res.json({
       tenantConfig: settings?.tenant_config || null,
       widgetConfig: settings?.widget_config || null,
-      knowledgeData: knowledge?.content || null
+      knowledgeData: knowledge?.content || null,
+      calendarConnections: safeCalendarConnections
     });
 
   } catch (error) {
