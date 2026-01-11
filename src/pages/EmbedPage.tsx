@@ -46,6 +46,9 @@ export const EmbedPage = () => {
     // Stable session ID for this embed instance
     const sessionIdRef = useRef<string>(`embed-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
 
+    // Track customer name when captured (updates to actual name when lead is captured)
+    const customerNameRef = useRef<string>('Visitor');
+
     // Set transparent background for embed mode
     useEffect(() => {
         document.body.classList.add('embed-mode');
@@ -136,6 +139,11 @@ export const EmbedPage = () => {
     const handleLeadCapture = async (leadData: { name: string; email: string; phone: string }) => {
         if (!tenantConfig.userId) return;
 
+        // Store customer name for session tracking
+        if (leadData.name) {
+            customerNameRef.current = capitalizeName(leadData.name);
+        }
+
         try {
             await fetch('/api/widget/lead', {
                 method: 'POST',
@@ -169,7 +177,7 @@ export const EmbedPage = () => {
                     userId: tenantConfig.userId,
                     session: {
                         id: sessionIdRef.current,
-                        customerName: 'Visitor',
+                        customerName: customerNameRef.current,
                         messages: messages,
                         summary: `Chat with ${messages.length} messages`,
                         type: 'General',
@@ -195,6 +203,11 @@ export const EmbedPage = () => {
     ) => {
         if (!tenantConfig.userId) return;
 
+        // Store customer name for session tracking
+        if (customerName) {
+            customerNameRef.current = capitalizeName(customerName);
+        }
+
         try {
             await fetch('/api/widget/lead', {
                 method: 'POST',
@@ -207,7 +220,10 @@ export const EmbedPage = () => {
                         phone: customerPhone || '',
                         status: 'Booked',
                         source: 'AI Chat',
-                        notes: `Booked via embed widget${service ? ` - ${service}` : ''}${locationName ? ` at ${locationName}` : ''}`
+                        notes: `Booked via embed widget`,
+                        locationId: locationId,
+                        locationName: locationName,
+                        service: service
                     }
                 })
             });
@@ -242,6 +258,11 @@ export const EmbedPage = () => {
     // Callback request handler
     const handleCallbackRequest = async (data: CallbackRequestData) => {
         if (!tenantConfig.userId) return;
+
+        // Store customer name for session tracking
+        if (data.customerName) {
+            customerNameRef.current = capitalizeName(data.customerName);
+        }
 
         try {
             await fetch('/api/widget/lead', {

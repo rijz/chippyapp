@@ -387,25 +387,35 @@ app.post('/api/widget/lead', widgetDataLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Missing userId or lead data' });
     }
 
-    // Check if lead exists by email
-    const { data: existingLead } = await supabaseAdmin
-      .from('leads')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('email', lead.email.toLowerCase())
-      .maybeSingle();
+    // Check if lead exists by email (if email provided)
+    let existingLead = null;
+    if (lead.email) {
+      const { data } = await supabaseAdmin
+        .from('leads')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('email', lead.email.toLowerCase())
+        .maybeSingle();
+      existingLead = data;
+    }
 
     if (existingLead) {
       // Update existing lead
+      const updateData = {
+        updated_at: new Date().toISOString()
+      };
+      // Only update fields that are provided
+      if (lead.name) updateData.name = lead.name;
+      if (lead.phone !== undefined) updateData.phone = lead.phone || null;
+      if (lead.status) updateData.status = lead.status;
+      if (lead.notes) updateData.notes = lead.notes;
+      if (lead.locationId) updateData.location_id = lead.locationId;
+      if (lead.locationName) updateData.location_name = lead.locationName;
+      if (lead.service) updateData.service = lead.service;
+
       const { error } = await supabaseAdmin
         .from('leads')
-        .update({
-          name: lead.name,
-          phone: lead.phone || null,
-          status: lead.status || 'New',
-          notes: lead.notes || null,
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', existingLead.id);
 
       if (error) throw error;
@@ -418,12 +428,15 @@ app.post('/api/widget/lead', widgetDataLimiter, async (req, res) => {
         .insert({
           id: newId,
           user_id: userId,
-          name: lead.name,
-          email: lead.email.toLowerCase(),
+          name: lead.name || 'Unknown',
+          email: (lead.email || '').toLowerCase(),
           phone: lead.phone || null,
           status: lead.status || 'New',
           source: lead.source || 'AI Chat',
-          notes: lead.notes || null
+          notes: lead.notes || null,
+          location_id: lead.locationId || null,
+          location_name: lead.locationName || null,
+          service: lead.service || null
         });
 
       if (error) throw error;

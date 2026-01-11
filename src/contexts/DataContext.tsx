@@ -229,10 +229,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             if (analytics.total_bookings !== undefined) setTotalBookings(analytics.total_bookings);
         }
 
-        // TODO: Enable after running migrations/002_leads_table.sql
         // Fetch leads from Supabase
-        // const remoteLeads = await fetchLeads(userId);
-        // if (remoteLeads && remoteLeads.length > 0) setLeads(remoteLeads);
+        const remoteLeads = await fetchLeads(userId);
+        if (remoteLeads && remoteLeads.length > 0) {
+            setLeads(remoteLeads);
+        }
     };
 
     useEffect(() => {
@@ -259,12 +260,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     // Persist leads to localStorage and sync to Supabase
     useEffect(() => {
         storage.saveLeads(leads);
-        // TODO: Enable Supabase sync after running migrations/002_leads_table.sql
         // Sync to Supabase (debounced)
-        // if (session?.user?.id && leads.length > 0) {
-        //     const timeout = setTimeout(() => syncLeads(leads, session.user.id), 1500);
-        //     return () => clearTimeout(timeout);
-        // }
+        if (session?.user?.id && leads.length > 0) {
+            const timeout = setTimeout(() => syncLeads(leads, session.user.id), 1500);
+            return () => clearTimeout(timeout);
+        }
     }, [leads, session?.user?.id]);
 
     useEffect(() => {
