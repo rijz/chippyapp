@@ -365,6 +365,175 @@ app.get('/env-config.js', (req, res) => {
 });
 
 // =====================
+// Widget Data APIs (for embed widget - bypasses RLS)
+// =====================
+
+// Rate limiter for widget data APIs (be careful - these can be called frequently)
+const widgetDataLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 requests per minute per IP
+  message: { error: 'Too many requests' }
+});
+
+/**
+ * POST /api/widget/lead
+ * Creates or updates a lead from the embed widget
+ */
+app.post('/api/widget/lead', widgetDataLimiter, async (req, res) => {
+  try {
+    const { userId, lead } = req.body;
+
+    if (!userId || !lead) {
+      return res.status(400).json({ error: 'Missing userId or lead data' });
+    }
+
+    // Check if lead exists by email
+    const { data: existingLead } = await supabaseAdmin
+      .from('leads')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('email', lead.email.toLowerCase())
+      .maybeSingle();
+
+    if (existingLead) {
+      // Update existing lead
+      const { error } = await supabaseAdmin
+        .from('leads')
+        .update({
+          name: lead.name,
+          phone: lead.phone || null,
+          status: lead.status || 'New',
+          notes: lead.notes || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingLead.id);
+
+      if (error) throw error;
+      res.json({ success: true, action: 'updated', id: existingLead.id });
+    } else {
+      // Create new lead
+      const newId = `lead-${Date.now()}`;
+      const { error } = await supabaseAdmin
+        .from('leads')
+        .insert({
+          id: newId,
+          user_id: userId,
+          name: lead.name,
+          email: lead.email.toLowerCase(),
+          phone: lead.phone || null,
+          status: lead.status || 'New',
+          source: lead.source || 'AI Chat',
+          notes: lead.notes || null
+        });
+
+      if (error) throw error;
+      res.json({ success: true, action: 'created', id: newId });
+    }
+  } catch (error) {
+    console.error('[API] Widget lead error:', error);
+    res.status(500).json({ error: 'Failed to save lead' });
+  }
+});
+
+/**
+ * POST /api/widget/session
+ * Saves a chat session from the embed widget
+ */
+app.post('/api/widget/session', widgetDataLimiter, async (req, res) => {
+  try {
+    const { userId, session } = req.body;
+
+    if (!userId || !session) {
+      return res.status(400).json({ error: 'Missing userId or session data' });
+    }
+
+    // Upsert session to chat_sessions table
+    const { error } = await supabaseAdmin
+      .from('chat_sessions')
+      .upsert({
+        id: session.id,
+        user_id: userId,
+        customer_name: session.customerName || 'Visitor',
+        messages: session.messages,
+        summary: session.summary || `Chat with ${session.messages?.length || 0} messages`,
+        type: session.type || 'General',
+        sentiment: session.sentiment || 'neutral',
+        status: session.status || 'Opened',
+        created_at: session.timestamp || new Date().toISOString()
+      }, { onConflict: 'id' });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[API] Widget session error:', error);
+    res.status(500).json({ error: 'Failed to save session' });
+  }
+});
+
+/**
+ * POST /api/widget/interaction
+ * Saves interaction data for analytics and review queue
+ */
+app.post('/api/widget/interaction', widgetDataLimiter, async (req, res) => {
+  try {
+    const { userId, query, response, analysis, sessionId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+
+    // 1. Update analytics (increment chat count)
+    const { data: analytics } = await supabaseAdmin
+      .from('analytics')
+      .select('total_chats, dashboard_data')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const newTotalChats = (analytics?.total_chats || 0) + 1;
+
+    // Update dashboard data for today
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'short' });
+    let dashboardData = analytics?.dashboard_data || [];
+    const todayIndex = dashboardData.findIndex(d => d.name === today);
+    if (todayIndex >= 0) {
+      dashboardData[todayIndex].chats = (dashboardData[todayIndex].chats || 0) + 1;
+    }
+
+    await supabaseAdmin
+      .from('analytics')
+      .upsert({
+        user_id: userId,
+        total_chats: newTotalChats,
+        dashboard_data: dashboardData,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' });
+
+    // 2. Save to review queue if low confidence
+    if (analysis && analysis.confidence !== undefined && analysis.confidence < 0.7) {
+      const reviewId = `review-${Date.now()}`;
+      await supabaseAdmin
+        .from('review_items')
+        .insert({
+          id: reviewId,
+          user_id: userId,
+          query: query,
+          response: response,
+          confidence: analysis.confidence,
+          sentiment: analysis.sentiment || 'neutral',
+          topics: analysis.topics || [],
+          status: 'PENDING',
+          created_at: new Date().toISOString()
+        });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[API] Widget interaction error:', error);
+    res.status(500).json({ error: 'Failed to save interaction' });
+  }
+});
+
+// =====================
 // Allowed Embed Domains API
 // =====================
 
