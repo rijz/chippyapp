@@ -23,6 +23,10 @@ export const KnowledgeBase = () => {
         setKnowledgeData(data);
         if (data.companyName) setTenantConfig(prev => ({ ...prev, companyName: data.companyName! }));
         setShowWizard(false);
+        // Navigate to Widget Studio after onboarding
+        setTimeout(() => {
+            window.location.href = '/widget';
+        }, 100);
     };
 
     const confirmRescan = () => {

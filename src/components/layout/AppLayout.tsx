@@ -65,9 +65,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             )}>
                 <div className="flex flex-col h-full p-8">
                     <div className="flex items-center gap-3 mb-10">
-                        <div className="bg-chippy-coral p-2 rounded-lg shadow-lg shadow-chippy-coral/20">
-                            <BrainCircuit className="w-6 h-6 text-white" />
-                        </div>
+                        <img src="/logo.png" alt="Chippy" className="w-10 h-10 rounded-lg shadow-lg shadow-chippy-coral/20" />
                         <span className="text-xl font-bold tracking-tight text-white">Chippy</span>
                     </div>
 

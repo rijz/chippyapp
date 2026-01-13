@@ -77,6 +77,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
    const [logs, setLogs] = useState<LogEntry[]>([]);
    const [progress, setProgress] = useState(0);
    const [scannedData, setScannedData] = useState<KnowledgeBaseData | null>(null);
+   const [scanError, setScanError] = useState<string | null>(null);
+   const [isScanning, setIsScanning] = useState(false);
    const lastLoggedStageRef = useRef<number>(-1);
    const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -127,6 +129,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       setProgress(10);
       setLogs([]);
       setScannedData(null);
+      setScanError(null);
+      setIsScanning(true);
       lastLoggedStageRef.current = -1;
 
       addLog(`Initializing Gemini Agent...`, 'pending');
@@ -166,6 +170,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
          const data = await analyzeCompanyContent(url);
          clearInterval(timer);
          setProgress(100);
+         setIsScanning(false);
 
          if (data) {
             setScannedData(data);
@@ -189,13 +194,19 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                addLog("Ready for human verification.", 'success');
             }
          } else {
-            addLog("Scan failed completely. Manual entry required.", 'pending');
-            setProgress(100);
+            addLog("Scan failed completely. Manual entry required.", 'error');
+            setScanError("Could not extract data from website. You can continue with manual entry.");
          }
-      } catch (error) {
+      } catch (error: any) {
          clearInterval(timer);
          setProgress(100);
-         addLog("An error occurred during scanning.", 'pending');
+         setIsScanning(false);
+         const errorMessage = error?.message || 'Unknown error occurred';
+         console.error('[Onboarding] Scan error:', errorMessage);
+         addLog(`❌ Error: ${errorMessage}`, 'error');
+         setScanError(errorMessage.includes('Rate limit')
+            ? 'Rate limit reached. Please wait a few minutes and try again.'
+            : `Scan failed: ${errorMessage}. You can continue with manual entry.`);
       }
    };
 
@@ -370,7 +381,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         </div>
                         <h3 className="text-2xl font-bold text-white mb-2">{scannedData ? "Model Generated" : "Scanning..."}</h3>
                         <p className="text-slate-400 mb-8 max-w-xs mx-auto">
-                           {scannedData ? "Data successfully structured." : `Extracting semantic entities from ${new URL(url).hostname}`}
+                           {scannedData ? "Data successfully structured." : `Extracting semantic entities from ${(() => { try { return new URL(url).hostname; } catch { return url; } })()}`}
                         </p>
                         <div className="w-full max-w-[240px]">
                            <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-widest">
@@ -557,7 +568,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                        value={loc.address}
                                        onChange={(e) => { const next = [...locations]; next[i].address = e.target.value; setLocations(next); }}
                                        placeholder="Street Address *"
-                                       className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
+                                       className={`w-full p-2 border rounded-lg text-sm bg-white ${!loc.address && businessType === 'storefront' ? 'border-red-300 focus:ring-red-200' : 'border-slate-200'}`}
                                     />
                                     <div className="grid grid-cols-3 gap-2">
                                        <input
@@ -584,6 +595,12 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                     </div>
                                  </div>
                               ))}
+                              {/* Show validation message */}
+                              {!locations[0]?.address && (
+                                 <p className="text-sm text-red-500 flex items-center gap-1 mt-2">
+                                    <AlertCircle className="w-4 h-4" /> Please enter your address to continue
+                                 </p>
+                              )}
                            </div>
                         )}
 
@@ -610,15 +627,22 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                            </div>
                         )}
 
+                        {/* Show message if no business type selected */}
+                        {!businessType && (
+                           <p className="text-sm text-slate-500 text-center mt-4">
+                              Select a business type above to continue
+                           </p>
+                        )}
+
                         <button
                            onClick={() => {
                               onUpdateConfig({ ...tenantConfig, businessType: businessType!, locations: businessType === 'storefront' ? locations : undefined });
                               handleStartScan();
                            }}
                            disabled={!businessType || (businessType === 'storefront' && !locations[0]?.address)}
-                           className="w-full mt-8 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-semibold py-4 rounded-xl transition-all shadow-lg disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
+                           className="w-full mt-8 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-semibold py-4 rounded-xl transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2"
                         >
-                           Begin Analysis <ArrowRight className="w-5 h-5" />
+                           {!businessType ? 'Select a Business Type' : (businessType === 'storefront' && !locations[0]?.address) ? 'Enter Address to Continue' : 'Begin Analysis'} <ArrowRight className="w-5 h-5" />
                         </button>
                      </div>
                   </div>
@@ -650,8 +674,25 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                            <div ref={logsEndRef} />
                         </div>
                      </div>
-                     <div className="mt-8 h-14">
-                        {progress === 100 && (
+                     {/* Error Message Display */}
+                     {scanError && (
+                        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl animate-in fade-in slide-in-from-bottom-2">
+                           <div className="flex items-start gap-3">
+                              <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                              <div className="flex-1">
+                                 <p className="text-red-800 font-medium text-sm">{scanError}</p>
+                                 <button
+                                    onClick={() => { setScanError(null); handleStartScan(); }}
+                                    className="mt-2 text-red-600 hover:text-red-700 text-sm font-semibold underline"
+                                 >
+                                    Try Again
+                                 </button>
+                              </div>
+                           </div>
+                        </div>
+                     )}
+                     <div className="mt-8 min-h-[56px]">
+                        {progress === 100 && !isScanning && (
                            <button onClick={() => {
                               if (!scannedData) {
                                  // Manual Fallback Init
@@ -671,9 +712,15 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                  });
                               }
                               setStep(4);
-                           }} className="w-full h-full bg-chippy-coral hover:bg-chippy-coral-hover text-white font-bold text-lg rounded-xl transition-all shadow-lg hover:shadow-chippy-coral/20 hover:-translate-y-0.5 flex items-center justify-center gap-2 animate-in slide-in-from-bottom-2 fade-in">
+                           }} className="w-full h-14 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-bold text-lg rounded-xl transition-all shadow-lg hover:shadow-chippy-coral/20 hover:-translate-y-0.5 flex items-center justify-center gap-2 animate-in slide-in-from-bottom-2 fade-in">
                               {scannedData ? "Proceed to Review" : "Continue Manually"} <ArrowRight className="w-5 h-5" />
                            </button>
+                        )}
+                        {isScanning && (
+                           <div className="w-full h-14 flex items-center justify-center gap-3 text-slate-500">
+                              <Loader2 className="w-5 h-5 animate-spin" />
+                              <span className="font-medium">Analyzing website...</span>
+                           </div>
                         )}
                      </div>
                   </div>
