@@ -261,7 +261,7 @@ export const analyzeCompanyContent = async (url: string): Promise<KnowledgeBaseD
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || `Scrape failed: ${response.status}`);
+      throw new Error(errorData.error || `Scrape failed with status ${response.status}`);
     }
 
     const data = await response.json() as KnowledgeBaseData;
@@ -273,25 +273,10 @@ export const analyzeCompanyContent = async (url: string): Promise<KnowledgeBaseD
       message: error.message,
       name: error.name
     });
-    console.warn("Server-side scraping failed, falling back to MOCK data for demo.");
 
-    // MOCK FAILURE FALLBACK
-    return {
-      companyName: "Demo Company (Mock)",
-      website: url,
-      phoneNumber: "+1 (555) 123-4567",
-      businessCategory: "Services",
-      keywords: ["Mock", "Demo", "Fallback"],
-      summary: `Simulation for ${url}. Real analysis failed: ${error.message}`,
-      services: ["Demo Service A", "Demo Service B"],
-      businessHours: "Mon-Fri: 9am - 5pm",
-      contactInfo: "demo@example.com",
-      pricing: "Standard Rate: $100/hr",
-      policies: "24h Cancellation Policy",
-      sources: ["Mock Generator"],
-      lastUpdated: new Date(),
-      isMock: true
-    };
+    // Re-throw the error so the UI can handle it properly
+    // The OnboardingWizard will show the error and allow manual entry
+    throw error;
   }
 };
 

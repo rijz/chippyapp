@@ -830,10 +830,23 @@ Based on this content, extract and return a JSON object with this exact structur
   "businessCategory": "2-3 word industry category (e.g., 'Hair Salon', 'E-Commerce Platform')",
   "keywords": ["5", "relevant", "industry", "keywords"],
   "summary": "2-sentence executive summary of what they do and who they serve",
-  "services": ["Specific Service 1", "Specific Service 2", "...list all found services/products"],
+  "services": [
+    {
+      "id": "svc_1",
+      "name": "Service Name",
+      "description": "Brief description of the service (optional)",
+      "pricing": {
+        "type": "fixed | starting_from | hourly | custom | contact",
+        "amount": 50,
+        "currency": "USD",
+        "customText": "Only if type is 'custom'"
+      },
+      "duration": 30,
+      "category": "Service category if applicable"
+    }
+  ],
   "businessHours": "Operating hours if found (or 'Not specified')",
   "contactInfo": "Email, address, other contact methods (or 'Not specified')",
-  "pricing": "Extract ALL pricing information found: plan names, prices (monthly/yearly), features. Format nicely. If none found, say 'No pricing information found.'",
   "policies": "Cancellation, refund, or booking policies found. If none, say 'No policies found.'",
   "locations": [
     {
@@ -848,10 +861,20 @@ Based on this content, extract and return a JSON object with this exact structur
   ]
 }
 
-IMPORTANT: 
-- For pricing, look for "$" amounts, plan tiers (Basic, Pro, Enterprise), monthly/yearly options.
-- Be thorough with services - list every distinct offering.
-- For LOCATIONS: Look for physical addresses, storefronts, clinics, offices, or branches. This is critical for local businesses where customers need to find the nearest location for booking. If no locations found, return an empty array [].
+IMPORTANT SERVICE EXTRACTION RULES:
+- Extract EVERY distinct service/product offered by the business
+- For each service, try to find its specific price:
+  - "fixed": Exact price (e.g., "Haircut - $35" → amount: 35, type: "fixed")
+  - "starting_from": Minimum price (e.g., "Color from $75" → amount: 75, type: "starting_from")
+  - "hourly": Rate per hour (e.g., "$50/hour" → amount: 50, type: "hourly")
+  - "custom": Variable pricing (e.g., "pricing varies" → type: "custom", customText: "Varies by project")
+  - "contact": No price found (→ type: "contact")
+- Include duration in minutes if mentioned (e.g., "45 min appointment" → duration: 45)
+- Generate sequential IDs like "svc_1", "svc_2", etc.
+- If no pricing found for a service, use type: "contact"
+
+OTHER INSTRUCTIONS:
+- For LOCATIONS: Look for physical addresses, storefronts, clinics, offices, or branches. Return empty array [] if none found.
 - Return ONLY valid JSON, no explanations.`;
 
     const result = await model.generateContent(prompt);
@@ -875,6 +898,116 @@ IMPORTANT:
     clearTimeout(timeout);
     console.error('[API] Scrape Error:', error);
     res.status(500).json({ error: error.message || 'Scraping failed' });
+  }
+});
+
+// =====================
+// Single-Page Pricing Scraper
+// =====================
+app.post('/api/scrape-pricing', async (req, res) => {
+  const { url, existingServices } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ error: 'URL is required' });
+  }
+
+  // Validate URL
+  try {
+    const parsedUrl = new URL(url);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return res.status(400).json({ error: 'Invalid URL. Only HTTP and HTTPS are supported.' });
+    }
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid URL format.' });
+  }
+
+  const timeoutMs = 60000; // 1 minute for single page
+  const timeout = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Request timed out.' });
+    }
+  }, timeoutMs);
+
+  try {
+    console.log(`[API] Scraping pricing page: ${url}`);
+
+    // Use the scraper but just for this single page
+    const browser = await (await import('puppeteer')).default.launch({
+      headless: 'new',
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    });
+
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    const content = await page.evaluate(() => {
+      const remove = ['script', 'style', 'nav', 'footer', 'header'];
+      remove.forEach(sel => document.querySelectorAll(sel).forEach(el => el.remove()));
+      return document.body?.innerText?.substring(0, 30000) || '';
+    });
+
+    await browser.close();
+
+    if (!content || content.length < 50) {
+      clearTimeout(timeout);
+      return res.status(400).json({ error: 'Could not extract content from this page.' });
+    }
+
+    // Extract pricing using Gemini
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    const serviceContext = existingServices && existingServices.length > 0
+      ? `\nEXISTING SERVICES TO MATCH:\n${existingServices.map(s => `- ${s.name}`).join('\n')}\n`
+      : '';
+
+    const prompt = `Extract pricing information from this pricing page content.${serviceContext}
+
+PAGE CONTENT:
+"""
+${content}
+"""
+
+Return a JSON array of service pricing objects (no markdown, no backticks):
+[
+  {
+    "name": "Service Name",
+    "pricing": {
+      "type": "fixed | starting_from | hourly | custom | contact",
+      "amount": 50,
+      "currency": "USD",
+      "customText": "Only if type is custom"
+    },
+    "duration": 30,
+    "description": "Brief description if found"
+  }
+]
+
+Rules:
+- Match services to existing services if provided
+- "fixed": exact price ($35)
+- "starting_from": minimum price (from $50)
+- "hourly": per hour rate ($50/hr)
+- "custom": variable (use customText to explain)
+- duration in minutes if mentioned
+- Return ONLY valid JSON array`;
+
+    const result = await model.generateContent(prompt);
+    let text = result.response.text();
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    const pricingData = JSON.parse(text);
+
+    clearTimeout(timeout);
+    console.log(`[API] Extracted pricing for ${pricingData.length} services`);
+    res.json({ services: pricingData });
+
+  } catch (error) {
+    clearTimeout(timeout);
+    console.error('[API] Pricing Scrape Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to extract pricing' });
   }
 });
 

@@ -30,9 +30,11 @@ import {
    Car,
    Laptop
 } from 'lucide-react';
-import { KnowledgeBaseData, LogEntry, TenantConfig, BusinessLocation, BusinessType } from '../types';
+import { KnowledgeBaseData, LogEntry, TenantConfig, BusinessLocation, BusinessType, Service } from '../types';
 import { analyzeCompanyContent, analyzeRawText } from '../services/geminiService';
 import { uploadKnowledgeAsset } from '../services/supabaseStorage';
+import { ServiceEditor } from './ServiceEditor';
+import { normalizeKnowledgeData, generateServiceId, defaultPricing } from '../utils/serviceUtils';
 
 interface OnboardingWizardProps {
    tenantConfig: TenantConfig;
@@ -94,6 +96,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
    const [isProcessingFile, setIsProcessingFile] = useState(false);
    const [isTraining, setIsTraining] = useState(false);
    const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
+   const [isScanningPricing, setIsScanningPricing] = useState(false);
 
    // Step 4 State
    const [trainingPhase, setTrainingPhase] = useState(0);
@@ -175,26 +178,21 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
          if (data) {
             setScannedData(data);
 
-            if (data.isMock) {
-               addLog("⚠️ Connection Failed. API Key rejected/blocked.", 'error');
-               addLog("Falling back to DEMO DATA.", 'pending');
+            // Dynamic Result Logs
+            addLog(`✓ Found ${data.services?.length || 0} Services/Offerings`, 'success');
+            if (data.pricing && data.pricing !== 'Detailed pricing information was not found.' && data.pricing !== 'No pricing information found.') {
+               addLog("✓ Successfully captured Pricing Packages", 'success');
             } else {
-               // Dynamic Result Logs
-               addLog(`✓ Found ${data.services.length} Services/Offerings`, 'success');
-               if (data.pricing && data.pricing !== 'Detailed pricing information was not found.') {
-                  addLog("✓ Successfully captured Pricing Packages", 'success');
-               } else {
-                  addLog("ℹ No detailed pricing found (Action Required)", 'pending');
-               }
-               if (data.businessHours !== 'Not specified') {
-                  addLog("✓ Captured Business Hours", 'success');
-               }
-
-               addLog("Data Model Constructed Successfully.", 'success');
-               addLog("Ready for human verification.", 'success');
+               addLog("ℹ No detailed pricing found (you can add it manually)", 'pending');
             }
+            if (data.businessHours && data.businessHours !== 'Not specified') {
+               addLog("✓ Captured Business Hours", 'success');
+            }
+
+            addLog("Data Model Constructed Successfully.", 'success');
+            addLog("Ready for human verification.", 'success');
          } else {
-            addLog("Scan failed completely. Manual entry required.", 'error');
+            addLog("Scan returned no data. Manual entry required.", 'error');
             setScanError("Could not extract data from website. You can continue with manual entry.");
          }
       } catch (error: any) {
@@ -203,10 +201,24 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
          setIsScanning(false);
          const errorMessage = error?.message || 'Unknown error occurred';
          console.error('[Onboarding] Scan error:', errorMessage);
-         addLog(`❌ Error: ${errorMessage}`, 'error');
-         setScanError(errorMessage.includes('Rate limit')
-            ? 'Rate limit reached. Please wait a few minutes and try again.'
-            : `Scan failed: ${errorMessage}. You can continue with manual entry.`);
+
+         // Show user-friendly error messages based on the error type
+         let userMessage = '';
+         if (errorMessage.includes('timed out') || errorMessage.includes('504')) {
+            userMessage = 'The website took too long to respond. This can happen with complex websites. You can try again or continue with manual entry.';
+            addLog(`⏱️ Scan timed out`, 'error');
+         } else if (errorMessage.includes('Rate limit') || errorMessage.includes('429')) {
+            userMessage = 'Rate limit reached. You can only scan 5 websites per hour. Please wait and try again later.';
+            addLog(`⚠️ Rate limit exceeded`, 'error');
+         } else if (errorMessage.includes('not extract enough')) {
+            userMessage = 'Could not find enough content on the website. The site may be blocking our scanner, or it may have limited public content.';
+            addLog(`ℹ️ Limited content found`, 'error');
+         } else {
+            userMessage = `Scan failed: ${errorMessage}. You can continue with manual entry.`;
+            addLog(`❌ Error: ${errorMessage}`, 'error');
+         }
+
+         setScanError(userMessage);
       }
    };
 
@@ -752,13 +764,56 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         </ReviewCard>
                      </div>
                      <div id="card-services">
-                        <ReviewCard title="Services" icon={<Tag className="w-5 h-5 text-blue-600" />} isExpanded={expandedSection === 'services'} isApproved={sectionStatus.services} onToggle={() => setExpandedSection(expandedSection === 'services' ? null : 'services')} onApprove={() => toggleApproval('services')} badgeCount={scannedData.services.length}>
-                           <div className="space-y-2">
-                              {scannedData.services.map((svc, i) => (
-                                 <div key={i} className="flex gap-2"><input className="flex-1 p-2 border border-slate-200 rounded text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral" value={svc} onChange={(e) => { const next = [...scannedData.services]; next[i] = e.target.value; setScannedData({ ...scannedData, services: next }); }} /><button onClick={() => { const next = scannedData.services.filter((_, idx) => idx !== i); setScannedData({ ...scannedData, services: next }); }} className="text-slate-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4" /></button></div>
-                              ))}
-                              <button onClick={() => setScannedData({ ...scannedData, services: [...scannedData.services, "New Service"] })} className="text-sm text-chippy-coral font-semibold flex items-center gap-1 mt-2 hover:underline"><Plus className="w-4 h-4" /> Add Service</button>
-                           </div>
+                        <ReviewCard title="Services & Pricing" icon={<Tag className="w-5 h-5 text-blue-600" />} isExpanded={expandedSection === 'services'} isApproved={sectionStatus.services} onToggle={() => setExpandedSection(expandedSection === 'services' ? null : 'services')} onApprove={() => toggleApproval('services')} badgeCount={scannedData.services.length}>
+                           <ServiceEditor
+                              services={scannedData.services}
+                              onChange={(newServices) => setScannedData({ ...scannedData, services: newServices })}
+                              onScanPricing={async (pricingUrl) => {
+                                 setIsScanningPricing(true);
+                                 try {
+                                    const response = await fetch('/api/scrape-pricing', {
+                                       method: 'POST',
+                                       headers: { 'Content-Type': 'application/json' },
+                                       body: JSON.stringify({ url: pricingUrl, existingServices: scannedData.services })
+                                    });
+                                    if (response.ok) {
+                                       const data = await response.json();
+                                       if (data.services && data.services.length > 0) {
+                                          // Merge pricing data with existing services
+                                          const updatedServices = scannedData.services.map(existingSvc => {
+                                             const match = data.services.find((s: any) =>
+                                                s.name.toLowerCase().includes(existingSvc.name.toLowerCase()) ||
+                                                existingSvc.name.toLowerCase().includes(s.name.toLowerCase())
+                                             );
+                                             if (match && match.pricing) {
+                                                return { ...existingSvc, pricing: match.pricing, duration: match.duration || existingSvc.duration };
+                                             }
+                                             return existingSvc;
+                                          });
+                                          // Add any new services found
+                                          const newServices = data.services.filter((s: any) =>
+                                             !scannedData.services.some(es =>
+                                                es.name.toLowerCase().includes(s.name.toLowerCase()) ||
+                                                s.name.toLowerCase().includes(es.name.toLowerCase())
+                                             )
+                                          ).map((s: any) => ({
+                                             id: generateServiceId(),
+                                             name: s.name,
+                                             description: s.description,
+                                             pricing: s.pricing || defaultPricing(),
+                                             duration: s.duration
+                                          }));
+                                          setScannedData({ ...scannedData, services: [...updatedServices, ...newServices] });
+                                       }
+                                    }
+                                 } catch (error) {
+                                    console.error('Failed to scan pricing:', error);
+                                 } finally {
+                                    setIsScanningPricing(false);
+                                 }
+                              }}
+                              isScanningPricing={isScanningPricing}
+                           />
                         </ReviewCard>
                      </div>
                      <div id="card-operations">

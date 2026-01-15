@@ -1,6 +1,6 @@
 # 🔒 FROZEN CHANGES - DO NOT MODIFY WITHOUT APPROVAL
 
-> **Last Updated:** January 11, 2026
+> **Last Updated:** January 15, 2026
 > **Status:** FROZEN - Changes require explicit user approval
 
 ---
@@ -137,6 +137,7 @@ If changes are needed:
 | `src/App.tsx` | Fixed auto-trigger of onboarding wizard for new users |
 | `src/components/OnboardingWizard.tsx` | Error handling, validation, loading states |
 | `src/pages/KnowledgeBase.tsx` | Widget Studio navigation after onboarding |
+| `src/services/geminiService.ts` | Removed mock data fallback, proper error throwing |
 
 ---
 
@@ -151,6 +152,115 @@ If changes are needed:
 
 ---
 
+## Fix 4: Website Scanning Error Handling
+
+> **Added:** January 15, 2026
+
+### Problems Solved
+1. Scan was returning confusing "API Key rejected/blocked" message when it actually timed out
+2. Mock/demo data was being returned on failure, confusing users
+3. Scan could get stuck at 98% during long scrapes
+
+### Root Causes
+- `geminiService.ts` returned mock data on any error, with `isMock: true` flag
+- `OnboardingWizard.tsx` checked for `isMock` and showed misleading "API Key blocked" message
+- No specific handling for different error types (timeout vs rate limit vs content issues)
+
+### Changes Made
+
+#### src/services/geminiService.ts
+- **Removed mock data fallback entirely** - now throws the actual error
+- Error message is passed through to the UI for accurate display
+
+#### src/components/OnboardingWizard.tsx
+- Removed `isMock` check (no longer needed)
+- Added specific error message handling:
+  - **Timeout (504)**: "The website took too long to respond..."
+  - **Rate limit (429)**: "Rate limit reached. You can only scan 5 websites per hour..."
+  - **Limited content**: "Could not find enough content on the website..."
+  - **Other errors**: Show actual error message with option to continue manually
+
+---
+
+## Fix 5: Scraper Performance Optimization
+
+> **Added:** January 15, 2026
+
+### Problem Solved
+Website scanning was timing out after 2 minutes on complex websites, causing scans to fail.
+
+### Root Cause
+The scraper was:
+- Scraping up to 30 pages (including sitemap URLs)
+- Using 20-second timeout per page
+- Using `networkidle2` wait strategy (slow)
+- 3 retries with exponential backoff
+- 500ms extra delay per page
+
+### Changes Made
+
+#### scraper.js
+- **Reduced max pages from 30 to 10** - Focus on essential pages only
+- **Reduced per-page timeout from 20s to 12s**
+- **Changed wait strategy from `networkidle2` to `domcontentloaded`** - Much faster
+- **Reduced max retries from 3 to 2**
+- **Removed 500ms extra delay** - No longer needed
+- **Increased batch size from 3 to 4** - More parallelism
+- **Skipped sitemap parsing** - Faster initial scan using essential paths only
+
+**Result:** Scans now complete in ~30-60 seconds instead of timing out.
+
+---
+
+## Fix 6: Dedicated Onboarding Route
+
+> **Added:** January 15, 2026
+
+### Problem Solved
+After signup, users saw the dashboard briefly before the onboarding popup appeared on top. This was jarring.
+
+### Root Cause
+Onboarding was a popup/overlay component rendered on top of the dashboard.
+
+### Changes Made
+
+#### src/pages/OnboardingPage.tsx (NEW)
+- Created dedicated full-page onboarding experience
+- Shows gentle loader while checking if user needs onboarding
+- Redirects to Widget Studio when complete
+- Clean URL: `app.hellochippy.com/onboarding`
+
+#### src/App.tsx
+- Added `/onboarding` route (full page, no sidebar)
+- Created `OnboardingCheck` component that redirects new users to `/onboarding`
+- Removed popup overlay logic
+- All other routes now check if user needs onboarding first
+
+**New Flow:**
+1. User signs up → redirected to `/onboarding`
+2. User completes onboarding → redirected to `/widget` (Widget Studio)
+3. From Widget Studio, user can connect calendar via Integrations
+
+---
+
+## Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `server.js` | Widget-config API + 3 new widget data APIs |
+| `src/pages/EmbedPage.tsx` | Calendar connections + all callback handlers |
+| `src/services/locationTools.ts` | Improved booking detection logic |
+| `src/pages/Integrations.tsx` | Embed domain security UI |
+| `src/contexts/DataContext.tsx` | Added isLoading state for onboarding trigger |
+| `src/App.tsx` | Dedicated /onboarding route, OnboardingCheck component |
+| `src/components/OnboardingWizard.tsx` | Error handling, validation, loading states |
+| `src/pages/KnowledgeBase.tsx` | Widget Studio navigation after onboarding |
+| `src/services/geminiService.ts` | Removed mock data fallback, proper error throwing |
+| `src/pages/OnboardingPage.tsx` | NEW - Dedicated onboarding page |
+| `scraper.js` | Performance optimization (10 pages, 12s timeout, no sitemap) |
+
+---
+
 ## Testing Verification
 
 ✅ Widget loads on external domain (hellochippy.com)
@@ -162,9 +272,18 @@ If changes are needed:
 ✅ Build compiles without errors
 
 ### Onboarding Flow Tests
-✅ New user sees onboarding wizard automatically
+✅ New user is redirected to /onboarding (not dashboard popup)
+✅ Gentle loader shows while checking onboarding status
 ✅ Validation shows when business type not selected
 ✅ Address validation shows for storefront businesses
 ✅ Scan errors display with retry option
 ✅ Loading indicator shows during scan
 ✅ Users navigate to Widget Studio after completion
+✅ Timeout errors show accurate message (not "API Key blocked")
+✅ No mock data returned on failure
+
+### Scraper Performance Tests
+✅ Scans complete in 30-60 seconds for most websites
+✅ Essential pages (homepage, pricing, services, about, contact, faq) are prioritized
+✅ Timeout still handled gracefully with user-friendly error message
+

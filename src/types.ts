@@ -108,6 +108,24 @@ export interface BusinessLocation {
   hours?: string;
 }
 
+// Service pricing configuration
+export interface ServicePricing {
+  type: 'fixed' | 'starting_from' | 'hourly' | 'custom' | 'contact';
+  amount?: number;        // e.g., 50 (in cents or dollars based on currency)
+  currency?: string;      // e.g., 'USD'
+  customText?: string;    // For 'custom' type: "Varies by project"
+}
+
+// Structured service with linked pricing
+export interface Service {
+  id: string;
+  name: string;
+  description?: string;
+  pricing: ServicePricing;
+  duration?: number;      // Duration in minutes (for booking)
+  category?: string;      // Service category (e.g., "Hair", "Nails")
+}
+
 export interface KnowledgeBaseData {
   companyName: string | null;
   website: string | null;
@@ -115,15 +133,16 @@ export interface KnowledgeBaseData {
   businessCategory: string | null;
   keywords: string[];
   summary: string | null;
-  services: string[];
+  services: Service[];        // NEW: Structured services with pricing
+  legacyServices?: string[];  // OLD: For migration - string array format
   businessHours: string | null;
   contactInfo: string | null;
-  pricing: string | null; // Summarized text
-  policies: string | null; // Summarized text
-  locations?: BusinessLocation[]; // Physical business locations
+  pricing?: string | null;    // DEPRECATED: Legacy pricing text (kept for migration)
+  policies: string | null;
+  locations?: BusinessLocation[];
   sources?: string[];
   lastUpdated?: Date;
-  isMock?: boolean; // New flag for error handling
+  isMock?: boolean;
   corrections?: { query: string; correction: string }[];
 }
 

@@ -2,7 +2,8 @@ import puppeteer from 'puppeteer';
 
 /**
  * Scrapes a website and extracts text content from key pages.
- * Features: retry logic, sitemap parsing, parallel fetching, improved JS rendering.
+ * Features: retry logic, parallel fetching, improved JS rendering.
+ * OPTIMIZED: Reduced pages and timeouts for faster initial scans.
  * @param {string} baseUrl - The root URL of the website.
  * @returns {Promise<{pages: {url: string, title: string, text: string}[], combinedText: string}>}
  */
@@ -18,52 +19,43 @@ export async function scrapeWebsite(baseUrl) {
     const results = [];
     const visitedUrls = new Set();
 
-    // Key paths to check (including location-related pages for local businesses)
-    const defaultPaths = [
-        '', // Homepage
+    // OPTIMIZED: Focus on essential pages only for faster scans
+    // These are the most important pages for understanding a business
+    const essentialPaths = [
+        '', // Homepage (most important)
         '/pricing',
-        '/plans',
         '/services',
         '/about',
-        '/about-us',
         '/contact',
-        '/contact-us',
         '/faq',
-        '/terms',
-        '/cancellation-policy',
-        '/locations',
-        '/find-us',
-        '/stores',
-        '/branches',
-        '/clinics',
-        '/offices',
-        '/our-locations',
-        '/store-locator'
     ];
 
-    // Try to get additional pages from sitemap
-    let sitemapUrls = [];
-    try {
-        sitemapUrls = await parseSitemap(baseUrl, browser);
-        console.log(`[Scraper] Found ${sitemapUrls.length} URLs in sitemap`);
-    } catch (err) {
-        console.log(`[Scraper] No sitemap found or error parsing: ${err.message}`);
-    }
+    // Additional paths to try if we have time (will be limited)
+    const secondaryPaths = [
+        '/plans',
+        '/about-us',
+        '/contact-us',
+        '/locations',
+        '/terms',
+        '/cancellation-policy',
+    ];
 
-    // Combine default paths with sitemap URLs, deduplicate
-    const allUrls = new Set();
-    defaultPaths.forEach(path => allUrls.add(new URL(path, baseUrl).href));
-    sitemapUrls.forEach(url => {
-        if (url.startsWith(baseUrl)) { // Only same-domain URLs
-            allUrls.add(url);
+    // Combine paths, prioritizing essential ones
+    const allPaths = [...essentialPaths, ...secondaryPaths];
+
+    // OPTIMIZED: Limit to 10 pages max (was 30) for faster scanning
+    const urlsToScrape = allPaths.slice(0, 10).map(path => {
+        try {
+            return new URL(path, baseUrl).href;
+        } catch {
+            return null;
         }
-    });
+    }).filter(Boolean);
 
-    const urlsToScrape = Array.from(allUrls).slice(0, 30); // Limit to 30 pages max
-    console.log(`[Scraper] Will process ${urlsToScrape.length} pages`);
+    console.log(`[Scraper] Will process ${urlsToScrape.length} pages (optimized for speed)`);
 
-    // Process pages in parallel batches of 3
-    const BATCH_SIZE = 3;
+    // Process pages in parallel batches of 4 (was 3)
+    const BATCH_SIZE = 4;
     for (let i = 0; i < urlsToScrape.length; i += BATCH_SIZE) {
         const batch = urlsToScrape.slice(i, i + BATCH_SIZE);
         console.log(`[Scraper] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(urlsToScrape.length / BATCH_SIZE)}`);
@@ -137,8 +129,9 @@ async function parseSitemap(baseUrl, browser) {
 
 /**
  * Scrape a single page with retry logic and exponential backoff
+ * OPTIMIZED: Reduced timeout and retries for faster scanning
  */
-async function scrapePageWithRetry(browser, fullUrl, visitedUrls, maxRetries = 3) {
+async function scrapePageWithRetry(browser, fullUrl, visitedUrls, maxRetries = 2) {
     // Skip if already visited
     if (visitedUrls.has(fullUrl)) {
         return null;
@@ -154,10 +147,10 @@ async function scrapePageWithRetry(browser, fullUrl, visitedUrls, maxRetries = 3
         try {
             console.log(`[Scraper] Fetching: ${fullUrl}${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
 
-            // Use networkidle2 for better JS rendering, with fallback timeout
+            // OPTIMIZED: Reduced timeout from 20s to 12s, use domcontentloaded for speed
             const response = await page.goto(fullUrl, {
-                waitUntil: 'networkidle2',
-                timeout: 20000
+                waitUntil: 'domcontentloaded',
+                timeout: 12000
             });
 
             // Skip if 404 or other error
@@ -166,9 +159,6 @@ async function scrapePageWithRetry(browser, fullUrl, visitedUrls, maxRetries = 3
                 await page.close();
                 return null;
             }
-
-            // Wait a bit more for dynamic content
-            await page.waitForTimeout(500);
 
             // Extract page title
             const title = await page.title();
