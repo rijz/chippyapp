@@ -1,17 +1,18 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { MessageCircle, X, Send, Sparkles, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
 import { Message, TenantConfig, WidgetConfig, BusinessLocation, CalendarConnection } from '../types';
 import { createAgentSession, analyzeInteraction } from '../services/geminiService';
 import { CALENDAR_TOOLS, executeCalendarTool, ToolContext, CallbackRequestData } from '../services/calendarTools';
 import { LOCATION_TOOL, executeFindClosestLocation, getLocationSelectionPrompt } from '../services/locationTools';
 import { ChatSession } from '@google/generative-ai';
+import DOMPurify from 'dompurify';
 
-// Simple Markdown renderer for chat messages
+// Simple Markdown renderer for chat messages with XSS protection
 const FormattedMessage: React.FC<{ text: string }> = ({ text }) => {
-  // Convert markdown to HTML
-  const formatText = (input: string) => {
-    return input
+  // Convert markdown to HTML and sanitize to prevent XSS
+  const sanitizedHtml = useMemo(() => {
+    const formatted = text
       // Bold: **text** or __text__
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/__(.*?)__/g, '<strong>$1</strong>')
@@ -22,12 +23,18 @@ const FormattedMessage: React.FC<{ text: string }> = ({ text }) => {
       .replace(/^[-*]\s+(.*)$/gm, '<li class="ml-4 list-disc">$1</li>')
       // Line breaks
       .replace(/\n/g, '<br />');
-  };
+
+    // Sanitize HTML to prevent XSS attacks
+    return DOMPurify.sanitize(formatted, {
+      ALLOWED_TAGS: ['strong', 'em', 'li', 'br', 'ul', 'ol', 'p', 'span'],
+      ALLOWED_ATTR: ['class']
+    });
+  }, [text]);
 
   return (
     <span
       className="formatted-message"
-      dangerouslySetInnerHTML={{ __html: formatText(text) }}
+      dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
     />
   );
 };

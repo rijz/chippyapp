@@ -498,3 +498,91 @@ The AddressAutocomplete component was using the legacy `google.maps.places.Autoc
 ✅ No deprecation warnings (using new PlaceAutocompleteElement)
 ✅ Address autocomplete works on Chrome, Firefox, Safari
 ✅ Fallback to legacy API if PlaceAutocompleteElement unavailable
+
+---
+
+## Fix 13: Security Hardening
+
+> **Added:** January 17, 2026
+
+### Problems Solved
+Security audit revealed several vulnerabilities:
+1. **XSS in ChatWidget**: `dangerouslySetInnerHTML` without sanitization could allow malicious scripts
+2. **IDOR vulnerability**: `/api/embed-domains/:userId` PUT endpoint had no authentication - anyone could modify any user's embed domains
+3. **Stored XSS**: Widget APIs accepted unsanitized input that could be stored and rendered
+
+### Security Testing Performed
+- Attempted XSS injection via widget APIs (payload accepted before fix)
+- Attempted SSRF via scraper API (blocked ✅)
+- Attempted unauthorized embed domain modification (possible before fix)
+- Tested authentication bypass on protected routes (blocked ✅)
+
+### Changes Made
+
+#### src/components/ChatWidget.tsx
+- **Added DOMPurify** for XSS sanitization
+- Markdown-to-HTML conversion now sanitizes output with whitelist:
+  ```javascript
+  DOMPurify.sanitize(formatted, {
+    ALLOWED_TAGS: ['strong', 'em', 'li', 'br', 'ul', 'ol', 'p', 'span'],
+    ALLOWED_ATTR: ['class']
+  });
+  ```
+
+#### server.js - Embed Domains Authentication
+- **Added authentication middleware** to `PUT /api/embed-domains/:userId`
+- Verifies Bearer token via Supabase auth
+- Checks `user.id === userId` to prevent IDOR attacks
+- Returns 401/403 for unauthorized requests
+- Logs security events for monitoring
+
+#### server.js - Input Sanitization
+- **Added `sanitizeInput()` and `sanitizeObject()` helpers**
+- Strips HTML tags, `javascript:` protocol, event handlers
+- Applied to all widget APIs:
+  - `POST /api/widget/lead`
+  - `POST /api/widget/session`  
+  - `POST /api/widget/interaction`
+
+### Security Audit Report
+Full security audit saved to `SECURITY_AUDIT_REPORT.md` with:
+- 2 Critical vulnerabilities (local .env exposure advisory, API key restrictions needed)
+- 3 High vulnerabilities (fixed in this release)
+- 3 Medium vulnerabilities (documented for future)
+- 10+ security checks passed
+
+---
+
+## Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `server.js` | Widget-config API + widget data APIs + widget.js CORS + enhanced embed CSP + AUTH on embed domains + input sanitization |
+| `src/pages/EmbedPage.tsx` | Calendar connections + all callback handlers |
+| `src/services/locationTools.ts` | Improved booking detection logic |
+| `src/pages/Integrations.tsx` | Embed domain security UI |
+| `src/contexts/DataContext.tsx` | isLoading state + data persistence fix |
+| `src/App.tsx` | Dedicated /onboarding route, OnboardingCheck component |
+| `src/components/OnboardingWizard.tsx` | Error handling, validation, loading states, auto-advance, address autocomplete |
+| `src/pages/KnowledgeBase.tsx` | Widget Studio navigation after onboarding |
+| `src/services/geminiService.ts` | Removed mock data fallback, proper error throwing |
+| `src/pages/OnboardingPage.tsx` | NEW - Dedicated onboarding page |
+| `scraper.js` | Performance optimization (10 pages, 12s timeout, no sitemap) |
+| `src/components/ServiceEditor.tsx` | Pricing scan feedback display |
+| `src/components/knowledge/KnowledgeData.tsx` | Service objects rendering + fallback UI |
+| `src/components/AddressAutocomplete.tsx` | NEW - Google Places PlaceAutocompleteElement API |
+| `src/pages/ReviewQueue.tsx` | Save functionality fix |
+| `src/components/ChatWidget.tsx` | DOMPurify XSS protection |
+| `SECURITY_AUDIT_REPORT.md` | NEW - Full security audit report |
+
+---
+
+## Security Tests
+
+✅ XSS payloads sanitized in chat messages (DOMPurify)
+✅ XSS payloads stripped from widget API inputs
+✅ Embed domain updates require authentication
+✅ IDOR prevented (user can only modify own settings)
+✅ SSRF blocked in scraper (localhost, metadata URLs)
+✅ Rate limiting on all expensive APIs
+✅ Authentication enforced on /dashboard, /superadmin

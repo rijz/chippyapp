@@ -556,13 +556,44 @@ const widgetDataLimiter = rateLimit({
   message: { error: 'Too many requests' }
 });
 
+// =====================
+// SECURITY: Input sanitization for widget APIs
+// =====================
+const sanitizeInput = (input) => {
+  if (typeof input !== 'string') return input;
+  return input
+    .replace(/<[^>]*>/g, '') // Remove HTML tags
+    .replace(/javascript:/gi, '') // Remove javascript: protocol
+    .replace(/on\w+\s*=/gi, '') // Remove event handlers
+    .replace(/data:/gi, '') // Remove data: protocol
+    .trim()
+    .slice(0, 1000); // Limit length
+};
+
+const sanitizeObject = (obj) => {
+  if (!obj || typeof obj !== 'object') return obj;
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'string') {
+      sanitized[key] = sanitizeInput(value);
+    } else if (typeof value === 'object' && value !== null) {
+      sanitized[key] = sanitizeObject(value);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
+
 /**
  * POST /api/widget/lead
  * Creates or updates a lead from the embed widget
  */
 app.post('/api/widget/lead', widgetDataLimiter, async (req, res) => {
   try {
-    const { userId, lead } = req.body;
+    // Sanitize all input to prevent XSS
+    const userId = sanitizeInput(req.body.userId);
+    const lead = sanitizeObject(req.body.lead);
 
     if (!userId || !lead) {
       return res.status(400).json({ error: 'Missing userId or lead data' });
@@ -635,7 +666,9 @@ app.post('/api/widget/lead', widgetDataLimiter, async (req, res) => {
  */
 app.post('/api/widget/session', widgetDataLimiter, async (req, res) => {
   try {
-    const { userId, session } = req.body;
+    // Sanitize all input to prevent XSS
+    const userId = sanitizeInput(req.body.userId);
+    const session = sanitizeObject(req.body.session);
 
     if (!userId || !session) {
       return res.status(400).json({ error: 'Missing userId or session data' });
@@ -670,7 +703,12 @@ app.post('/api/widget/session', widgetDataLimiter, async (req, res) => {
  */
 app.post('/api/widget/interaction', widgetDataLimiter, async (req, res) => {
   try {
-    const { userId, query, response, analysis, sessionId } = req.body;
+    // Sanitize all input to prevent XSS
+    const userId = sanitizeInput(req.body.userId);
+    const query = sanitizeInput(req.body.query);
+    const response = sanitizeInput(req.body.response);
+    const analysis = sanitizeObject(req.body.analysis);
+    const sessionId = sanitizeInput(req.body.sessionId);
 
     if (!userId) {
       return res.status(400).json({ error: 'Missing userId' });
@@ -796,11 +834,33 @@ app.get('/api/embed-domains/:userId', async (req, res) => {
   }
 });
 
-// Update allowed embed domains
+// Update allowed embed domains (PROTECTED - requires authentication)
 app.put('/api/embed-domains/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const { domains } = req.body;
+
+    // =====================
+    // SECURITY: Verify the caller owns this userId
+    // =====================
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // Verify the authenticated user matches the userId being modified
+    if (user.id !== userId) {
+      console.warn(`[Security] User ${user.id} attempted to modify embed domains for ${userId}`);
+      return res.status(403).json({ error: 'You can only modify your own embed domains' });
+    }
+    // =====================
 
     if (!userId) {
       return res.status(400).json({ error: 'Missing userId' });
