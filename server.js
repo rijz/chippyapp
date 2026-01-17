@@ -237,6 +237,7 @@ app.use(express.static(servePath));
 app.get('/embed', async (req, res, next) => {
   try {
     const userId = req.query.u;
+    const referer = req.headers.referer || req.headers.origin || '';
 
     if (userId) {
       // Fetch user's allowed embed domains from settings
@@ -246,20 +247,22 @@ app.get('/embed', async (req, res, next) => {
         .eq('user_id', userId)
         .maybeSingle();
 
-      // Get allowed domains - fallback to tenant's website URL, then allow all
+      // Get allowed domains - start with explicitly configured domains
       let allowedDomains = settings?.allowed_embed_domains || [];
+      let defaultDomain = null;
 
-      // If no explicit domains, try to get from tenant config's website
+      // If no explicit domains, use the tenant's website URL as the default
       if (allowedDomains.length === 0 && settings?.tenant_config?.companyUrl) {
         try {
           const url = new URL(settings.tenant_config.companyUrl);
-          allowedDomains = [url.origin];
+          defaultDomain = url.origin;
+          allowedDomains = [defaultDomain];
         } catch (e) {
           // Invalid URL, skip
         }
       }
 
-      // Also fetch from knowledge base if still empty
+      // Also check knowledge base for website if still empty
       if (allowedDomains.length === 0) {
         const { data: knowledge } = await supabaseAdmin
           .from('knowledge_bases')
@@ -270,20 +273,45 @@ app.get('/embed', async (req, res, next) => {
         if (knowledge?.content?.website) {
           try {
             const url = new URL(knowledge.content.website);
-            allowedDomains = [url.origin];
+            defaultDomain = url.origin;
+            allowedDomains = [defaultDomain];
           } catch (e) {
             // Invalid URL, skip
           }
         }
       }
 
-      // Set CSP header if we have allowed domains
-      if (allowedDomains.length > 0) {
-        // Always include 'self' for preview in dashboard
-        const frameAncestors = ["'self'", ...allowedDomains].join(' ');
-        res.setHeader('Content-Security-Policy', `frame-ancestors ${frameAncestors}`);
+      // Log access attempt for security monitoring
+      if (referer) {
+        try {
+          const refererOrigin = new URL(referer).origin;
+          const isAuthorized = allowedDomains.some(domain =>
+            refererOrigin === domain || refererOrigin === 'null' // 'null' is for local file:// access
+          ) || refererOrigin.includes('hellochippy.com') || refererOrigin.includes('localhost');
+
+          if (!isAuthorized && allowedDomains.length > 0) {
+            console.warn(`[Embed Security] Unauthorized access attempt for user ${userId} from ${refererOrigin}. Allowed: ${allowedDomains.join(', ')}`);
+          }
+        } catch (e) {
+          // Invalid referer URL
+        }
       }
-      // If no domains configured, don't set CSP (allow all - for initial setup)
+
+      // Always set CSP header for security
+      // Include 'self' for dashboard preview and all allowed domains
+      const frameAncestors = [
+        "'self'",
+        "https://app.hellochippy.com",
+        "https://hellochippy.com",
+        "http://localhost:5173",
+        "http://localhost:8080",
+        ...allowedDomains
+      ].join(' ');
+
+      res.setHeader('Content-Security-Policy', `frame-ancestors ${frameAncestors}`);
+
+      // Add X-Frame-Options as fallback for older browsers
+      // Using ALLOW-FROM is deprecated, but CSP handles modern browsers
     }
 
     next();

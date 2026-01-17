@@ -370,6 +370,84 @@ The `handleSaveCorrection` function wasn't resetting the editing state after sav
 
 ---
 
+## Fix 11: Enhanced Widget Embed Security
+
+> **Added:** January 17, 2026
+
+### Problem Solved
+The widget embed had permissive security - if no domains were configured, it allowed embedding from anywhere. This could allow widget abuse or hijacking.
+
+### Changes Made
+
+#### server.js - Enhanced /embed CSP middleware
+- **Always set CSP header** (previously only set if domains were configured)
+- **Default whitelist** includes:
+  - `'self'` for dashboard preview
+  - `https://app.hellochippy.com` and `https://hellochippy.com`
+  - `localhost` for development
+  - User's configured `allowed_embed_domains`
+  - User's scanned website URL (auto-whitelisted)
+- **Security logging**: Logs unauthorized access attempts with referer origin
+- **Checks both** explicit domains and scanned website URL as fallback
+
+**Security Model:**
+```
+widget.js  → Open (CORS: *) - just a loader script, no sensitive data
+/embed     → Protected (CSP frame-ancestors) - actual widget with user data
+```
+
+---
+
+## Fix 12: Google Places API Migration
+
+> **Added:** January 17, 2026
+
+### Problems Solved
+1. Console warning: "Google Maps JavaScript API has been loaded directly without loading=async"
+2. Deprecation warning: "google.maps.places.Autocomplete is not available to new customers"
+
+### Root Cause
+The AddressAutocomplete component was using the legacy `google.maps.places.Autocomplete` API which is deprecated for new customers as of March 2025.
+
+### Changes Made
+
+#### src/components/AddressAutocomplete.tsx
+- **Migrated to new PlaceAutocompleteElement API** (`google.maps.places.PlaceAutocompleteElement`)
+- **Added `loading=async`** to the script URL for optimal performance
+- **Fallback support**: Falls back to legacy API if PlaceAutocompleteElement is not available
+- **Uses `gmp-placeselect` event** instead of `place_changed`
+- **Fetches place details** with `place.fetchFields()` to get addressComponents
+- **Styled with CSS custom properties** for the new element:
+  ```css
+  --gmpx-color-surface: white;
+  --gmpx-color-on-surface: #1e293b;
+  --gmpx-color-primary: #FF6B5E;
+  ```
+
+---
+
+## Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `server.js` | Widget-config API + widget data APIs + widget.js CORS + enhanced embed CSP |
+| `src/pages/EmbedPage.tsx` | Calendar connections + all callback handlers |
+| `src/services/locationTools.ts` | Improved booking detection logic |
+| `src/pages/Integrations.tsx` | Embed domain security UI |
+| `src/contexts/DataContext.tsx` | isLoading state + data persistence fix |
+| `src/App.tsx` | Dedicated /onboarding route, OnboardingCheck component |
+| `src/components/OnboardingWizard.tsx` | Error handling, validation, loading states, auto-advance, address autocomplete |
+| `src/pages/KnowledgeBase.tsx` | Widget Studio navigation after onboarding |
+| `src/services/geminiService.ts` | Removed mock data fallback, proper error throwing |
+| `src/pages/OnboardingPage.tsx` | NEW - Dedicated onboarding page |
+| `scraper.js` | Performance optimization (10 pages, 12s timeout, no sitemap) |
+| `src/components/ServiceEditor.tsx` | Pricing scan feedback display |
+| `src/components/knowledge/KnowledgeData.tsx` | Service objects rendering + fallback UI |
+| `src/components/AddressAutocomplete.tsx` | NEW - Google Places PlaceAutocompleteElement API |
+| `src/pages/ReviewQueue.tsx` | Save functionality fix |
+
+---
+
 ## Testing Verification
 
 ✅ Widget loads on external domain (hellochippy.com)
@@ -393,7 +471,7 @@ The `handleSaveCorrection` function wasn't resetting the editing state after sav
 ✅ Scan progress shows updates at 96% and 98%
 ✅ Auto-advance to next section after approving
 ✅ Pricing scan shows feedback message
-✅ Address autocomplete fills city/state/zip
+✅ Address autocomplete fills city/state/zip (new PlaceAutocompleteElement API)
 
 ### Scraper Performance Tests
 ✅ Scans complete in 30-60 seconds for most websites
@@ -411,5 +489,12 @@ The `handleSaveCorrection` function wasn't resetting the editing state after sav
 
 ### Widget Embedding Tests
 ✅ widget.js loads from external domains without CORS errors
-✅ Widget can be embedded on any website
+✅ Widget embed restricted to allowed domains (CSP enforced)
+✅ Unauthorized access attempts are logged
+✅ Scanned website URL auto-whitelisted for embedding
 
+### Google Places API Tests
+✅ No console warnings about async loading
+✅ No deprecation warnings (using new PlaceAutocompleteElement)
+✅ Address autocomplete works on Chrome, Firefox, Safari
+✅ Fallback to legacy API if PlaceAutocompleteElement unavailable
