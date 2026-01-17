@@ -69,6 +69,10 @@ export const ReviewQueue = () => {
             });
         }
 
+        // 3. Reset editing state to show the updated content
+        setIsEditing(false);
+        setCorrectionText('');
+
         // Move to next item logic is handled by effect or manual selection for history
         // For pending, we usually want to select the next one.
         if (filter === 'pending') {

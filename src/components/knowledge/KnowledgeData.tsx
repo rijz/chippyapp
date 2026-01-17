@@ -1,16 +1,29 @@
 
 import React, { useState } from 'react';
-import { Tag, DollarSign, ShieldCheck, Edit2, Save, X, CheckSquare, Plus, MapPin, Trash2 } from 'lucide-react';
+import { Tag, DollarSign, ShieldCheck, Edit2, Save, X, CheckSquare, Plus, MapPin, Trash2, Clock } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
-import { KnowledgeBaseData, PricingPlan, BusinessLocation } from '../../types';
+import { KnowledgeBaseData, PricingPlan, BusinessLocation, Service } from '../../types';
+import { formatServicePrice } from '../../utils/serviceUtils';
 
 export const KnowledgeData = () => {
     const { knowledgeData, setKnowledgeData } = useData();
     const [editingSection, setEditingSection] = useState<keyof KnowledgeBaseData | null>(null);
     const [tempValue, setTempValue] = useState<any>('');
 
+    if (!knowledgeData) {
+        return (
+            <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 animate-in fade-in">
+                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Tag className="w-8 h-8 text-slate-400" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-700 mb-2">No Knowledge Data Yet</h3>
+                <p className="text-slate-500 text-sm max-w-md mx-auto">
+                    Complete the onboarding wizard to populate your knowledge base with services, pricing, and policies.
+                </p>
+            </div>
+        );
+    }
 
-    if (!knowledgeData) return null;
 
     const startEditing = (section: keyof KnowledgeBaseData, value: any) => {
         setEditingSection(section);
@@ -119,6 +132,44 @@ export const KnowledgeData = () => {
                             ))}
                         </div>
                     )}
+                </div>
+            );
+        }
+
+        // Custom Renderer for Services (objects with id, name, pricing, description)
+        if (field === 'services' && Array.isArray(content) && content.length > 0 && typeof content[0] === 'object' && 'pricing' in content[0]) {
+            return (
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 transition-all hover:bg-slate-50/50">
+                    <div className="flex justify-between items-start mb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-slate-100 rounded-lg text-chippy-navy">{icon}</div>
+                            <div>
+                                <h3 className="font-bold text-chippy-navy">{title}</h3>
+                                <span className="text-xs text-slate-500">{content.length} services</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {(content as Service[]).map((service) => (
+                            <div key={service.id} className="p-4 border border-slate-200 rounded-xl bg-slate-50 hover:shadow-sm transition-shadow">
+                                <h4 className="font-semibold text-chippy-navy text-sm mb-1">{service.name}</h4>
+                                {service.description && (
+                                    <p className="text-xs text-slate-500 mb-2 line-clamp-2">{service.description}</p>
+                                )}
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="font-bold text-chippy-coral">{formatServicePrice(service.pricing)}</span>
+                                    {service.duration && (
+                                        <span className="text-slate-400 flex items-center gap-1">
+                                            <Clock className="w-3 h-3" /> {service.duration} min
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-4 italic">
+                        To edit services, use the Re-scan Website feature or complete the onboarding wizard again.
+                    </p>
                 </div>
             );
         }

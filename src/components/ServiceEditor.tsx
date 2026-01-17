@@ -8,13 +8,15 @@ interface ServiceEditorProps {
     onChange: (services: Service[]) => void;
     onScanPricing: (url: string) => Promise<void>;
     isScanningPricing: boolean;
+    pricingScanResult?: { success: boolean; message: string } | null;
 }
 
 export const ServiceEditor: React.FC<ServiceEditorProps> = ({
     services,
     onChange,
     onScanPricing,
-    isScanningPricing
+    isScanningPricing,
+    pricingScanResult
 }) => {
     const [editingService, setEditingService] = useState<Service | null>(null);
     const [pricingUrl, setPricingUrl] = useState('');
@@ -73,8 +75,8 @@ export const ServiceEditor: React.FC<ServiceEditorProps> = ({
                     <div
                         key={service.id}
                         className={`p-4 rounded-xl border transition-all ${hasValidPricing(service)
-                                ? 'bg-white border-slate-200 hover:border-chippy-coral/50'
-                                : 'bg-amber-50 border-amber-200'
+                            ? 'bg-white border-slate-200 hover:border-chippy-coral/50'
+                            : 'bg-amber-50 border-amber-200'
                             }`}
                     >
                         <div className="flex items-center justify-between">
@@ -151,6 +153,20 @@ export const ServiceEditor: React.FC<ServiceEditorProps> = ({
                         )}
                     </button>
                 </div>
+                {/* Scan Result Feedback */}
+                {pricingScanResult && (
+                    <div className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 ${pricingScanResult.success
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                            : 'bg-amber-50 text-amber-800 border border-amber-200'
+                        }`}>
+                        {pricingScanResult.success ? (
+                            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        ) : (
+                            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        )}
+                        <span>{pricingScanResult.message}</span>
+                    </div>
+                )}
             </div>
 
             {/* Edit Modal */}

@@ -35,6 +35,7 @@ import { analyzeCompanyContent, analyzeRawText } from '../services/geminiService
 import { uploadKnowledgeAsset } from '../services/supabaseStorage';
 import { ServiceEditor } from './ServiceEditor';
 import { normalizeKnowledgeData, generateServiceId, defaultPricing } from '../utils/serviceUtils';
+import { AddressAutocomplete } from './AddressAutocomplete';
 
 interface OnboardingWizardProps {
    tenantConfig: TenantConfig;
@@ -97,6 +98,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
    const [isTraining, setIsTraining] = useState(false);
    const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
    const [isScanningPricing, setIsScanningPricing] = useState(false);
+   const [pricingScanResult, setPricingScanResult] = useState<{ success: boolean; message: string } | null>(null);
 
    // Step 4 State
    const [trainingPhase, setTrainingPhase] = useState(0);
@@ -145,9 +147,11 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
          { p: 20, m: "Analyzing Sitemap Structure..." },
          { p: 35, m: "Scanning Homepage for Identity..." },
          { p: 55, m: "Deep Search: Services & Offerings..." },
-         { p: 70, m: "Deep Search: Pricing & Rates..." },
+         { p: 70, m: "Deep Search: Pricing Information..." },
          { p: 85, m: "Deep Search: Policies & Terms..." },
-         { p: 95, m: "Synthesizing Knowledge Model..." }
+         { p: 92, m: "Synthesizing Knowledge Model..." },
+         { p: 96, m: "Finalizing data extraction..." },
+         { p: 98, m: "Validating extracted entities..." }
       ];
 
       let tick = 0;
@@ -299,7 +303,26 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
    const toggleApproval = (section: SectionKey) => {
       setSectionStatus(prev => {
          const newState = { ...prev, [section]: !prev[section] };
-         if (newState[section]) setExpandedSection(null);
+         // When approving a section, open the next unapproved section
+         if (newState[section]) {
+            const sectionOrder: SectionKey[] = ['identity', 'services', 'operations', 'pricing', 'policies'];
+            const currentIndex = sectionOrder.indexOf(section);
+            // Find the next unapproved section
+            let nextSection: SectionKey | null = null;
+            for (let i = currentIndex + 1; i < sectionOrder.length; i++) {
+               if (!newState[sectionOrder[i]]) {
+                  nextSection = sectionOrder[i];
+                  break;
+               }
+            }
+            setExpandedSection(nextSection);
+            // Scroll to next section if exists
+            if (nextSection) {
+               setTimeout(() => {
+                  document.getElementById(`card-${nextSection}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+               }, 100);
+            }
+         }
          return newState;
       });
    };
@@ -575,12 +598,19 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                           <button onClick={() => setLocations(locations.filter((_, idx) => idx !== i))} className="text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
                                        )}
                                     </div>
-                                    <input
-                                       type="text"
+                                    <AddressAutocomplete
                                        value={loc.address}
-                                       onChange={(e) => { const next = [...locations]; next[i].address = e.target.value; setLocations(next); }}
-                                       placeholder="Street Address *"
-                                       className={`w-full p-2 border rounded-lg text-sm bg-white ${!loc.address && businessType === 'storefront' ? 'border-red-300 focus:ring-red-200' : 'border-slate-200'}`}
+                                       onChange={(address) => { const next = [...locations]; next[i].address = address; setLocations(next); }}
+                                       onPlaceSelect={(place) => {
+                                          const next = [...locations];
+                                          next[i].address = place.address;
+                                          next[i].city = place.city;
+                                          next[i].state = place.state;
+                                          next[i].zip = place.zip;
+                                          setLocations(next);
+                                       }}
+                                       placeholder="Start typing your address..."
+                                       error={!loc.address && businessType === 'storefront'}
                                     />
                                     <div className="grid grid-cols-3 gap-2">
                                        <input
@@ -594,14 +624,14 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                           type="text"
                                           value={loc.state}
                                           onChange={(e) => { const next = [...locations]; next[i].state = e.target.value; setLocations(next); }}
-                                          placeholder="State *"
+                                          placeholder="State/Province *"
                                           className="p-2 border border-slate-200 rounded-lg text-sm bg-white"
                                        />
                                        <input
                                           type="text"
                                           value={loc.zip}
                                           onChange={(e) => { const next = [...locations]; next[i].zip = e.target.value; setLocations(next); }}
-                                          placeholder="ZIP *"
+                                          placeholder="ZIP/Postal *"
                                           className="p-2 border border-slate-200 rounded-lg text-sm bg-white"
                                        />
                                     </div>
@@ -764,12 +794,13 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         </ReviewCard>
                      </div>
                      <div id="card-services">
-                        <ReviewCard title="Services & Pricing" icon={<Tag className="w-5 h-5 text-blue-600" />} isExpanded={expandedSection === 'services'} isApproved={sectionStatus.services} onToggle={() => setExpandedSection(expandedSection === 'services' ? null : 'services')} onApprove={() => toggleApproval('services')} badgeCount={scannedData.services.length}>
+                        <ReviewCard title="Services" icon={<Tag className="w-5 h-5 text-blue-600" />} isExpanded={expandedSection === 'services'} isApproved={sectionStatus.services} onToggle={() => setExpandedSection(expandedSection === 'services' ? null : 'services')} onApprove={() => toggleApproval('services')} badgeCount={scannedData.services.length}>
                            <ServiceEditor
                               services={scannedData.services}
                               onChange={(newServices) => setScannedData({ ...scannedData, services: newServices })}
                               onScanPricing={async (pricingUrl) => {
                                  setIsScanningPricing(true);
+                                 setPricingScanResult(null);
                                  try {
                                     const response = await fetch('/api/scrape-pricing', {
                                        method: 'POST',
@@ -804,15 +835,35 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                              duration: s.duration
                                           }));
                                           setScannedData({ ...scannedData, services: [...updatedServices, ...newServices] });
+                                          const updatedCount = updatedServices.filter((s, i) => s !== scannedData.services[i]).length;
+                                          setPricingScanResult({
+                                             success: true,
+                                             message: `Found pricing for ${updatedCount} existing service(s)${newServices.length > 0 ? ` and ${newServices.length} new service(s)` : ''}.`
+                                          });
+                                       } else {
+                                          setPricingScanResult({
+                                             success: false,
+                                             message: 'No pricing information found on this page. Try a different URL or add prices manually.'
+                                          });
                                        }
+                                    } else {
+                                       setPricingScanResult({
+                                          success: false,
+                                          message: 'Failed to scan the page. Please check the URL and try again.'
+                                       });
                                     }
                                  } catch (error) {
                                     console.error('Failed to scan pricing:', error);
+                                    setPricingScanResult({
+                                       success: false,
+                                       message: 'An error occurred while scanning. Please try again.'
+                                    });
                                  } finally {
                                     setIsScanningPricing(false);
                                  }
                               }}
                               isScanningPricing={isScanningPricing}
+                              pricingScanResult={pricingScanResult}
                            />
                         </ReviewCard>
                      </div>
@@ -901,8 +952,8 @@ const StatusItem = ({ label, status, icon, count }: { label: string, status: 'pe
 );
 
 const TrainingItem = ({ label, active, completed }: { label: string, active: boolean, completed: boolean }) => (
-   <div className={`flex items-center gap-3 p-4 rounded-xl border transition-all duration-500 ${completed ? 'bg-chippy-coral/10 border-chippy-coral/20 text-chippy-navy' : active ? 'bg-white border-chippy-coral/20 text-slate-800 shadow-sm' : 'bg-transparent border-transparent text-slate-400'}`}>
-      {completed ? <CheckCircle2 className="w-5 h-5 text-chippy-coral" /> : active ? <Loader2 className="w-5 h-5 animate-spin text-chippy-coral" /> : <div className="w-5 h-5 rounded-full border-2 border-slate-200"></div>}
+   <div className={`flex items-center gap-3 p-4 rounded-xl border transition-all duration-500 ${completed ? 'bg-blue-50 border-blue-200 text-chippy-navy' : active ? 'bg-white border-blue-300 text-slate-800 shadow-sm' : 'bg-transparent border-transparent text-slate-400'}`}>
+      {completed ? <CheckCircle2 className="w-5 h-5 text-blue-600" /> : active ? <Loader2 className="w-5 h-5 animate-spin text-blue-600" /> : <div className="w-5 h-5 rounded-full border-2 border-slate-200"></div>}
       <span className={`text-sm font-medium ${completed || active ? 'opacity-100' : 'opacity-60'}`}>{label}</span>
    </div>
 );

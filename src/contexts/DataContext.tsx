@@ -174,9 +174,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         if (!session?.user?.id) return;
         const userId = session.user.id;
 
-        // Always update knowledge data from Supabase (even if null - means it was reset)
+        // Fetch knowledge from Supabase - only overwrite local data if Supabase has data
+        // This prevents losing data that was set locally but hasn't synced yet
         const remoteKnowledge = await fetchKnowledgeBase(userId);
-        setKnowledgeData(remoteKnowledge);
+        if (remoteKnowledge) {
+            setKnowledgeData(remoteKnowledge);
+        }
+        // If remoteKnowledge is null but we have local data, keep the local data
 
         // Fetch calendar connections
         const connections = await fetchCalendarConnections(userId);

@@ -213,6 +213,19 @@ const distPath = path.join(__dirname, 'dist');
 const publicPath = path.join(__dirname, 'public');
 const servePath = path.join(__dirname);
 
+// =====================
+// Widget.js - Special CORS handling for cross-origin embedding
+// =====================
+app.get('/widget.js', (req, res) => {
+  // Set CORS headers to allow any origin to load this script
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+  // Serve the widget.js file from public directory
+  res.sendFile(path.join(publicPath, 'widget.js'));
+});
+
 app.use(express.static(distPath));
 app.use(express.static(publicPath));
 app.use(express.static(servePath));
@@ -363,6 +376,146 @@ app.get('/env-config.js', (req, res) => {
   res.type('application/javascript');
   res.send(`window.__ENV__ = ${JSON.stringify(env)};`);
 });
+
+// =====================
+// Super Admin APIs (bypass RLS with service role)
+// =====================
+
+// Super admin email whitelist
+const SUPER_ADMIN_EMAILS = [
+  'p.rijesh1@gmail.com',
+  // Add more super admin emails here
+];
+
+// Middleware to verify super admin access
+const verifySuperAdmin = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Missing authorization header' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+
+    if (error || !user) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    if (!SUPER_ADMIN_EMAILS.includes(user.email?.toLowerCase())) {
+      return res.status(403).json({ error: 'Not authorized as super admin' });
+    }
+
+    req.superAdminUser = user;
+    next();
+  } catch (error) {
+    console.error('[SuperAdmin] Auth error:', error);
+    res.status(500).json({ error: 'Authentication failed' });
+  }
+};
+
+// GET /api/superadmin/stats - Dashboard stats
+app.get('/api/superadmin/stats', verifySuperAdmin, async (req, res) => {
+  try {
+    // Get total users
+    const { count: totalUsers } = await supabaseAdmin
+      .from('profiles')
+      .select('*', { count: 'exact', head: true });
+
+    // Get recent signups (last 7 days)
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+
+    const { data: recentSignups } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email, created_at, full_name, business_name')
+      .gte('created_at', weekAgo.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    // Get total leads
+    const { count: totalLeads } = await supabaseAdmin
+      .from('leads')
+      .select('*', { count: 'exact', head: true });
+
+    // Get total chat sessions
+    const { count: totalConversations } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('*', { count: 'exact', head: true });
+
+    // Get bookings count
+    const { count: totalBookings } = await supabaseAdmin
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'Booked');
+
+    res.json({
+      totalUsers: totalUsers || 0,
+      activeUsers: recentSignups?.length || 0,
+      totalConversations: totalConversations || 0,
+      totalBookings: totalBookings || 0,
+      totalLeads: totalLeads || 0,
+      recentSignups: recentSignups || []
+    });
+  } catch (error) {
+    console.error('[SuperAdmin] Stats error:', error);
+    res.status(500).json({ error: 'Failed to load stats' });
+  }
+});
+
+// GET /api/superadmin/users - List all users
+app.get('/api/superadmin/users', verifySuperAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email, full_name, business_name, created_at')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json({ users: data || [] });
+  } catch (error) {
+    console.error('[SuperAdmin] Users error:', error);
+    res.status(500).json({ error: 'Failed to load users' });
+  }
+});
+
+// GET /api/superadmin/users/:userId - Get single user details
+app.get('/api/superadmin/users/:userId', verifySuperAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Get user profile
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (profileError) throw profileError;
+
+    // Get user's leads count
+    const { count: leadsCount } = await supabaseAdmin
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+
+    // Get user's chat sessions count
+    const { count: sessionsCount } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+
+    res.json({
+      ...profile,
+      leadsCount: leadsCount || 0,
+      sessionsCount: sessionsCount || 0
+    });
+  } catch (error) {
+    console.error('[SuperAdmin] User detail error:', error);
+    res.status(500).json({ error: 'Failed to load user details' });
+  }
+});
+
 
 // =====================
 // Widget Data APIs (for embed widget - bypasses RLS)
