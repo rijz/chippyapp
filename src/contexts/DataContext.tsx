@@ -24,7 +24,8 @@ import {
     syncSettings,
     syncChatSessions,
     syncLeads,
-    fetchLeads
+    fetchLeads,
+    syncReviewItems
 } from '../services/supabaseStorage';
 import { fetchCalendarConnections, canAddCalendar } from '../services/calendarConnections';
 
@@ -270,6 +271,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             return () => clearTimeout(timeout);
         }
     }, [leads, session?.user?.id]);
+
+    // Persist review items to localStorage and sync to Supabase
+    useEffect(() => {
+        storage.saveReviewItems(reviewItems);
+        // Sync to Supabase (debounced)
+        if (session?.user?.id && reviewItems.length > 0) {
+            const timeout = setTimeout(() => syncReviewItems(reviewItems, session.user.id), 2000);
+            return () => clearTimeout(timeout);
+        }
+    }, [reviewItems, session?.user?.id]);
 
     useEffect(() => {
         if (session?.user?.id) {

@@ -586,3 +586,57 @@ Full security audit saved to `SECURITY_AUDIT_REPORT.md` with:
 ✅ SSRF blocked in scraper (localhost, metadata URLs)
 ✅ Rate limiting on all expensive APIs
 ✅ Authentication enforced on /dashboard, /superadmin
+
+---
+
+## Fix 14: Review Queue Persistence
+
+> **Added:** January 21, 2026
+
+### Problem Solved
+Review Queue corrections (status changes, suggested text) were not being saved to the database. They would disappear after refreshing the page.
+
+### Root Cause
+`DataContext.tsx` updated the local `reviewItems` state but lacked a `useEffect` hook to trigger the `syncReviewItems` function to persist these changes to Supabase.
+
+### Changes Made
+
+#### src/contexts/DataContext.tsx
+- **Added `syncReviewItems` import**
+- **Added `useEffect` hook** to automatically sync changes to `reviewItems` to Supabase (debounced by 2s)
+- **Review Items now persist**: Status changes (e.g. to 'CORRECTED') and `suggestedCorrection` text are saved.
+- **Sentiments preserved**: The sync function includes the original sentiment analysis in the update, ensuring no data loss.
+
+---
+
+## Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `server.js` | Widget-config API + widget data APIs + widget.js CORS + enhanced embed CSP + AUTH on embed domains + input sanitization |
+| `src/pages/EmbedPage.tsx` | Calendar connections + all callback handlers |
+| `src/services/locationTools.ts` | Improved booking detection logic |
+| `src/pages/Integrations.tsx` | Embed domain security UI |
+| `src/contexts/DataContext.tsx` | isLoading state + data persistence fix + **Review Queue Sync** |
+| `src/App.tsx` | Dedicated /onboarding route, OnboardingCheck component |
+| `src/components/OnboardingWizard.tsx` | Error handling, validation, loading states, auto-advance, address autocomplete |
+| `src/pages/KnowledgeBase.tsx` | Widget Studio navigation after onboarding |
+| `src/services/geminiService.ts` | Removed mock data fallback, proper error throwing |
+| `src/pages/OnboardingPage.tsx` | NEW - Dedicated onboarding page |
+| `scraper.js` | Performance optimization (10 pages, 12s timeout, no sitemap) |
+| `src/components/ServiceEditor.tsx` | Pricing scan feedback display |
+| `src/components/knowledge/KnowledgeData.tsx` | Service objects rendering + fallback UI |
+| `src/components/AddressAutocomplete.tsx` | NEW - Google Places PlaceAutocompleteElement API |
+| `src/pages/ReviewQueue.tsx` | Save functionality fix |
+| `src/components/ChatWidget.tsx` | DOMPurify XSS protection |
+| `SECURITY_AUDIT_REPORT.md` | NEW - Full security audit report |
+
+---
+
+## Persistence Tests
+
+✅ Review Queue status updates ('PENDING' -> 'CORRECTED') save to database
+✅ Suggested corrections text saves to database
+✅ Sentiment data is preserved during updates
+✅ Changes persist after page reload
+
