@@ -175,7 +175,7 @@ export const Inbox = () => {
                                         </div>
                                     </div>
 
-                                    {selectedSession.messages.map((m, i) => (
+                                    {(selectedSession.messages || []).map((m, i) => (
                                         <div key={i} className={`flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}`}>
                                             <div className={`flex flex-col ${m.role === 'user' ? 'items-start' : 'items-end'} max-w-[80%]`}>
                                                 <div className="flex items-center gap-2 mb-1 px-1">

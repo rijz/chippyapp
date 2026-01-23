@@ -173,9 +173,9 @@ export const fetchChatSessions = async (userId: string): Promise<ChatSessionReco
 
     return (data || []).map(row => ({
       id: row.id,
-      customerName: row.customer_name,
-      messages: row.messages,
-      summary: row.summary,
+      customerName: row.customer_name || 'Unknown',
+      messages: row.messages || [],
+      summary: row.summary || '',
       type: row.type as any,
       sentiment: row.sentiment as any,
       status: row.status as any,
