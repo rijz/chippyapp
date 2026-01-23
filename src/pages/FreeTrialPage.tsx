@@ -367,9 +367,9 @@ export const FreeTrialPage: React.FC = () => {
 
                             <p className="text-xs text-slate-400 text-center mt-5 leading-relaxed">
                                 By signing up, you agree to our{' '}
-                                <a href="#" className="text-slate-600 hover:text-chippy-coral transition-colors">Terms of Service</a>
+                                <a href="https://hellochippy.com/terms/" target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-chippy-coral transition-colors">Terms of Service</a>
                                 {' '}and{' '}
-                                <a href="#" className="text-slate-600 hover:text-chippy-coral transition-colors">Privacy Policy</a>.
+                                <a href="https://hellochippy.com/privacy/" target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-chippy-coral transition-colors">Privacy Policy</a>.
                             </p>
                         </div>
 
@@ -397,6 +397,14 @@ export const FreeTrialPage: React.FC = () => {
                             </div>
                         ))}
                     </div>
+                </div>
+            </div>
+
+            {/* Footer Links */}
+            <div className="absolute bottom-6 w-full text-center pointer-events-none z-20">
+                <div className="flex items-center justify-center gap-6 pointer-events-auto">
+                    <a href="https://hellochippy.com/privacy/" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-white transition-colors">Privacy Policy</a>
+                    <a href="https://hellochippy.com/terms/" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-white transition-colors">Terms of Service</a>
                 </div>
             </div>
         </div>

@@ -261,6 +261,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onBack }) => {
           </button>
         </div>
       </div>
+
+      <div className="absolute bottom-6 w-full text-center pointer-events-none z-20">
+        <div className="flex items-center justify-center gap-6 pointer-events-auto">
+          <a href="https://hellochippy.com/privacy/" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-white transition-colors">Privacy Policy</a>
+          <a href="https://hellochippy.com/terms/" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-white transition-colors">Terms of Service</a>
+        </div>
+      </div>
     </div>
   );
 };
