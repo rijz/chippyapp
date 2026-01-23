@@ -7,6 +7,7 @@ import { CALENDAR_TOOLS, executeCalendarTool, ToolContext, CallbackRequestData }
 import { LOCATION_TOOL, executeFindClosestLocation, getLocationSelectionPrompt } from '../services/locationTools';
 import { ChatSession } from '@google/generative-ai';
 import DOMPurify from 'dompurify';
+import { DateTimePicker } from './DateTimePicker';
 
 // Simple Markdown renderer for chat messages with XSS protection
 const FormattedMessage: React.FC<{ text: string }> = ({ text }) => {
@@ -829,33 +830,22 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
 
 
 
-                  {/* Clickable Time Slots - Show when slots are available */}
+                  {/* Calendar Time Picker - Show when slots are available */}
                   {clickableSlots.length > 0 && !isLoading && (
-                    <div className="space-y-2 p-3 bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl">
-                      <p className="text-xs font-semibold text-green-700 flex items-center gap-1">
-                        <span>🗓️</span> Click a time to book:
+                    <div className="animate-in slide-in-from-bottom-2 duration-300">
+                      <p className="text-xs font-semibold text-gray-600 flex items-center gap-1 mb-2">
+                        <span>🗓️</span> Pick a date & time:
                       </p>
-                      <div className="flex flex-wrap gap-2">
-                        {clickableSlots.slice(0, 8).map((slot, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => {
-                              // Send the slot selection to the AI
-                              setInputText(`I'd like to book the ${slot} slot`);
-                              setClickableSlots([]); // Clear slots
-                              setTimeout(() => handleSend(), 100);
-                            }}
-                            className="px-3 py-2 text-xs bg-white border border-green-300 text-green-700 rounded-lg hover:bg-green-50 hover:border-green-400 hover:shadow-md transition-all font-medium"
-                          >
-                            {slot}
-                          </button>
-                        ))}
-                      </div>
-                      {clickableSlots.length > 8 && (
-                        <p className="text-[10px] text-green-600 mt-1">
-                          + {clickableSlots.length - 8} more slots available
-                        </p>
-                      )}
+                      <DateTimePicker
+                        availableSlots={clickableSlots}
+                        onSlotSelect={(slot) => {
+                          // Send the slot selection to the AI
+                          setInputText(`I'd like to book the ${slot} slot`);
+                          setClickableSlots([]); // Clear slots
+                          setTimeout(() => handleSend(), 100);
+                        }}
+                        accentColor={widgetConfig.color || '#14b8a6'}
+                      />
                     </div>
                   )}
 
