@@ -175,28 +175,38 @@ export const Inbox = () => {
                                         </div>
                                     </div>
 
-                                    {(selectedSession.messages || []).map((m, i) => (
-                                        <div key={i} className={`flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}`}>
-                                            <div className={`flex flex-col ${m.role === 'user' ? 'items-start' : 'items-end'} max-w-[80%]`}>
-                                                <div className="flex items-center gap-2 mb-1 px-1">
-                                                    <span className="text-[10px] font-bold text-slate-400 uppercase">
-                                                        {m.role === 'user' ? selectedSession.customerName : 'Agent X'}
-                                                    </span>
-                                                    <span className="text-[10px] text-slate-300">
-                                                        {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                    </span>
-                                                </div>
-                                                <div className={clsx(
-                                                    "p-4 rounded-2xl shadow-sm text-sm leading-relaxed whitespace-pre-wrap",
-                                                    m.role === 'user'
-                                                        ? 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'
-                                                        : 'bg-chippy-navy text-white rounded-tr-none shadow-md'
-                                                )}>
-                                                    {m.text}
+                                    {(() => {
+                                        // Safely get messages array - handles string, array, null, undefined
+                                        let msgs = selectedSession.messages;
+                                        if (!msgs) return null;
+                                        if (typeof msgs === 'string') {
+                                            try { msgs = JSON.parse(msgs); } catch { msgs = []; }
+                                        }
+                                        if (!Array.isArray(msgs)) return null;
+
+                                        return msgs.map((m: any, i: number) => (
+                                            <div key={i} className={`flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+                                                <div className={`flex flex-col ${m.role === 'user' ? 'items-start' : 'items-end'} max-w-[80%]`}>
+                                                    <div className="flex items-center gap-2 mb-1 px-1">
+                                                        <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                                            {m.role === 'user' ? selectedSession.customerName : 'Agent X'}
+                                                        </span>
+                                                        <span className="text-[10px] text-slate-300">
+                                                            {m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                                        </span>
+                                                    </div>
+                                                    <div className={clsx(
+                                                        "p-4 rounded-2xl shadow-sm text-sm leading-relaxed whitespace-pre-wrap",
+                                                        m.role === 'user'
+                                                            ? 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'
+                                                            : 'bg-chippy-navy text-white rounded-tr-none shadow-md'
+                                                    )}>
+                                                        {m.text || ''}
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        ));
+                                    })()}
                                 </div>
                             </div>
                         </div>

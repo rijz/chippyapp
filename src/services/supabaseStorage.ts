@@ -161,6 +161,21 @@ export const syncChatSessions = async (sessions: ChatSessionRecord[], userId: st
   }
 };
 
+// Helper to safely parse messages which can come as string, array, null, or undefined
+const parseMessages = (messages: any): any[] => {
+  if (!messages) return [];
+  if (Array.isArray(messages)) return messages;
+  if (typeof messages === 'string') {
+    try {
+      const parsed = JSON.parse(messages);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
 export const fetchChatSessions = async (userId: string): Promise<ChatSessionRecord[]> => {
   try {
     const { data, error } = await supabase
@@ -174,7 +189,7 @@ export const fetchChatSessions = async (userId: string): Promise<ChatSessionReco
     return (data || []).map(row => ({
       id: row.id,
       customerName: row.customer_name || 'Unknown',
-      messages: row.messages || [],
+      messages: parseMessages(row.messages),
       summary: row.summary || '',
       type: row.type as any,
       sentiment: row.sentiment as any,
