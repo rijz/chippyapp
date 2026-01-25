@@ -242,9 +242,23 @@ app.get('/widget.js', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Content-Type', 'application/javascript');
 
-  // Serve the widget.js file from public directory
-  res.sendFile(path.join(publicPath, 'widget.js'));
+  // Serve the widget.js file - try public first, then dist
+  const publicWidget = path.join(publicPath, 'widget.js');
+  res.sendFile(publicWidget, (err) => {
+    if (err) {
+      // If not in public, try dist (Vite build output acts as fallback)
+      const distWidget = path.join(distPath, 'widget.js');
+      res.sendFile(distWidget, (err2) => {
+        if (err2) {
+          console.error('[Serve] widget.js not found in public or dist');
+          // Return a safe script that logs error to browser console instead of 404 HTML
+          res.status(404).send('console.error("Chippy Widget: File not found");');
+        }
+      });
+    }
+  });
 });
 
 app.use(express.static(distPath));
