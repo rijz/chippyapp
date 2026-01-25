@@ -1879,6 +1879,97 @@ app.post('/api/calendar/reschedule-event', calendarLimiter, async (req, res) => 
   }
 });
 
+// =====================
+// Persistent Memory / Learning Endpoints
+// =====================
+
+/**
+ * POST /api/memory/recall
+ * Retrieves relevant memories for context augmentation
+ */
+app.post('/api/memory/recall', async (req, res) => {
+  try {
+    const { userId, query, sessionId, limit = 4 } = req.body;
+
+    if (!userId || !query) {
+      return res.status(400).json({ error: 'Missing userId or query' });
+    }
+
+    // 1. Generate Embedding for the query
+    const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
+    const result = await model.embedContent(query);
+    const embedding = result.embedding.values;
+
+    // 2. Search matches via RPC
+    const { data: globalMemories, error: error1 } = await supabaseAdmin.rpc('match_memories', {
+      query_embedding: embedding,
+      match_threshold: 0.65,
+      match_count: limit,
+      p_user_id: userId
+    });
+
+    if (error1) throw error1;
+
+    // Filter logic:
+    // If it's a global memory (no session_id), include it.
+    // If it's a session memory, only include if session_id matches.
+    const relevantMemories = (globalMemories || []).filter(m => {
+      const scope = m.metadata?.scope || 'global';
+      const mSessionId = m.metadata?.session_id;
+
+      if (scope === 'global') return true;
+      if (mSessionId === sessionId) return true;
+      return false;
+    });
+
+    res.json({ memories: relevantMemories });
+
+  } catch (error) {
+    console.error('[Memory] Recall Error:', error);
+    res.status(500).json({ error: 'Failed to recall memories' });
+  }
+});
+
+/**
+ * POST /api/memory/memorize
+ * Stores a new memory fact
+ */
+app.post('/api/memory/memorize', async (req, res) => {
+  try {
+    const { userId, text, sessionId, scope = 'session' } = req.body;
+
+    if (!userId || !text) {
+      return res.status(400).json({ error: 'Missing userId or text' });
+    }
+
+    // 1. Generate Embedding
+    const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
+    const result = await model.embedContent(text);
+    const embedding = result.embedding.values;
+
+    // 2. Insert Memory
+    const { error } = await supabaseAdmin.from('memories').insert({
+      user_id: userId,
+      content: text,
+      embedding: embedding,
+      metadata: {
+        scope: scope, // 'session' or 'global'
+        session_id: sessionId,
+        source: 'conversation'
+      }
+    });
+
+    if (error) throw error;
+
+    res.json({ success: true });
+
+  } catch (error) {
+    console.error('[Memory] Memorize Error:', JSON.stringify(error, null, 2));
+    res.status(500).json({ error: 'Failed to memorize', details: error.message });
+  }
+});
+
+
 // Handle SPA routing: return index.html for all non-file requests
 app.get('*', (req, res) => {
   const indexPath = path.join(distPath, 'index.html');

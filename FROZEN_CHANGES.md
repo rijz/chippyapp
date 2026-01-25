@@ -693,3 +693,61 @@ Login and Trial pages were missing links to Privacy Policy and Terms of Service,
 ✅ Links open correct URLs in new tab
 ✅ Styling consistent with dark background (slate-400)
 
+
+---
+
+## Fix 16: Persistent Memory & Learning
+
+> **Added:** January 25, 2026
+
+### Problem Solved
+The AI agent lacked long-term memory. It forgot user details (like name, preferences) between sessions and couldn't "learn" new facts about the business from corrections.
+
+### Root Cause
+Chat history was only stored in  (for session) or not at all. There was no vector store mechanism to recall past information.
+
+### Changes Made
+
+#### 1. Database Schema
+- **Enabled `pgvector` extension** in Supabase.
+- **Created `memories` table**: Stores text segments + 768-dim embeddings.
+- **Created `match_memories` RPC function**: Allows semantic similarity search.
+
+#### 2. Backend API (server.js)
+- **POST `/api/memory/recall`**: Accepts a query, generates embedding, calls `match_memories` RPC, returns relevant facts.
+- **POST `/api/memory/memorize`**: Accepts text, generates embedding, inserts into `memories` table. Use scopes ('session' vs 'global').
+
+#### 3. Frontend Services
+- **`src/services/memoryService.ts`**: Client-side wrapper to call the new backend endpoints.
+- **`src/services/geminiService.ts`**:
+    - **RAG Implementation**: `sendMessage` now attempts to `recall()` relevant memories before generating a response.
+    - **Context Injection**: Relevant memories are silently injected into the user's message prompt.
+    - **Auto-Learning**: Added `learnFromInteraction` stub (currently logging) to eventualy extract facts.
+    - **Context Awareness**: Updated `createAgentSession` to accept `userId` and `sessionId`.
+
+#### 4. UI Integration
+- **`src/components/ChatWidget.tsx`**: Passes `userId` (from tenant config) and `sessionId` (from state) to the agent session.
+
+---
+
+## Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `migrations/006_persistent_memory.sql` | NEW - Vector table and match function |
+| `server.js` | Added `/api/memory/*` endpoints |
+| `src/services/memoryService.ts` | NEW - Client service for memory |
+| `src/services/geminiService.ts` | RAG integration in ProxyChatSession |
+| `src/components/ChatWidget.tsx` | Passing context to agent session |
+
+---
+
+## Testing Verification
+
+✅ Database migration confirmed (table exists, FK constraints active)
+✅ Backend endpoints (/api/memory/recall, /api/memory/memorize) are reachable
+✅ Frontend service (memoryService.ts) successfully communicates with backend
+✅ RAG Logic integrated into ChatWidget session
+✅ Build compiles without errors
+
+---

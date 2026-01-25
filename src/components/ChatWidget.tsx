@@ -449,7 +449,12 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       { functionDeclarations: [LOCATION_TOOL] }
     ];
 
-    const session = await createAgentSession(systemInstruction, allTools, toolExecutor);
+    const session = await createAgentSession(
+      systemInstruction,
+      allTools,
+      toolExecutor,
+      { userId: tenantConfig.userId, sessionId }
+    );
 
     // Restore previous conversation history if it exists
     const savedMessages = localStorage.getItem(`chatMessages_${sessionId}`);
