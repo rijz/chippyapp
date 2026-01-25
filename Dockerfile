@@ -54,6 +54,7 @@ COPY package*.json ./
 RUN npm install --production
 COPY --from=builder /app/dist ./dist
 COPY server.js .
+COPY emailService.js .
 COPY scraper.js .
 COPY src ./src
 
