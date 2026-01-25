@@ -1,7 +1,24 @@
 import 'dotenv/config';
+import { emailService } from './emailService.js';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import cron from 'node-cron';
+import * as Sentry from "@sentry/node";
+import { nodeProfilingIntegration } from "@sentry/profiling-node";
+
+// Initialize Sentry
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  integrations: [
+    nodeProfilingIntegration(),
+  ],
+  // Performance Monitoring
+  tracesSampleRate: 1.0, // Capture 100% of the transactions
+  // Set sampling rate for profiling - this is relative to tracesSampleRate
+  profilesSampleRate: 1.0,
+});
+
 import Stripe from 'stripe';
 import {
   checkGoogleAvailability,
@@ -21,6 +38,10 @@ import helmet from 'helmet';
 import cors from 'cors';
 
 const app = express();
+
+// Sentry Request Handler removed (handled by instrumentation in v8+)
+
+
 const PORT = process.env.PORT || 8080;
 
 // Trust proxy for Cloud Run / load balancers
@@ -1575,6 +1596,50 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
         }
       );
 
+      // Send transactional emails asynchronously
+      try {
+        const customerEmail = attendees.find(a => a.email)?.email;
+        if (customerEmail) {
+          // Send confirmation to customer
+          // Parse name from summary or description if possible, else use "Customer"
+          // Start legacy description parsing... ideally we pass structured data
+          const custName = description?.match(/Name: (.*?)(\n|$)/)?.[1] || 'Valued Customer';
+
+          emailService.sendBookingConfirmation(customerEmail, custName, {
+            startTime,
+            description: summary
+          });
+
+          // Send notification to owner
+          if (connection.provider_email) {
+            emailService.sendOwnerNotification(connection.provider_email, 'booking', {
+              customerName: custName,
+              customerEmail: customerEmail,
+              startTime: startTime,
+              description: description
+            });
+          }
+        }
+
+        // ANALYTICS: Track booking in database
+        const { error: dbError } = await supabaseAdmin.from('bookings').insert({
+          user_id: userId,
+          customer_email: customerEmail || null,
+          customer_name: description?.match(/Name: (.*?)(\n|$)/)?.[1] || 'Unknown',
+          customer_phone: description?.match(/Phone: (.*?)(\n|$)/)?.[1] || null,
+          service_type: 'Appointment', // Future: extract from description
+          description: summary,
+          start_time: startTime,
+          end_time: endTime,
+          status: 'confirmed',
+          provider: 'google'
+        });
+
+        if (dbError) console.error('[Analytics] Failed to track booking:', dbError);
+      } catch (emailErr) {
+        console.error('[API] Failed to send transactional emails:', emailErr);
+      }
+
       res.json(result);
     } else {
       res.status(400).json({ error: `Provider '${provider}' not yet supported` });
@@ -1980,6 +2045,67 @@ app.get('*', (req, res) => {
     }
   });
 });
+
+// =====================
+// Weekly Analytics Report (Cron Job)
+// =====================
+// Runs every Monday at 9:00 AM
+cron.schedule('0 9 * * 1', async () => {
+  console.log('[Cron] Starting weekly reports...');
+  try {
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    // 1. Find users who had bookings in the last week
+    // Note: returning duplicate user_ids is fine, we'll dedupe in JS
+    const { data: activeUsers, error } = await supabaseAdmin
+      .from('bookings')
+      .select('user_id')
+      .gte('created_at', oneWeekAgo.toISOString());
+
+    if (error) throw error;
+
+    const uniqueUserIds = [...new Set(activeUsers.map(u => u.user_id))];
+    console.log(`[Cron] Found ${uniqueUserIds.length} active users for reports.`);
+
+    for (const userId of uniqueUserIds) {
+      try {
+        // 2. Get User Email
+        const { data: { user }, error: userErr } = await supabaseAdmin.auth.admin.getUserById(userId);
+        if (userErr || !user?.email) continue;
+
+        // 3. Get Stats
+        const { count: bookingCount } = await supabaseAdmin
+          .from('bookings')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .gte('created_at', oneWeekAgo.toISOString());
+
+        // (Optional) Get Leads count if you have a leads table
+        const { count: leadCount } = await supabaseAdmin
+          .from('leads')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .gte('created_at', oneWeekAgo.toISOString());
+
+        // 4. Send Email
+        if (bookingCount > 0 || leadCount > 0) {
+          await emailService.sendWeeklyReport(user.email, {
+            bookings: bookingCount || 0,
+            leads: leadCount || 0
+          });
+        }
+      } catch (innerErr) {
+        console.error(`[Cron] Failed report for user ${userId}:`, innerErr);
+      }
+    }
+  } catch (err) {
+    console.error('[Cron] Weekly report job failed:', err);
+  }
+});
+
+// Sentry Error Handler
+Sentry.setupExpressErrorHandler(app);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Chippy SaaS App running on port ${PORT}`);

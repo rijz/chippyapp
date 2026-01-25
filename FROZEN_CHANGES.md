@@ -751,3 +751,57 @@ Chat history was only stored in  (for session) or not at all. There was no vecto
 ✅ Build compiles without errors
 
 ---
+
+---
+
+## Fix 17: Production Readiness (Phase 1 & 2)
+
+> **Added:** January 25, 2026
+
+### Problem Solved
+The app was missing critical production layers: Transactional Emails and Error Monitoring.
+
+### Changes Made
+
+#### 1. Transactional Emails (Resend)
+- **Services**: Created `emailService.js` using `resend` SDK.
+- **Backend Integration**: Updated `server.js` to trigger confirmation emails when `/api/calendar/create-event` succeeds.
+- **Triggers**: Sends "Booking Confirmed" to User and "New Booking Notification" to Owner.
+
+#### 2. Error Monitoring (Sentry)
+- **Dependencies**: Added `@sentry/node`, `@sentry/profiling-node`, `@sentry/react`.
+- **Backend**: Configured `server.js` with Sentry v10 `setupExpressErrorHandler`.
+- **Frontend**: Configured `src/index.tsx` with Sentry React SDK (Browser Tracing + Replay).
+
+## Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `emailService.js` | NEW - Resend integration |
+| `server.js` | Added Email trigger + Sentry init |
+| `src/index.tsx` | Added Sentry React init |
+| `.env` | Added RESEND_API_KEY and SENTRY_DSN |
+
+---
+
+## Fix 18: Business Analytics (Phase 4)
+
+> **Added:** January 25, 2026
+
+### Problem Solved
+Business owners had no visibility into the "Real Value" (ROI) provided by the agent.
+
+### Changes Made
+1.  **Database**: Created `bookings` table to track appointment history locally.
+2.  **Tracking**: Updated `server.js` to insert booking records into Supabase on successful GCal events.
+3.  **Reporting**: Added a weekly Cron Job (Mondays 9am) that counts bookings and emails an ROI report to the owner.
+
+## Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `emailService.js` | Added `sendWeeklyReport` |
+| `server.js` | Added Booking Tracking (DB Insert) + Cron Job |
+| `migrations/007_analytics.sql` | NEW - Bookings table migration |
+
+---
