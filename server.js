@@ -80,7 +80,7 @@ app.use(cors({
 // Global rate limiter - prevents basic DDoS
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 100, // 100 requests per minute per IP
+  max: process.env.NODE_ENV === 'production' ? 100 : 500, // Higher limit for dev
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -99,7 +99,7 @@ const expensiveApiLimiter = rateLimit({
 // Very strict limiter for the Gemini proxy (costs money per request!)
 const geminiProxyLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 AI requests per minute per IP
+  max: process.env.NODE_ENV === 'production' ? 30 : 100, // Higher limit for dev
   message: { error: 'Chat limit reached. Please wait a moment.' },
   keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
 });
@@ -107,7 +107,7 @@ const geminiProxyLimiter = rateLimit({
 // Calendar endpoint limiter
 const calendarLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 calendar requests per minute
+  max: process.env.NODE_ENV === 'production' ? 30 : 200, // Higher limit for dev
   message: { error: 'Too many calendar requests. Please wait.' },
   keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
 });
@@ -115,7 +115,7 @@ const calendarLimiter = rateLimit({
 // Widget config limiter (semi-public endpoint)
 const widgetConfigLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 60, // 60 requests per minute (generous for widget loading)
+  max: process.env.NODE_ENV === 'production' ? 60 : 200, // Higher limit for dev
   message: { error: 'Widget rate limit exceeded.' },
   keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
 });

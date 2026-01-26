@@ -159,7 +159,7 @@ export const ReviewQueue = () => {
                                 </div>
                                 <p className="text-xs font-bold text-chippy-navy line-clamp-2 mb-1">"{item.query}"</p>
                                 <div className="flex gap-1 overflow-hidden">
-                                    {item.topics.slice(0, 2).map((t, i) => (
+                                    {(Array.isArray(item.topics) ? item.topics : []).slice(0, 2).map((t, i) => (
                                         <span key={i} className="text-[9px] bg-slate-50 text-slate-500 px-1.5 py-0.5 rounded border border-slate-100 whitespace-nowrap">{t}</span>
                                     ))}
                                 </div>
