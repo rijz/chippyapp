@@ -144,6 +144,7 @@ export interface KnowledgeBaseData {
   lastUpdated?: Date;
   isMock?: boolean;
   corrections?: { query: string; correction: string }[];
+  topRules?: string; // Priority instructions for the AI (one rule per line)
 }
 
 export interface KnowledgeConflict {

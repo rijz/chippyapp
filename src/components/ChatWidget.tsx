@@ -217,6 +217,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const initChat = async (userData?: typeof leadData, overrideSlots?: string): Promise<any> => {
     let structuredInfo = "Standard business hours apply.";
     let correctionsInfo = "";
+    let topRulesInfo = "";
 
     try {
       if (knowledgeSummary) {
@@ -237,6 +238,18 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
             The user has previously corrected your behavior on specific queries. You MUST follow these corrections:
             ${parsed.corrections.map((c: any) => `- When asked "${c.query}", YOU MUST ANSWER: "${c.correction}"`).join('\n')}
           `;
+        }
+
+        // Parse top rules from knowledge base
+        if (parsed.topRules && parsed.topRules.trim()) {
+          const rules = parsed.topRules.split('\n').filter((r: string) => r.trim());
+          if (rules.length > 0) {
+            topRulesInfo = `
+            🎯 TOP PRIORITY RULES (MUST FOLLOW):
+            These are the business owner's priority instructions. Follow these rules in all interactions:
+            ${rules.map((r: string, i: number) => `${i + 1}. ${r.trim()}`).join('\n')}
+            `;
+          }
         }
       }
     } catch (e) {
@@ -274,6 +287,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       ${structuredInfo}
 
       ${correctionsInfo}
+      
+      ${topRulesInfo}
       
       ${getLocationSelectionPrompt(locations, calendarConnections)}
       

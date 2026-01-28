@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Tag, DollarSign, ShieldCheck, Edit2, Save, X, CheckSquare, Plus, MapPin, Trash2, Clock } from 'lucide-react';
+import { Tag, DollarSign, ShieldCheck, Edit2, Save, X, CheckSquare, Plus, MapPin, Trash2, Clock, ListChecks } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
 import { KnowledgeBaseData, PricingPlan, BusinessLocation, Service } from '../../types';
 import { formatServicePrice } from '../../utils/serviceUtils';
@@ -229,6 +229,9 @@ export const KnowledgeData = () => {
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            {/* Top Rules Section - Priority Instructions */}
+            <TopRulesSection />
+
             <RenderSection
                 title="Services & Offerings"
                 icon={<Tag className="w-5 h-5" />}
@@ -262,6 +265,89 @@ export const KnowledgeData = () => {
             <LocationsSection />
         </div>
     );
+
+    // Top Rules Section Component - Priority instructions for the AI
+    function TopRulesSection() {
+        const [isEditing, setIsEditing] = useState(false);
+        const [topRules, setTopRules] = useState('');
+
+        const startEditing = () => {
+            setTopRules(knowledgeData?.topRules || '');
+            setIsEditing(true);
+        };
+
+        const saveTopRules = () => {
+            setKnowledgeData({ ...knowledgeData!, topRules });
+            setIsEditing(false);
+        };
+
+        const rulesArray = (knowledgeData?.topRules || '').split('\n').filter(r => r.trim());
+
+        return (
+            <div className="bg-gradient-to-br from-chippy-coral/5 to-orange-50 border-2 border-chippy-coral/20 rounded-2xl p-6 transition-all hover:border-chippy-coral/30">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-chippy-coral/10 rounded-lg text-chippy-coral">
+                            <ListChecks className="w-5 h-5" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-chippy-navy">Top Rules</h3>
+                            <p className="text-xs text-slate-500">Priority instructions your AI will always follow</p>
+                        </div>
+                    </div>
+                    {isEditing ? (
+                        <div className="flex gap-2">
+                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg transition-colors">
+                                <X className="w-4 h-4" />
+                            </button>
+                            <button onClick={saveTopRules} className="p-2 bg-chippy-navy text-white hover:bg-chippy-coral rounded-lg transition-colors">
+                                <Save className="w-4 h-4" />
+                            </button>
+                        </div>
+                    ) : (
+                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-chippy-navy hover:bg-slate-100 rounded-lg transition-colors">
+                            <Edit2 className="w-4 h-4" />
+                        </button>
+                    )}
+                </div>
+
+                <div className="pl-[3.25rem]">
+                    {isEditing ? (
+                        <div className="space-y-2">
+                            <textarea
+                                value={topRules}
+                                onChange={(e) => setTopRules(e.target.value)}
+                                className="w-full h-40 p-3 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-chippy-coral outline-none resize-none font-mono"
+                                placeholder="Enter one rule per line, e.g.:
+Always greet customers warmly
+Never discuss competitor pricing
+Prioritize booking appointments over general chat
+Always confirm the service before booking"
+                            />
+                            <p className="text-xs text-slate-400 flex items-center gap-1">
+                                💡 Enter one rule per line (max 10 recommended for best results)
+                            </p>
+                        </div>
+                    ) : rulesArray.length > 0 ? (
+                        <ul className="space-y-2">
+                            {rulesArray.map((rule, idx) => (
+                                <li key={idx} className="flex items-start gap-2 text-sm text-slate-600">
+                                    <span className="w-5 h-5 bg-chippy-coral/10 text-chippy-coral rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5">
+                                        {idx + 1}
+                                    </span>
+                                    <span>{rule}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <p className="text-slate-400 italic text-sm">
+                            No rules set yet. Add priority instructions to customize how your AI responds.
+                        </p>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     // Keywords Section Component
     function KeywordsSection() {
