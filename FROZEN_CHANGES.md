@@ -805,3 +805,64 @@ Business owners had no visibility into the "Real Value" (ROI) provided by the ag
 | `migrations/007_analytics.sql` | NEW - Bookings table migration |
 
 ---
+
+## Fix 19: Top Rules (Priority AI Instructions)
+
+> **Added:** January 27, 2026
+
+### Feature Added
+Users can now provide "Top Rules" - priority instructions that their AI will always follow in customer interactions.
+
+### Use Case
+Business owners can customize AI behavior with rules like:
+- "Always greet customers warmly"
+- "Never discuss competitor pricing"
+- "Prioritize booking appointments over general chat"
+- "Always confirm the service before booking"
+
+### Changes Made
+
+#### src/types.ts
+- **Added `topRules?: string`** field to `KnowledgeBaseData` interface
+
+#### src/components/knowledge/KnowledgeData.tsx
+- **Added `TopRulesSection` component** with:
+  - Highlighted card design (coral gradient border for visibility)
+  - Edit/save functionality
+  - Text area for entering one rule per line
+  - Numbered list display when viewing
+  - Hint text recommending max 10 rules
+- **Added `ListChecks` icon** from lucide-react
+
+#### src/components/ChatWidget.tsx
+- **Parses `topRules`** from knowledgeSummary JSON
+- **Injects rules into AI system prompt** as "🎯 TOP PRIORITY RULES (MUST FOLLOW)"
+- Rules appear after corrections in the prompt hierarchy
+
+### Storage
+- Data stored in **`knowledge_bases` table** (Supabase)
+- `topRules` is part of the `content` JSONB column
+- No database schema changes required
+
+---
+
+## Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `src/types.ts` | Added `topRules` field to KnowledgeBaseData |
+| `src/components/knowledge/KnowledgeData.tsx` | TopRulesSection component + ListChecks icon |
+| `src/components/ChatWidget.tsx` | Top Rules injection into AI system prompt |
+
+---
+
+## Testing Verification
+
+✅ Build compiles without errors
+✅ Top Rules section appears in Knowledge Base → Knowledge Data tab
+✅ Rules can be edited and saved
+✅ Rules are formatted as numbered list when viewing
+✅ Rules persist to database via existing knowledge sync
+✅ Rules are injected into AI system prompt
+
+---
