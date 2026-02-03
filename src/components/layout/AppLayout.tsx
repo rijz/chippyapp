@@ -24,8 +24,8 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     const location = useLocation();
 
     const navItems = [
-        { id: '/', label: 'Dashboard', icon: LayoutDashboard },
         { id: '/inbox', label: 'Inbox', icon: InboxIcon },
+        { id: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         {
             id: '/leads',
             label: 'Leads',

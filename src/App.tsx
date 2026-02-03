@@ -155,7 +155,8 @@ const AuthenticatedApp = () => {
           <OnboardingCheck>
             <AppLayout>
               <Routes>
-                <Route path="/" element={<Dashboard />} />
+                <Route path="/" element={<Navigate to="/inbox" replace />} />
+                <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/inbox" element={<Inbox />} />
                 <Route path="/leads" element={<Leads />} />
                 <Route path="/knowledge" element={<KnowledgeBase />} />
@@ -274,4 +275,3 @@ export default function App() {
     </ToastProvider>
   );
 }
-

@@ -8,7 +8,7 @@ import { syncChatSessions } from '../services/supabaseStorage';
 import clsx from 'clsx';
 
 export const Inbox = () => {
-    const { chatSessions, setChatSessions } = useData();
+    const { chatSessions, setChatSessions, leads } = useData();
     const { session } = useAuth();
     const [selectedSession, setSelectedSession] = useState<ChatSessionRecord | null>(null);
     const [statusFilter, setStatusFilter] = useState<'All' | 'Opened' | 'Closed'>('All');
@@ -32,29 +32,50 @@ export const Inbox = () => {
         return matchesStatus && matchesSearch;
     });
 
+    const now = new Date();
+    const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const hotLeads = leads.filter(l => l.priority === 'Hot').length;
+    const needsReply = chatSessions.filter(s => s.status === 'Opened').length;
+    const newChats = chatSessions.filter(s => new Date(s.timestamp) >= last24h).length;
+
     return (
-        <div className="h-full flex flex-col space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden pb-4">
+        <div className="h-full flex flex-col space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden pb-6">
             <header className="flex justify-between items-end">
                 <div>
-                    <h2 className="text-3xl font-bold text-chippy-navy tracking-tight">Inbox</h2>
-                    <p className="text-slate-500">Manage customer conversations.</p>
+                    <h2 className="text-3xl font-bold text-chippy-navy tracking-tight">Today</h2>
+                    <p className="text-slate-500">Focus on the items that need a response.</p>
                 </div>
             </header>
 
-            <div className="flex-1 rounded-[2.5rem] bg-white border border-slate-200 shadow-xl overflow-hidden flex min-h-0">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">Hot Leads</p>
+                    <p className="text-2xl font-bold text-chippy-navy mt-1">{hotLeads}</p>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">Needs Reply</p>
+                    <p className="text-2xl font-bold text-chippy-navy mt-1">{needsReply}</p>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">New Chats (24h)</p>
+                    <p className="text-2xl font-bold text-chippy-navy mt-1">{newChats}</p>
+                </div>
+            </div>
+
+            <div className="flex-1 rounded-2xl bg-white border border-slate-200 overflow-hidden flex min-h-0">
                 {/* Sidebar */}
                 <div className={clsx(
-                    "w-full md:w-[400px] border-r border-slate-100 flex flex-col min-h-0 bg-slate-50/50",
+                    "w-full md:w-[360px] border-r border-slate-200 flex flex-col min-h-0 bg-white",
                     selectedSession ? 'hidden md:flex' : 'flex'
                 )}>
                     {/* Search & Tabs */}
-                    <div className="p-4 space-y-4 bg-white border-b border-slate-100">
+                    <div className="p-4 space-y-4 bg-white border-b border-slate-200">
                         <div className="relative">
                             <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
                             <input
                                 type="text"
                                 placeholder="Search conversations..."
-                                className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
+                                className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
@@ -76,27 +97,24 @@ export const Inbox = () => {
                     </div>
 
                     {/* Session List */}
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
                         {filteredSessions.length === 0 ? (
-                            <div className="p-10 text-center text-slate-400 flex flex-col items-center">
-                                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                                    <InboxIcon className="w-8 h-8 text-slate-300" />
-                                </div>
-                                <p className="text-sm font-bold">No messages found.</p>
-                                <p className="text-xs">Your inbox is clear!</p>
+                            <div className="p-8 text-center text-slate-400 flex flex-col items-center">
+                                <p className="text-sm font-bold">All clear.</p>
+                                <p className="text-xs">No follow-ups due right now.</p>
                             </div>
                         ) : (
                             filteredSessions.map((s) => (
                                 <div key={s.id} onClick={() => setSelectedSession(s)} className={clsx(
-                                    "p-4 cursor-pointer transition-all rounded-2xl border",
+                                    "p-4 cursor-pointer transition-all rounded-xl border",
                                     selectedSession?.id === s.id
-                                        ? 'bg-white border-chippy-coral shadow-md'
-                                        : 'bg-white border-transparent hover:border-slate-200 hover:shadow-sm'
+                                        ? 'bg-white border-chippy-coral'
+                                        : 'bg-white border-transparent hover:border-slate-200'
                                 )}>
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex items-center gap-3 overflow-hidden">
                                             <div className={clsx(
-                                                "w-10 h-10 rounded-full flex items-center justify-center font-black text-sm shrink-0",
+                                                "w-9 h-9 rounded-full flex items-center justify-center font-black text-xs shrink-0",
                                                 selectedSession?.id === s.id ? "bg-chippy-coral text-white" : "bg-slate-100 text-slate-500"
                                             )}>
                                                 {s.customerName.charAt(0)}
@@ -111,8 +129,8 @@ export const Inbox = () => {
                                         <StatusBadge status={s.status} />
                                     </div>
                                     <div className="pl-[3.25rem]">
-                                        <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed bg-slate-50 p-2 rounded-lg">
-                                            "{s.summary}"
+                                        <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                                            {s.summary}
                                         </p>
                                         <div className="flex items-center gap-2 mt-2">
                                             <Tag className="w-3 h-3 text-slate-300" />
@@ -133,7 +151,7 @@ export const Inbox = () => {
                     {selectedSession ? (
                         <div className="flex-1 flex flex-col min-h-0 animate-in fade-in duration-300">
                             {/* Chat Header */}
-                            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white z-10 shadow-sm/50">
+                            <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-white z-10">
                                 <div className="flex items-center gap-4">
                                     <button onClick={() => setSelectedSession(null)} className="md:hidden p-2 hover:bg-slate-100 rounded-lg text-slate-500">
                                         <ArrowLeft className="w-5 h-5" />
@@ -165,11 +183,11 @@ export const Inbox = () => {
                             </div>
 
                             {/* Messages */}
-                            <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar bg-slate-50">
+                            <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar bg-white">
                                 <div className="max-w-3xl mx-auto space-y-8">
                                     {/* Summary Card */}
                                     <div className="flex justify-center">
-                                        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm max-w-lg text-center">
+                                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 max-w-lg text-center">
                                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Conversation Analysis</p>
                                             <p className="text-sm text-slate-600 italic">"{selectedSession.summary}"</p>
                                         </div>

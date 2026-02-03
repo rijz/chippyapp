@@ -338,7 +338,7 @@ export const WidgetStudio = () => {
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview Tokens</label>
                                     <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-3">
-                                        Use tokens: {{customer_name}}, {{customer_email}}, {{company_name}}, {{company_url}}, {{summary}}, {{next_action}}, {{priority}}, {{intent}}
+                                        Use tokens: {'{{customer_name}}'}, {'{{customer_email}}'}, {'{{company_name}}'}, {'{{company_url}}'}, {'{{summary}}'}, {'{{next_action}}'}, {'{{priority}}'}, {'{{intent}}'}
                                     </div>
                                 </div>
 

@@ -78,12 +78,12 @@ export const Leads = () => {
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500 pb-20">
+        <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-500 pb-20">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-chippy-navy tracking-tight">Leads & Appointments</h1>
-                    <p className="text-slate-500">Manage your potential clients and upcoming bookings.</p>
+                    <p className="text-slate-500">Track who needs a response and who is booked.</p>
                 </div>
                 <div className="flex gap-3">
                     <button
@@ -96,7 +96,7 @@ export const Leads = () => {
             </div>
 
             {/* View Tabs */}
-            <div className="grid grid-cols-3 gap-2 bg-slate-100/50 p-2 rounded-2xl md:w-fit">
+            <div className="grid grid-cols-3 gap-2 bg-slate-100 p-2 rounded-xl md:w-fit">
                 <button
                     onClick={() => setCurrentView('All')}
                     className={`flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-all
@@ -158,11 +158,11 @@ export const Leads = () => {
                     )}
                 </div>
 
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden min-h-[400px]">
+                <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden min-h-[400px]">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
                             <thead>
-                                <tr className="bg-slate-50/50 border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 font-bold">
+                                <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 font-bold">
                                     <th className="p-6">Name</th>
                                     <th className="p-6">Contact</th>
                                     <th className="p-6">Status</th>
@@ -175,21 +175,21 @@ export const Leads = () => {
                                     <tr
                                         key={lead.id}
                                         onClick={() => setSelectedLead(lead)}
-                                        className="hover:bg-slate-50/50 transition-colors group cursor-pointer"
+                                        className={`hover:bg-slate-50 transition-colors group cursor-pointer border-l-4 ${lead.priority === 'Hot' ? 'border-l-rose-400' : lead.priority === 'Warm' ? 'border-l-amber-300' : 'border-l-transparent'}`}
                                     >
                                         <td className="p-6">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-lg">
                                                     {lead.name[0]}
                                                 </div>
-                                            <div>
-                                                <div className="font-bold text-chippy-navy">{lead.name}</div>
-                                                <div className="flex items-center gap-2 flex-wrap mt-1">
-                                                    {lead.priority && (
-                                                        <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${lead.priority === 'Hot' ? 'bg-rose-100 text-rose-700' : lead.priority === 'Warm' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                            {lead.priority}
-                                                        </span>
-                                                    )}
+                                                <div>
+                                                    <div className="font-bold text-chippy-navy">{lead.name}</div>
+                                                    <div className="flex items-center gap-2 flex-wrap mt-1">
+                                                        {lead.priority && (
+                                                            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${lead.priority === 'Hot' ? 'bg-rose-100 text-rose-700' : lead.priority === 'Warm' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                                {lead.priority}
+                                                            </span>
+                                                        )}
                                                     {lead.service && (
                                                         <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
                                                             {lead.service}
