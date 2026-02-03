@@ -182,14 +182,19 @@ export const Leads = () => {
                                                 <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-lg">
                                                     {lead.name[0]}
                                                 </div>
-                                                <div>
-                                                    <div className="font-bold text-chippy-navy">{lead.name}</div>
-                                                    <div className="flex items-center gap-2 flex-wrap mt-1">
-                                                        {lead.service && (
-                                                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
-                                                                {lead.service}
-                                                            </span>
-                                                        )}
+                                            <div>
+                                                <div className="font-bold text-chippy-navy">{lead.name}</div>
+                                                <div className="flex items-center gap-2 flex-wrap mt-1">
+                                                    {lead.priority && (
+                                                        <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${lead.priority === 'Hot' ? 'bg-rose-100 text-rose-700' : lead.priority === 'Warm' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                            {lead.priority}
+                                                        </span>
+                                                    )}
+                                                    {lead.service && (
+                                                        <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                                                            {lead.service}
+                                                        </span>
+                                                    )}
                                                         {lead.locationName && (
                                                             <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
                                                                 <MapPin className="w-3 h-3" />

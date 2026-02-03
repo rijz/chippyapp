@@ -1,12 +1,72 @@
 import React, { useState } from 'react';
 import { Palette, Zap, User, Mail, Phone, BrainCircuit, X, Eye, MessageSquare, Layout, FormInput, MessageCircle } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { ContactFieldSelector } from '../components/ui/Shared';
 import { ContactFieldRequirement, LeadCaptureMode } from '../types';
 
 export const WidgetStudio = () => {
     const { widgetConfig, setWidgetConfig } = useData();
+    const { session } = useAuth();
+    const { showToast } = useToast();
     const [activeTab, setActiveTab] = useState<'appearance' | 'behavior'>('appearance');
+    const [isSendingTest, setIsSendingTest] = useState(false);
+
+    const sendTestEmail = async (mode: 'customer' | 'owner') => {
+        if (!session?.access_token || !session?.user?.id || !session?.user?.email) {
+            showToast('You must be logged in to send a test email.', 'error');
+            return;
+        }
+
+        setIsSendingTest(true);
+        try {
+            const templateVars = {
+                customer_name: 'Alex',
+                customer_email: 'alex@example.com',
+                company_name: 'Acme Co.',
+                company_url: 'https://example.com',
+                summary: 'Asked about pricing and next available appointment.',
+                next_action: 'Suggested: book a consultation this week.',
+                priority: 'Warm',
+                intent: 'Pricing + booking'
+            };
+
+            const subject = mode === 'customer'
+                ? (widgetConfig.followUp.customerSubject || '')
+                : (widgetConfig.followUp.ownerSubject || '');
+            const body = mode === 'customer'
+                ? (widgetConfig.followUp.customerBody || '')
+                : (widgetConfig.followUp.ownerBody || '');
+
+            const response = await fetch('/api/followup/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({
+                    userId: session.user.id,
+                    toEmail: session.user.email,
+                    mode,
+                    subject,
+                    body,
+                    templateVars
+                })
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Failed to send test email');
+            }
+
+            showToast('Test email sent to your inbox.', 'success');
+        } catch (e: any) {
+            showToast(e.message || 'Failed to send test email', 'error');
+        } finally {
+            setIsSendingTest(false);
+        }
+    };
 
     const updateContactField = (field: keyof typeof widgetConfig.contactFields, value: ContactFieldRequirement) => {
         setWidgetConfig(prev => ({
@@ -131,6 +191,201 @@ export const WidgetStudio = () => {
                                             <span className="font-bold text-chippy-navy">Conversational (AI)</span>
                                         </div>
                                         <p className="text-xs text-slate-500 pl-[3.25rem]">Agent X collects info naturally when a user wants to book or connect.</p>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm space-y-4">
+                                <h3 className="font-bold text-lg text-chippy-navy">Follow-Up Emails</h3>
+                                <p className="text-sm text-slate-500">Send a short, helpful recap after a chat ends.</p>
+
+                                <label className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                                    <div>
+                                        <p className="text-sm font-bold text-chippy-navy">Enable follow-ups</p>
+                                        <p className="text-xs text-slate-500">Only sends when no booking is made.</p>
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={widgetConfig.followUp.enabled}
+                                        onChange={(e) => setWidgetConfig({
+                                            ...widgetConfig,
+                                            followUp: { ...widgetConfig.followUp, enabled: e.target.checked }
+                                        })}
+                                        className="h-5 w-5"
+                                    />
+                                </label>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Timing</label>
+                                    <select
+                                        value={widgetConfig.followUp.delayMinutes}
+                                        onChange={(e) => setWidgetConfig({
+                                            ...widgetConfig,
+                                            followUp: { ...widgetConfig.followUp, delayMinutes: Number(e.target.value) }
+                                        })}
+                                        className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                        disabled={!widgetConfig.followUp.enabled}
+                                    >
+                                        <option value={0}>Send immediately</option>
+                                        <option value={30}>Send after 30 minutes</option>
+                                        <option value={120}>Send after 2 hours</option>
+                                        <option value={1440}>Send next morning</option>
+                                    </select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Recipients</label>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm">
+                                            <input
+                                                type="checkbox"
+                                                checked={widgetConfig.followUp.sendToCustomer}
+                                                onChange={(e) => setWidgetConfig({
+                                                    ...widgetConfig,
+                                                    followUp: { ...widgetConfig.followUp, sendToCustomer: e.target.checked }
+                                                })}
+                                                className="h-4 w-4"
+                                                disabled={!widgetConfig.followUp.enabled}
+                                            />
+                                            <span>Customer</span>
+                                        </label>
+                                        <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm">
+                                            <input
+                                                type="checkbox"
+                                                checked={widgetConfig.followUp.sendToOwner}
+                                                onChange={(e) => setWidgetConfig({
+                                                    ...widgetConfig,
+                                                    followUp: { ...widgetConfig.followUp, sendToOwner: e.target.checked }
+                                                })}
+                                                className="h-4 w-4"
+                                                disabled={!widgetConfig.followUp.enabled}
+                                            />
+                                            <span>Owner</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Reply-To Email</label>
+                                    <input
+                                        type="email"
+                                        value={widgetConfig.followUp.replyToEmail || ''}
+                                        onChange={(e) => setWidgetConfig({
+                                            ...widgetConfig,
+                                            followUp: { ...widgetConfig.followUp, replyToEmail: e.target.value }
+                                        })}
+                                        className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                        placeholder="owner@business.com"
+                                        disabled={!widgetConfig.followUp.enabled}
+                                    />
+                                    <p className="text-xs text-slate-500">Replies from customers will go to this address.</p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Customer Email Subject</label>
+                                    <input
+                                        type="text"
+                                        value={widgetConfig.followUp.customerSubject || ''}
+                                        onChange={(e) => setWidgetConfig({
+                                            ...widgetConfig,
+                                            followUp: { ...widgetConfig.followUp, customerSubject: e.target.value }
+                                        })}
+                                        className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                        disabled={!widgetConfig.followUp.enabled}
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Customer Email Body</label>
+                                    <textarea
+                                        value={widgetConfig.followUp.customerBody || ''}
+                                        onChange={(e) => setWidgetConfig({
+                                            ...widgetConfig,
+                                            followUp: { ...widgetConfig.followUp, customerBody: e.target.value }
+                                        })}
+                                        className="w-full h-36 p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
+                                        disabled={!widgetConfig.followUp.enabled}
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Owner Email Subject</label>
+                                    <input
+                                        type="text"
+                                        value={widgetConfig.followUp.ownerSubject || ''}
+                                        onChange={(e) => setWidgetConfig({
+                                            ...widgetConfig,
+                                            followUp: { ...widgetConfig.followUp, ownerSubject: e.target.value }
+                                        })}
+                                        className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                        disabled={!widgetConfig.followUp.enabled}
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Owner Email Body</label>
+                                    <textarea
+                                        value={widgetConfig.followUp.ownerBody || ''}
+                                        onChange={(e) => setWidgetConfig({
+                                            ...widgetConfig,
+                                            followUp: { ...widgetConfig.followUp, ownerBody: e.target.value }
+                                        })}
+                                        className="w-full h-28 p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
+                                        disabled={!widgetConfig.followUp.enabled}
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview Tokens</label>
+                                    <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                                        Use tokens: {{customer_name}}, {{customer_email}}, {{company_name}}, {{company_url}}, {{summary}}, {{next_action}}, {{priority}}, {{intent}}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview (Customer)</label>
+                                    <div className="bg-white border border-slate-200 rounded-xl p-3 text-sm whitespace-pre-wrap">
+                                        {(widgetConfig.followUp.customerBody || '')
+                                            .replace(/{{customer_name}}/g, 'Alex')
+                                            .replace(/{{customer_email}}/g, 'alex@example.com')
+                                            .replace(/{{company_name}}/g, 'Acme Co.')
+                                            .replace(/{{company_url}}/g, 'https://example.com')
+                                            .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
+                                            .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
+                                            .replace(/{{priority}}/g, 'Warm')
+                                            .replace(/{{intent}}/g, 'Pricing + booking')}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview (Owner)</label>
+                                    <div className="bg-white border border-slate-200 rounded-xl p-3 text-sm whitespace-pre-wrap">
+                                        {(widgetConfig.followUp.ownerBody || '')
+                                            .replace(/{{customer_name}}/g, 'Alex')
+                                            .replace(/{{customer_email}}/g, 'alex@example.com')
+                                            .replace(/{{company_name}}/g, 'Acme Co.')
+                                            .replace(/{{company_url}}/g, 'https://example.com')
+                                            .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
+                                            .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
+                                            .replace(/{{priority}}/g, 'Warm')
+                                            .replace(/{{intent}}/g, 'Pricing + booking')}
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-2 pt-2">
+                                    <button
+                                        onClick={() => sendTestEmail('customer')}
+                                        disabled={isSendingTest || !widgetConfig.followUp.enabled}
+                                        className="flex-1 py-2 bg-chippy-navy text-white font-bold rounded-lg hover:bg-chippy-navy/90 transition-colors disabled:opacity-50"
+                                    >
+                                        {isSendingTest ? 'Sending...' : 'Send Test (Customer)'}
+                                    </button>
+                                    <button
+                                        onClick={() => sendTestEmail('owner')}
+                                        disabled={isSendingTest || !widgetConfig.followUp.enabled}
+                                        className="flex-1 py-2 bg-slate-100 text-slate-700 font-bold rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50"
+                                    >
+                                        {isSendingTest ? 'Sending...' : 'Send Test (Owner)'}
                                     </button>
                                 </div>
                             </div>

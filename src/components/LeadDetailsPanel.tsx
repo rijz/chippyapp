@@ -86,6 +86,35 @@ export const LeadDetailsPanel: React.FC<LeadDetailsPanelProps> = ({ lead, onClos
                     </div>
                 )}
 
+                {/* AI Triage */}
+                {(lead.priority || lead.intent || lead.nextAction) && (
+                    <div className="space-y-3">
+                        <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">AI Triage</h3>
+                        <div className="space-y-2 text-sm bg-slate-50 p-3 rounded-lg">
+                            {lead.priority && (
+                                <div>
+                                    <span className="font-bold text-slate-600">Priority:</span>{' '}
+                                    <span className={`font-bold ${lead.priority === 'Hot' ? 'text-rose-600' : lead.priority === 'Warm' ? 'text-amber-600' : 'text-slate-600'}`}>
+                                        {lead.priority}
+                                    </span>
+                                </div>
+                            )}
+                            {lead.intent && (
+                                <div>
+                                    <span className="font-bold text-slate-600">Intent:</span>{' '}
+                                    <span className="text-slate-700">{lead.intent}</span>
+                                </div>
+                            )}
+                            {lead.nextAction && (
+                                <div>
+                                    <span className="font-bold text-slate-600">Next Action:</span>{' '}
+                                    <span className="text-slate-700">{lead.nextAction}</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Requested Callback Date/Time */}
                 {lead.requestedCallbackDate && (
                     <div className="space-y-3">

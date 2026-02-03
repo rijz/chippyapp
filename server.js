@@ -716,6 +716,8 @@ app.post('/api/widget/session', widgetDataLimiter, async (req, res) => {
         id: session.id,
         user_id: userId,
         customer_name: session.customerName || 'Visitor',
+        customer_email: session.customerEmail ? String(session.customerEmail).toLowerCase() : null,
+        customer_phone: session.customerPhone || null,
         messages: session.messages,
         summary: session.summary || `Chat with ${session.messages?.length || 0} messages`,
         type: session.type || 'General',
@@ -726,6 +728,58 @@ app.post('/api/widget/session', widgetDataLimiter, async (req, res) => {
 
     if (error) throw error;
     res.json({ success: true });
+
+    // Background triage + follow-up scheduling (non-blocking)
+    setTimeout(async () => {
+      try {
+        const { data: sessionRow } = await supabaseAdmin
+          .from('chat_sessions')
+          .select('id, user_id, customer_name, customer_email, followup_status, triage')
+          .eq('id', session.id)
+          .maybeSingle();
+
+        if (!sessionRow) return;
+
+        let triage = sessionRow.triage;
+        if (!triage && session.messages && session.messages.length >= 3) {
+          const { data: settings } = await supabaseAdmin
+            .from('settings')
+            .select('tenant_config')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+          triage = await generateTriage({
+            messages: session.messages,
+            companyName: settings?.tenant_config?.companyName
+          });
+
+          if (triage) {
+            await supabaseAdmin
+              .from('chat_sessions')
+              .update({ triage, triage_updated_at: new Date().toISOString() })
+              .eq('id', session.id);
+
+            // Mirror triage onto lead if we have an email
+            const email = session.customerEmail ? String(session.customerEmail).toLowerCase() : null;
+            if (email) {
+              await supabaseAdmin
+                .from('leads')
+                .update({
+                  intent: triage.intent || null,
+                  priority: triage.priority || null,
+                  next_action: triage.nextAction || null
+                })
+                .eq('user_id', userId)
+                .eq('email', email);
+            }
+          }
+        }
+
+        await scheduleFollowUpIfNeeded({ userId, sessionRow, sessionPayload: session });
+      } catch (e) {
+        console.error('[API] Background triage/follow-up error:', e);
+      }
+    }, 0);
   } catch (error) {
     console.error('[API] Widget session error:', error);
     res.status(500).json({ error: 'Failed to save session' });
@@ -1007,6 +1061,163 @@ import { scrapeWebsite } from './scraper.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.VITE_GEMINI_API_KEY || '');
+
+// =====================
+// AI Triage + Follow-Up Helpers
+// =====================
+const FOLLOWUP_DEFAULTS = {
+  enabled: true,
+  delayMinutes: 0,
+  sendToCustomer: true,
+  sendToOwner: false,
+  customerSubject: 'Thanks for chatting with {{company_name}}',
+  customerBody:
+    "Hi {{customer_name}},\n\n" +
+    "Here’s a quick recap of your chat:\n" +
+    "{{summary}}\n\n" +
+    "{{next_action}}\n\n" +
+    "You can also visit {{company_url}} or reply to this email with any questions.\n\n" +
+    "- {{company_name}}",
+  ownerSubject: 'Follow-up needed: {{customer_name}}',
+  ownerBody:
+    "Customer: {{customer_name}} ({{customer_email}})\n" +
+    "Priority: {{priority}}\n" +
+    "Intent: {{intent}}\n\n" +
+    "Summary:\n" +
+    "{{summary}}\n\n" +
+    "Next action:\n" +
+    "{{next_action}}",
+  replyToEmail: ''
+};
+
+const safeJsonParse = (text, fallback = null) => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+
+const normalizeMessagesForTriage = (messages = []) => {
+  const cleaned = (Array.isArray(messages) ? messages : [])
+    .filter(m => m && m.text && m.role)
+    .slice(-12)
+    .map(m => `${m.role === 'user' ? 'User' : 'Agent'}: ${String(m.text).slice(0, 800)}`);
+  return cleaned.join('\n');
+};
+
+const renderTemplate = (template, vars) => {
+  if (!template) return '';
+  return Object.entries(vars).reduce((acc, [key, value]) => {
+    const safeVal = value === undefined || value === null ? '' : String(value);
+    return acc.replace(new RegExp(`{{\\s*${key}\\s*}}`, 'g'), safeVal);
+  }, template);
+};
+
+const generateTriage = async ({ messages, companyName }) => {
+  const transcript = normalizeMessagesForTriage(messages);
+  if (!transcript) return null;
+
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  const result = await model.generateContent(`You are an assistant helping a business owner triage inbound chats.
+
+BUSINESS: ${companyName || 'Unknown'}
+
+CHAT TRANSCRIPT:
+${transcript}
+
+Return JSON only (no markdown) with this exact structure:
+{
+  "summary": "1-2 sentences, plain English",
+  "intent": "short phrase describing what the customer wants",
+  "priority": "Hot | Warm | Cold",
+  "nextAction": "the single best next step for the owner"
+}
+`);
+
+  let text = result.response.text();
+  text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+  return safeJsonParse(text, null);
+};
+
+const scheduleFollowUpIfNeeded = async ({ userId, sessionRow, sessionPayload }) => {
+  if (!userId || !sessionRow) return;
+
+  const { data: settings } = await supabaseAdmin
+    .from('settings')
+    .select('widget_config, tenant_config')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const followUp = {
+    ...FOLLOWUP_DEFAULTS,
+    ...(settings?.widget_config?.followUp || {})
+  };
+
+  if (!followUp.enabled) return;
+
+  // Avoid duplicate scheduling
+  if (sessionRow.followup_status === 'scheduled' || sessionRow.followup_status === 'sent') {
+    return;
+  }
+
+  const customerEmail = (sessionPayload?.customerEmail || sessionRow.customer_email || '').toLowerCase();
+  const customerName = sessionPayload?.customerName || sessionRow.customer_name || 'Visitor';
+
+  const recipients = [];
+  if (followUp.sendToCustomer && customerEmail) recipients.push('customer');
+  if (followUp.sendToOwner) recipients.push('owner');
+
+  if (recipients.length === 0) {
+    await supabaseAdmin
+      .from('chat_sessions')
+      .update({ followup_status: 'skipped' })
+      .eq('id', sessionRow.id);
+    return;
+  }
+
+  // Skip if already booked
+  if (customerEmail) {
+    const { data: bookedLead } = await supabaseAdmin
+      .from('leads')
+      .select('id, status')
+      .eq('user_id', userId)
+      .eq('email', customerEmail)
+      .maybeSingle();
+
+    if (bookedLead?.status === 'Booked') {
+      await supabaseAdmin
+        .from('chat_sessions')
+        .update({ followup_status: 'skipped' })
+        .eq('id', sessionRow.id);
+      return;
+    }
+  }
+
+  const delayMs = Math.max(0, Number(followUp.delayMinutes || 0)) * 60 * 1000;
+  const scheduledAt = new Date(Date.now() + delayMs).toISOString();
+
+  await supabaseAdmin
+    .from('chat_sessions')
+    .update({
+      followup_status: 'scheduled',
+      followup_scheduled_at: scheduledAt,
+      followup_recipients: recipients
+    })
+    .eq('id', sessionRow.id);
+
+  // Mirror follow-up status to lead if available
+  if (customerEmail) {
+    await supabaseAdmin
+      .from('leads')
+      .update({
+        followup_status: 'scheduled',
+        followup_scheduled_at: scheduledAt
+      })
+      .eq('user_id', userId)
+      .eq('email', customerEmail);
+  }
+};
 
 // Rate Limiter for /api/scrape (in-memory, per IP)
 const scrapeRateLimiter = new Map(); // IP -> { count, windowStart }
@@ -2058,6 +2269,214 @@ app.get('*', (req, res) => {
       res.sendFile(path.join(servePath, 'index.html'));
     }
   });
+});
+
+// =====================
+// Follow-Up Email Processor (Cron)
+// =====================
+const processScheduledFollowUps = async () => {
+  try {
+    const nowIso = new Date().toISOString();
+    const { data: sessions, error } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('id, user_id, customer_name, customer_email, summary, triage, followup_recipients, followup_status, followup_scheduled_at')
+      .eq('followup_status', 'scheduled')
+      .lte('followup_scheduled_at', nowIso)
+      .limit(50);
+
+    if (error) throw error;
+    if (!sessions || sessions.length === 0) return;
+
+    for (const session of sessions) {
+      try {
+        const userId = session.user_id;
+        const { data: settings } = await supabaseAdmin
+          .from('settings')
+          .select('tenant_config, widget_config')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        const followUp = {
+          ...FOLLOWUP_DEFAULTS,
+          ...(settings?.widget_config?.followUp || {})
+        };
+
+        if (!followUp.enabled) {
+          await supabaseAdmin
+            .from('chat_sessions')
+            .update({ followup_status: 'skipped' })
+            .eq('id', session.id);
+          continue;
+        }
+
+        const recipients = Array.isArray(session.followup_recipients)
+          ? session.followup_recipients
+          : safeJsonParse(session.followup_recipients, []);
+
+        const triage = session.triage || {};
+        const summary = triage.summary || session.summary;
+        const nextAction = triage.nextAction;
+        const priority = triage.priority;
+        const intent = triage.intent;
+
+        const companyName = settings?.tenant_config?.companyName || 'Your Team';
+        const companyUrl = settings?.tenant_config?.companyUrl || '';
+
+        const customerEmail = session.customer_email ? String(session.customer_email).toLowerCase() : '';
+        const customerName = session.customer_name || 'Visitor';
+
+        const templateVars = {
+          customer_name: customerName || 'Customer',
+          customer_email: customerEmail || '',
+          company_name: companyName,
+          company_url: companyUrl,
+          summary: summary || '',
+          next_action: nextAction || '',
+          priority: priority || '',
+          intent: intent || ''
+        };
+
+        const replyTo = followUp.replyToEmail || undefined;
+
+        if (recipients.includes('customer') && customerEmail) {
+          const subject = renderTemplate(followUp.customerSubject || '', templateVars) || `Thanks for chatting with ${companyName}`;
+          const bodyText = renderTemplate(followUp.customerBody || '', templateVars);
+          await emailService.sendFollowUpToCustomer(customerEmail, customerName, {
+            subject,
+            bodyText,
+            companyName,
+            replyTo
+          });
+        }
+
+        if (recipients.includes('owner')) {
+          const { data: ownerData } = await supabaseAdmin.auth.admin.getUserById(userId);
+          const ownerEmail = ownerData?.user?.email;
+          if (ownerEmail) {
+            const subject = renderTemplate(followUp.ownerSubject || '', templateVars) || `Follow-up needed: ${customerName || 'New chat'}`;
+            const bodyText = renderTemplate(followUp.ownerBody || '', templateVars);
+            await emailService.sendFollowUpToOwner(ownerEmail, {
+              customerName,
+              subject,
+              bodyText,
+              companyName,
+              replyTo
+            });
+          }
+        }
+
+        const sentAt = new Date().toISOString();
+        await supabaseAdmin
+          .from('chat_sessions')
+          .update({ followup_status: 'sent', followup_sent_at: sentAt })
+          .eq('id', session.id);
+
+        if (customerEmail) {
+          await supabaseAdmin
+            .from('leads')
+            .update({ followup_status: 'sent', followup_sent_at: sentAt })
+            .eq('user_id', userId)
+            .eq('email', customerEmail);
+        }
+      } catch (innerErr) {
+        console.error('[Cron] Follow-up send error:', innerErr);
+      }
+    }
+  } catch (err) {
+    console.error('[Cron] Follow-up processor failed:', err);
+  }
+};
+
+// Run every 2 minutes
+cron.schedule('*/5 * * * *', async () => {
+  await processScheduledFollowUps();
+});
+
+// =====================
+// Follow-Up Test Email (Authenticated)
+// =====================
+app.post('/api/followup/test', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    const userId = sanitizeInput(req.body.userId);
+    const toEmail = sanitizeInput(req.body.toEmail);
+    const mode = sanitizeInput(req.body.mode);
+    const subject = sanitizeInput(req.body.subject);
+    const body = sanitizeInput(req.body.body);
+    const templateVars = sanitizeObject(req.body.templateVars || {});
+
+    if (!userId || user.id !== userId) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+    if (!toEmail) {
+      return res.status(400).json({ error: 'Missing toEmail' });
+    }
+    if (mode !== 'customer' && mode !== 'owner') {
+      return res.status(400).json({ error: 'Invalid mode' });
+    }
+
+    const { data: settings } = await supabaseAdmin
+      .from('settings')
+      .select('tenant_config, widget_config')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const followUp = {
+      ...FOLLOWUP_DEFAULTS,
+      ...(settings?.widget_config?.followUp || {})
+    };
+
+    const companyName = settings?.tenant_config?.companyName || 'Your Team';
+    const companyUrl = settings?.tenant_config?.companyUrl || '';
+
+    const vars = {
+      customer_name: templateVars.customer_name || 'Alex',
+      customer_email: templateVars.customer_email || 'alex@example.com',
+      company_name: companyName,
+      company_url: companyUrl,
+      summary: templateVars.summary || 'Asked about pricing and next available appointment.',
+      next_action: templateVars.next_action || 'Suggested: book a consultation this week.',
+      priority: templateVars.priority || 'Warm',
+      intent: templateVars.intent || 'Pricing + booking'
+    };
+
+    const renderedSubject = renderTemplate(subject || (mode === 'customer' ? followUp.customerSubject : followUp.ownerSubject), vars);
+    const renderedBody = renderTemplate(body || (mode === 'customer' ? followUp.customerBody : followUp.ownerBody), vars);
+
+    const replyTo = followUp.replyToEmail || undefined;
+
+    if (mode === 'customer') {
+      await emailService.sendFollowUpToCustomer(toEmail, vars.customer_name, {
+        subject: renderedSubject,
+        bodyText: renderedBody,
+        companyName,
+        replyTo
+      });
+    } else {
+      await emailService.sendFollowUpToOwner(toEmail, {
+        customerName: vars.customer_name,
+        subject: renderedSubject,
+        bodyText: renderedBody,
+        companyName,
+        replyTo
+      });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[API] Follow-up test error:', error);
+    res.status(500).json({ error: 'Failed to send test email' });
+  }
 });
 
 // =====================

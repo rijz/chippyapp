@@ -9,7 +9,7 @@ const getResendClient = () => {
     return new Resend(process.env.RESEND_API_KEY);
 };
 
-const FROM_EMAIL = 'Chippy <notifications@hellochippy.com>'; // Or 'onboarding@resend.dev' for testing
+const FROM_EMAIL = 'Chippy <notifications@hellochippy.com>'; // Default sender
 
 export const emailService = {
     /**
@@ -127,6 +127,63 @@ export const emailService = {
             console.log(`[Email] Weekly report sent to ${ownerEmail}`);
         } catch (error) {
             console.error('[Email] Failed to send weekly report:', error);
+        }
+    }
+    ,
+
+    /**
+     * Send follow-up email to the customer after a chat (no booking)
+     */
+    async sendFollowUpToCustomer(toEmail, customerName, details) {
+        const resend = getResendClient();
+        if (!resend) return;
+
+        try {
+            const { bodyText, companyName, replyTo } = details;
+            const subject = details.subject || `Thanks for chatting with ${companyName}`;
+            const from = companyName ? `${companyName} <notifications@hellochippy.com>` : FROM_EMAIL;
+
+            await resend.emails.send({
+                from,
+                reply_to: replyTo || undefined,
+                to: [toEmail],
+                subject,
+                html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="white-space: pre-wrap; line-height: 1.5;">${bodyText || ''}</div>
+          </div>
+        `
+            });
+        } catch (error) {
+            console.error('[Email] Failed to send follow-up to customer:', error);
+        }
+    },
+
+    /**
+     * Send follow-up summary to the business owner
+     */
+    async sendFollowUpToOwner(ownerEmail, details) {
+        const resend = getResendClient();
+        if (!resend) return;
+
+        try {
+            const { customerName, companyName, bodyText, replyTo } = details;
+            const subject = details.subject || `Follow-up needed: ${customerName || 'New chat'}`;
+            const from = companyName ? `${companyName} <notifications@hellochippy.com>` : FROM_EMAIL;
+
+            await resend.emails.send({
+                from,
+                reply_to: replyTo || undefined,
+                to: [ownerEmail],
+                subject,
+                html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="white-space: pre-wrap; line-height: 1.5;">${bodyText || ''}</div>
+          </div>
+        `
+            });
+        } catch (error) {
+            console.error('[Email] Failed to send follow-up to owner:', error);
         }
     }
 };

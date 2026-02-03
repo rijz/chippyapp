@@ -21,6 +21,12 @@ export interface Lead {
   requestedCallbackDate?: Date; // Specific date/time requested for callback
   locationId?: string; // Location where appointment is booked
   locationName?: string; // Name of the location (for display)
+  intent?: string; // AI-inferred intent
+  priority?: 'Hot' | 'Warm' | 'Cold'; // AI lead priority
+  nextAction?: string; // AI-recommended next action
+  followUpStatus?: 'disabled' | 'scheduled' | 'sent' | 'skipped' | 'none';
+  followUpScheduledAt?: Date;
+  followUpSentAt?: Date;
 }
 
 export type BusinessType = 'storefront' | 'mobile' | 'online';
@@ -52,6 +58,17 @@ export interface WidgetConfig {
     email: ContactFieldRequirement;
     phone: ContactFieldRequirement;
   };
+  followUp: {
+    enabled: boolean;
+    delayMinutes: number;
+    sendToCustomer: boolean;
+    sendToOwner: boolean;
+    customerSubject?: string;
+    customerBody?: string;
+    ownerSubject?: string;
+    ownerBody?: string;
+    replyToEmail?: string;
+  };
 }
 
 export type Sentiment = 'positive' | 'neutral' | 'negative' | 'frustrated';
@@ -72,12 +89,23 @@ export interface ReviewItem {
 export interface ChatSessionRecord {
   id: string;
   customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
   messages: Message[];
   summary: string;
   type: EnquiryType;
   sentiment: Sentiment;
   timestamp: Date;
   status: 'Opened' | 'Closed' | 'Archived' | 'Reviewed';
+  triage?: {
+    summary?: string;
+    intent?: string;
+    priority?: 'Hot' | 'Warm' | 'Cold';
+    nextAction?: string;
+  };
+  followUpStatus?: 'disabled' | 'scheduled' | 'sent' | 'skipped' | 'none';
+  followUpScheduledAt?: Date;
+  followUpSentAt?: Date;
 }
 
 export interface ChartDataPoint {

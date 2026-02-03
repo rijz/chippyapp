@@ -37,6 +37,30 @@ export const EmbedPage = () => {
             name: 'required',
             email: 'required',
             phone: 'optional'
+        },
+        followUp: {
+            enabled: true,
+            delayMinutes: 0,
+            sendToCustomer: true,
+            sendToOwner: false,
+            customerSubject: 'Thanks for chatting with {{company_name}}',
+            customerBody:
+                "Hi {{customer_name}},\n\n" +
+                "Here’s a quick recap of your chat:\n" +
+                "{{summary}}\n\n" +
+                "{{next_action}}\n\n" +
+                "You can also visit {{company_url}} or reply to this email with any questions.\n\n" +
+                "- {{company_name}}",
+            ownerSubject: 'Follow-up needed: {{customer_name}}',
+            ownerBody:
+                "Customer: {{customer_name}} ({{customer_email}})\n" +
+                "Priority: {{priority}}\n" +
+                "Intent: {{intent}}\n\n" +
+                "Summary:\n" +
+                "{{summary}}\n\n" +
+                "Next action:\n" +
+                "{{next_action}}",
+            replyToEmail: ''
         }
     });
 
@@ -48,6 +72,8 @@ export const EmbedPage = () => {
 
     // Track customer name when captured (updates to actual name when lead is captured)
     const customerNameRef = useRef<string>('Visitor');
+    const customerEmailRef = useRef<string>('');
+    const customerPhoneRef = useRef<string>('');
 
     // Set transparent background for embed mode
     useEffect(() => {
@@ -99,7 +125,20 @@ export const EmbedPage = () => {
                 const data = await response.json();
 
                 if (data.tenantConfig) setTenantConfig(data.tenantConfig);
-                if (data.widgetConfig) setWidgetConfig(data.widgetConfig);
+                if (data.widgetConfig) {
+                    setWidgetConfig(prev => ({
+                        ...prev,
+                        ...data.widgetConfig,
+                        contactFields: {
+                            ...prev.contactFields,
+                            ...(data.widgetConfig.contactFields || {})
+                        },
+                        followUp: {
+                            ...prev.followUp,
+                            ...(data.widgetConfig.followUp || {})
+                        }
+                    }));
+                }
                 if (data.knowledgeData) setKnowledgeData(data.knowledgeData);
                 if (data.calendarConnections) setCalendarConnections(data.calendarConnections);
 
@@ -143,6 +182,12 @@ export const EmbedPage = () => {
         if (leadData.name) {
             customerNameRef.current = capitalizeName(leadData.name);
         }
+        if (leadData.email) {
+            customerEmailRef.current = leadData.email;
+        }
+        if (leadData.phone) {
+            customerPhoneRef.current = leadData.phone;
+        }
 
         try {
             await fetch('/api/widget/lead', {
@@ -178,6 +223,8 @@ export const EmbedPage = () => {
                     session: {
                         id: sessionIdRef.current,
                         customerName: customerNameRef.current,
+                        customerEmail: customerEmailRef.current,
+                        customerPhone: customerPhoneRef.current,
                         messages: messages,
                         summary: `Chat with ${messages.length} messages`,
                         type: 'General',
@@ -206,6 +253,12 @@ export const EmbedPage = () => {
         // Store customer name for session tracking
         if (customerName) {
             customerNameRef.current = capitalizeName(customerName);
+        }
+        if (customerEmail) {
+            customerEmailRef.current = customerEmail;
+        }
+        if (customerPhone) {
+            customerPhoneRef.current = customerPhone;
         }
 
         try {
@@ -262,6 +315,12 @@ export const EmbedPage = () => {
         // Store customer name for session tracking
         if (data.customerName) {
             customerNameRef.current = capitalizeName(data.customerName);
+        }
+        if (data.customerEmail) {
+            customerEmailRef.current = data.customerEmail;
+        }
+        if (data.customerPhone) {
+            customerPhoneRef.current = data.customerPhone;
         }
 
         try {
@@ -322,4 +381,3 @@ export const EmbedPage = () => {
         </div>
     );
 };
-

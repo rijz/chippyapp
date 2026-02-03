@@ -143,12 +143,18 @@ export const syncChatSessions = async (sessions: ChatSessionRecord[], userId: st
       id: s.id,
       user_id: userId,
       customer_name: s.customerName,
+      customer_email: s.customerEmail || null,
+      customer_phone: s.customerPhone || null,
       messages: s.messages,
       summary: s.summary,
       type: s.type,
       sentiment: s.sentiment,
       status: s.status,
-      created_at: s.timestamp
+      created_at: s.timestamp,
+      triage: s.triage || null,
+      followup_status: s.followUpStatus || null,
+      followup_scheduled_at: s.followUpScheduledAt || null,
+      followup_sent_at: s.followUpSentAt || null
     }));
 
     const { error } = await supabase
@@ -189,12 +195,18 @@ export const fetchChatSessions = async (userId: string): Promise<ChatSessionReco
     return (data || []).map(row => ({
       id: row.id,
       customerName: row.customer_name || 'Unknown',
+      customerEmail: row.customer_email || undefined,
+      customerPhone: row.customer_phone || undefined,
       messages: parseMessages(row.messages),
       summary: row.summary || '',
       type: row.type as any,
       sentiment: row.sentiment as any,
       status: row.status as any,
-      timestamp: new Date(row.created_at)
+      timestamp: new Date(row.created_at),
+      triage: row.triage || undefined,
+      followUpStatus: row.followup_status || undefined,
+      followUpScheduledAt: row.followup_scheduled_at ? new Date(row.followup_scheduled_at) : undefined,
+      followUpSentAt: row.followup_sent_at ? new Date(row.followup_sent_at) : undefined
     }));
   } catch (error) {
     console.error('Chat Fetch Error:', error);
@@ -309,6 +321,12 @@ export const syncLeads = async (leads: Lead[], userId: string) => {
       status: lead.status,
       source: lead.source,
       notes: lead.notes,
+      intent: lead.intent || null,
+      priority: lead.priority || null,
+      next_action: lead.nextAction || null,
+      followup_status: lead.followUpStatus || null,
+      followup_scheduled_at: lead.followUpScheduledAt || null,
+      followup_sent_at: lead.followUpSentAt || null,
       created_at: typeof lead.date === 'string' ? lead.date : lead.date.toISOString(),
       updated_at: new Date().toISOString()
     }));
@@ -343,7 +361,13 @@ export const fetchLeads = async (userId: string): Promise<Lead[] | null> => {
         status: row.status,
         source: row.source,
         date: new Date(row.created_at),
-        notes: row.notes || ''
+        notes: row.notes || '',
+        intent: row.intent || undefined,
+        priority: row.priority || undefined,
+        nextAction: row.next_action || undefined,
+        followUpStatus: row.followup_status || undefined,
+        followUpScheduledAt: row.followup_scheduled_at ? new Date(row.followup_scheduled_at) : undefined,
+        followUpSentAt: row.followup_sent_at ? new Date(row.followup_sent_at) : undefined
       }));
     }
     return null;

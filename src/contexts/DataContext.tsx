@@ -51,6 +51,30 @@ const DEFAULT_WIDGET_CONFIG: WidgetConfig = {
         name: 'required',
         email: 'required',
         phone: 'optional'
+    },
+    followUp: {
+        enabled: true,
+        delayMinutes: 0,
+        sendToCustomer: true,
+        sendToOwner: false,
+        customerSubject: 'Thanks for chatting with {{company_name}}',
+        customerBody:
+            "Hi {{customer_name}},\n\n" +
+            "Here’s a quick recap of your chat:\n" +
+            "{{summary}}\n\n" +
+            "{{next_action}}\n\n" +
+            "You can also visit {{company_url}} or reply to this email with any questions.\n\n" +
+            "- {{company_name}}",
+        ownerSubject: 'Follow-up needed: {{customer_name}}',
+        ownerBody:
+            "Customer: {{customer_name}} ({{customer_email}})\n" +
+            "Priority: {{priority}}\n" +
+            "Intent: {{intent}}\n\n" +
+            "Summary:\n" +
+            "{{summary}}\n\n" +
+            "Next action:\n" +
+            "{{next_action}}",
+        replyToEmail: ''
     }
 };
 
@@ -128,6 +152,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             contactFields: {
                 ...DEFAULT_WIDGET_CONFIG.contactFields,
                 ...(saved?.contactFields || {})
+            },
+            followUp: {
+                ...DEFAULT_WIDGET_CONFIG.followUp,
+                ...(saved?.followUp || {})
             }
         };
     });
@@ -202,7 +230,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                 setWidgetConfig(prev => ({
                     ...prev,
                     ...settings.widget_config,
-                    contactFields: { ...prev.contactFields, ...(settings.widget_config.contactFields || {}) }
+                    contactFields: { ...prev.contactFields, ...(settings.widget_config.contactFields || {}) },
+                    followUp: { ...prev.followUp, ...(settings.widget_config.followUp || {}) }
                 }));
             }
             if (settings.calendar_settings) setCalendarSettings(settings.calendar_settings);
