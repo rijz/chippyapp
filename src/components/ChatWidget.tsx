@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { MessageCircle, X, Send, Sparkles, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
+import { X, Send, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
 import { Message, TenantConfig, WidgetConfig, BusinessLocation, CalendarConnection } from '../types';
 import { createAgentSession, analyzeInteraction } from '../services/geminiService';
 import { CALENDAR_TOOLS, executeCalendarTool, ToolContext, CallbackRequestData } from '../services/calendarTools';
@@ -709,7 +709,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
           {/* Header */}
           <div className="p-4 flex items-center justify-between text-white" style={{ backgroundColor: widgetConfig.color }}>
             <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-white/80" />
+              <img src="/logo.png" alt="Chippy" className="w-5 h-5 rounded" />
               <div>
                 <h3 className="font-semibold text-sm">{widgetConfig.title}</h3>
                 <p className="text-xs text-white/80">{widgetConfig.subtitle}</p>
@@ -926,7 +926,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         className="text-white p-4 rounded-full shadow-lg hover:scale-110 transition-all duration-300"
         style={{ backgroundColor: widgetConfig.color }}
       >
-        {isOpen ? <X className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
+        {isOpen ? <X className="w-6 h-6" /> : <img src="/logo.png" alt="Chippy" className="w-6 h-6 rounded" />}
       </button>
     </div>
   );

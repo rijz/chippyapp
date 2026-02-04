@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Target, CheckCircle2, User, BrainCircuit, Sparkles, AlertCircle, MessageSquare, ThumbsUp, X, Edit2, Save, ArrowRight } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
 import { ReviewItem } from '../types';
+import { PageHeader } from '../components/layout/PageHeader';
 
 export const ReviewQueue = () => {
     const { reviewItems, setReviewItems, knowledgeData, setKnowledgeData } = useData();
@@ -90,28 +91,32 @@ export const ReviewQueue = () => {
     };
 
     return (
-        <div className="h-[calc(100vh-140px)] flex flex-col md:flex-row gap-6 animate-in fade-in duration-500">
+        <div className="w-full space-y-6 animate-in fade-in duration-500">
+            <PageHeader
+                title="Quality Check"
+                subtitle="Review low-confidence responses and improve the assistant."
+            />
+
+            <div className="h-[calc(100vh-220px)] flex flex-col md:flex-row gap-6">
             {/* LEFT SIDEBAR - LIST */}
             <div className="w-full md:w-80 shrink-0 flex flex-col gap-4">
                 <div className="space-y-4">
-                    <h2 className="text-xl font-bold text-chippy-navy">Review Queue</h2>
-
                     {/* TABS */}
-                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                    <div className="flex bg-slate-100 p-1 rounded-lg">
                         <button
                             onClick={() => setFilter('pending')}
-                            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${filter === 'pending'
-                                ? 'bg-white text-chippy-navy shadow-sm'
-                                : 'text-slate-400 hover:text-slate-600'
+                            className={`flex-1 py-2 text-xs font-semibold rounded-md transition-all ${filter === 'pending'
+                                ? 'bg-white text-slate-800'
+                                : 'text-slate-500 hover:text-slate-700'
                                 }`}
                         >
                             Pending <span className="ml-1 opacity-60">({reviewItems.filter(i => i.status === 'PENDING').length})</span>
                         </button>
                         <button
                             onClick={() => setFilter('history')}
-                            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${filter === 'history'
-                                ? 'bg-white text-chippy-navy shadow-sm'
-                                : 'text-slate-400 hover:text-slate-600'
+                            className={`flex-1 py-2 text-xs font-semibold rounded-md transition-all ${filter === 'history'
+                                ? 'bg-white text-slate-800'
+                                : 'text-slate-500 hover:text-slate-700'
                                 }`}
                         >
                             History
@@ -121,7 +126,7 @@ export const ReviewQueue = () => {
 
                 <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
                     {filteredItems.length === 0 ? (
-                        <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl">
+                        <div className="p-8 text-center border border-dashed border-slate-200 rounded-xl">
                             <CheckCircle2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                             <p className="text-xs text-slate-400">
                                 {filter === 'pending' ? "All caught up!" : "No history yet."}
@@ -132,32 +137,29 @@ export const ReviewQueue = () => {
                             <button
                                 key={item.id}
                                 onClick={() => setSelectedId(item.id)}
-                                className={`w-full text-left p-4 rounded-xl border transition-all hover:shadow-md ${selectedId === item.id
-                                    ? 'bg-white border-chippy-coral ring-1 ring-chippy-coral shadow-sm'
-                                    : 'bg-white border-slate-200 hover:border-chippy-navy/30'
+                                className={`w-full text-left p-4 rounded-lg border transition-all ${selectedId === item.id
+                                    ? 'bg-white border-slate-300'
+                                    : 'bg-white border-slate-200 hover:border-slate-300'
                                     }`}
                             >
                                 <div className="flex justify-between items-start mb-2">
                                     <div className="flex gap-2">
                                         {/* Status Badge for History Items */}
                                         {item.status !== 'PENDING' && (
-                                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${item.status === 'CORRECTED' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-500'
+                                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${item.status === 'CORRECTED' ? 'bg-slate-100 text-slate-600' : 'bg-slate-100 text-slate-500'
                                                 }`}>
                                                 {item.status === 'DISMISSED' ? 'Approved' : item.status}
                                             </span>
                                         )}
                                         {item.status === 'PENDING' && (
-                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded uppercase ${item.confidence > 0.8 ? 'bg-emerald-50 text-emerald-600' :
-                                                item.confidence > 0.5 ? 'bg-amber-50 text-amber-600' :
-                                                    'bg-red-50 text-red-600'
-                                                }`}>
+                                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-slate-100 text-slate-600">
                                                 {Math.round(item.confidence * 100)}% Conf.
                                             </span>
                                         )}
                                     </div>
                                     <span className="text-[10px] text-slate-400">{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                 </div>
-                                <p className="text-xs font-bold text-chippy-navy line-clamp-2 mb-1">"{item.query}"</p>
+                                <p className="text-xs font-semibold text-slate-800 line-clamp-2 mb-1">"{item.query}"</p>
                                 <div className="flex gap-1 overflow-hidden">
                                     {(Array.isArray(item.topics) ? item.topics : []).slice(0, 2).map((t, i) => (
                                         <span key={i} className="text-[9px] bg-slate-50 text-slate-500 px-1.5 py-0.5 rounded border border-slate-100 whitespace-nowrap">{t}</span>
@@ -170,22 +172,19 @@ export const ReviewQueue = () => {
             </div>
 
             {/* RIGHT PANEL - DETAIL */}
-            <div className="flex-1 min-w-0 bg-white border border-slate-200 rounded-[2rem] shadow-xl overflow-hidden flex flex-col">
+            <div className="flex-1 min-w-0 bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col">
                 {selectedItem ? (
                     <>
                         {/* Header Analysis */}
-                        <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-6 items-center justify-between">
+                        <div className="px-8 py-6 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-6 items-center justify-between">
                             <div className="flex gap-4">
-                                <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-                                    <p className="text-[10px] text-slate-400 uppercase font-black">Sentiment</p>
-                                    <p className={`font-bold capitalize ${selectedItem.sentiment === 'positive' ? 'text-emerald-500' :
-                                        selectedItem.sentiment === 'negative' ? 'text-red-500' :
-                                            'text-slate-600'
-                                        }`}>{selectedItem.sentiment}</p>
+                                <div className="bg-white px-4 py-2 rounded-lg border border-slate-200">
+                                    <p className="text-[10px] text-slate-400 uppercase font-bold">Sentiment</p>
+                                    <p className="font-semibold capitalize text-slate-700">{selectedItem.sentiment}</p>
                                 </div>
-                                <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-                                    <p className="text-[10px] text-slate-400 uppercase font-black">Status</p>
-                                    <p className="font-bold text-chippy-navy capitalize">{selectedItem.status === 'DISMISSED' ? 'Approved' : selectedItem.status}</p>
+                                <div className="bg-white px-4 py-2 rounded-lg border border-slate-200">
+                                    <p className="text-[10px] text-slate-400 uppercase font-bold">Status</p>
+                                    <p className="font-semibold text-slate-700 capitalize">{selectedItem.status === 'DISMISSED' ? 'Approved' : selectedItem.status}</p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2 text-slate-400 text-xs italic">
@@ -330,7 +329,7 @@ export const ReviewQueue = () => {
                     </div>
                 )}
             </div>
+            </div>
         </div>
     );
 };
-

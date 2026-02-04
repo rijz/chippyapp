@@ -2408,15 +2408,16 @@ app.post('/api/followup/test', async (req, res) => {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    const userId = sanitizeInput(req.body.userId);
-    const toEmail = sanitizeInput(req.body.toEmail);
+    const bodyUserId = sanitizeInput(req.body.userId);
+    const toEmail = sanitizeInput(req.body.toEmail || user.email);
     const mode = sanitizeInput(req.body.mode);
     const subject = sanitizeInput(req.body.subject);
     const body = sanitizeInput(req.body.body);
     const templateVars = sanitizeObject(req.body.templateVars || {});
 
-    if (!userId || user.id !== userId) {
-      return res.status(403).json({ error: 'Not authorized' });
+    const userId = user.id;
+    if (bodyUserId && bodyUserId !== userId) {
+      console.warn('[API] Follow-up test user mismatch:', bodyUserId, userId);
     }
     if (!toEmail) {
       return res.status(400).json({ error: 'Missing toEmail' });
@@ -2475,7 +2476,7 @@ app.post('/api/followup/test', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('[API] Follow-up test error:', error);
-    res.status(500).json({ error: 'Failed to send test email' });
+    res.status(500).json({ error: error.message || 'Failed to send test email' });
   }
 });
 

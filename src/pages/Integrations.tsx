@@ -3,6 +3,7 @@ import { Calendar, CheckCircle2, RefreshCw, Clock, CalendarDays, Settings, LogOu
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { PageHeader } from '../components/layout/PageHeader';
 import { handleAuthClick, loadGoogleScripts, fetchCalendars, handleSignOut } from '../services/calendarAuth';
 import { CalendarSettings, CalendarItem } from '../types';
 import { MultiLocationCalendarManager } from '../components/MultiLocationCalendarManager';
@@ -193,17 +194,17 @@ export const Integrations = () => {
     };
 
     return (
-        <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500 pb-20">
-            <header>
-                <h2 className="text-3xl font-bold text-chippy-navy tracking-tight">Integrations</h2>
-                <p className="text-slate-500">Connect Chippy to your calendars and locations.</p>
-            </header>
+        <div className="w-full space-y-8 animate-in fade-in duration-500 pb-20">
+            <PageHeader
+                title="Integrations"
+                subtitle="Connect your calendars and embed settings."
+            />
 
             {/* Multi-Location Calendar Manager */}
-            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
-                <div className="p-10 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="p-8 border-b border-slate-200 flex items-center justify-between bg-slate-50">
                     <div className="flex items-center gap-6">
-                        <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center border border-slate-100">
+                        <div className="w-14 h-14 bg-white rounded-xl flex items-center justify-center border border-slate-200">
                             <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar" className="w-10 h-10" />
                         </div>
                         <div>
@@ -212,7 +213,7 @@ export const Integrations = () => {
                         </div>
                     </div>
                 </div>
-                <div className="p-10">
+                <div className="p-8">
                     <MultiLocationCalendarManager />
                 </div>
             </div>
@@ -262,11 +263,11 @@ export const Integrations = () => {
             */}
 
             {/* WEBSITE EMBED SECTION */}
-            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
-                <div className="p-10 border-b border-slate-100 bg-slate-50/50">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="p-8 border-b border-slate-200 bg-slate-50">
                     <div className="flex items-center gap-6">
-                        <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center border border-slate-100">
-                            <code className="text-xl font-bold text-chippy-coral">&lt;/&gt;</code>
+                        <div className="w-14 h-14 bg-white rounded-xl flex items-center justify-center border border-slate-200">
+                            <code className="text-lg font-bold text-slate-600">&lt;/&gt;</code>
                         </div>
                         <div>
                             <h3 className="font-bold text-2xl text-chippy-navy">Website Embed</h3>
@@ -274,7 +275,7 @@ export const Integrations = () => {
                         </div>
                     </div>
                 </div>
-                <div className="p-10 text-left space-y-8">
+                <div className="p-8 text-left space-y-8">
                     {/* Embed Code */}
                     <div>
                         <p className="text-sm text-slate-500 mb-4">Copy and paste this code anywhere in your website's HTML (before <code>&lt;/body&gt;</code> is recommended).</p>
@@ -290,7 +291,7 @@ export const Integrations = () => {
                                     navigator.clipboard.writeText(`<script src="https://app.hellochippy.com/widget.js" data-chippy-id="${userId}"></script>`);
                                     showToast("Copied to clipboard!", 'success');
                                 }}
-                                className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all border border-white/10"
+                                className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-md text-xs font-semibold transition-all border border-white/10"
                             >
                                 Copy Code
                             </button>
@@ -301,7 +302,7 @@ export const Integrations = () => {
                     {/* Allowed Domains Section */}
                     <div className="border-t border-slate-100 pt-8">
                         <div className="flex items-center gap-3 mb-4">
-                            <Shield className="w-5 h-5 text-chippy-coral" />
+                            <Shield className="w-5 h-5 text-slate-500" />
                             <h4 className="font-bold text-lg text-chippy-navy">Allowed Embed Domains</h4>
                         </div>
                         <p className="text-sm text-slate-500 mb-4">
@@ -317,14 +318,14 @@ export const Integrations = () => {
                                 {/* Current Domains List */}
                                 <div className="space-y-2 mb-4">
                                     {allowedDomains.length === 0 ? (
-                                        <div className="flex items-center gap-2 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                                            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
-                                            <p className="text-sm text-amber-800">
+                                        <div className="flex items-center gap-2 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                                            <AlertCircle className="w-5 h-5 text-slate-500 flex-shrink-0" />
+                                            <p className="text-sm text-slate-600">
                                                 No domains configured. Your widget can currently be embedded on any website.
                                                 {defaultDomain && (
                                                     <button
                                                         onClick={useDefaultDomain}
-                                                        className="ml-2 text-amber-700 underline hover:text-amber-900 font-medium"
+                                                        className="ml-2 text-slate-700 underline hover:text-slate-900 font-medium"
                                                     >
                                                         Add {defaultDomain}
                                                     </button>
@@ -333,14 +334,14 @@ export const Integrations = () => {
                                         </div>
                                     ) : (
                                         allowedDomains.map((domain, index) => (
-                                            <div key={index} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl group">
+                                            <div key={index} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg group">
                                                 <Globe className="w-4 h-4 text-slate-400" />
                                                 <span className="flex-1 text-sm font-medium text-slate-700">{domain}</span>
                                                 <button
                                                     onClick={() => removeDomain(domain)}
-                                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 rounded-lg transition-all"
+                                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-slate-100 rounded-md transition-all"
                                                 >
-                                                    <X className="w-4 h-4 text-red-500" />
+                                                    <X className="w-4 h-4 text-slate-500" />
                                                 </button>
                                             </div>
                                         ))
@@ -355,11 +356,11 @@ export const Integrations = () => {
                                         onChange={(e) => setNewDomain(e.target.value)}
                                         onKeyDown={(e) => e.key === 'Enter' && addDomain()}
                                         placeholder="https://yourwebsite.com"
-                                        className="flex-1 p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-chippy-coral focus:border-transparent"
+                                        className="flex-1 p-3 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-chippy-coral focus:border-transparent"
                                     />
                                     <button
                                         onClick={addDomain}
-                                        className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all flex items-center gap-2 font-medium"
+                                        className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all flex items-center gap-2 font-medium"
                                     >
                                         <Plus className="w-4 h-4" />
                                         Add
@@ -368,14 +369,14 @@ export const Integrations = () => {
 
                                 {/* Default Domain Suggestion */}
                                 {defaultDomain && !allowedDomains.includes(defaultDomain) && allowedDomains.length > 0 && (
-                                    <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
-                                        <Globe className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                                        <p className="text-sm text-blue-800 flex-1">
+                                    <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg mb-4">
+                                        <Globe className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                                        <p className="text-sm text-slate-600 flex-1">
                                             Your website <strong>{defaultDomain}</strong> is not in the list.
                                         </p>
                                         <button
                                             onClick={useDefaultDomain}
-                                            className="text-blue-700 hover:text-blue-900 text-sm font-medium underline"
+                                            className="text-slate-700 hover:text-slate-900 text-sm font-medium underline"
                                         >
                                             Add it
                                         </button>
@@ -387,7 +388,7 @@ export const Integrations = () => {
                                     <button
                                         onClick={saveDomains}
                                         disabled={isSavingDomains}
-                                        className="w-full py-3 bg-chippy-coral hover:bg-chippy-coral/90 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                                        className="w-full py-3 bg-slate-900 hover:bg-slate-900/90 text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                                     >
                                         {isSavingDomains ? (
                                             <>

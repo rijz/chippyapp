@@ -5,6 +5,7 @@ import { useData } from '../contexts/DataContext';
 import { Lead } from '../types';
 import { useSearchParams } from 'react-router-dom';
 import { LeadDetailsPanel } from '../components/LeadDetailsPanel';
+import { PageHeader } from '../components/layout/PageHeader';
 
 export const Leads = () => {
     const { leads, setLeads, knowledgeData, calendarConnections } = useData();
@@ -78,22 +79,20 @@ export const Leads = () => {
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-500 pb-20">
+        <div className="w-full space-y-6 animate-in fade-in duration-500 pb-20">
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold text-chippy-navy tracking-tight">Leads & Appointments</h1>
-                    <p className="text-slate-500">Track who needs a response and who is booked.</p>
-                </div>
-                <div className="flex gap-3">
+            <PageHeader
+                title="Customers"
+                subtitle="Track who needs a response and who is booked."
+                actions={(
                     <button
                         onClick={exportToCSV}
-                        className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-2"
+                        className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2"
                     >
                         <Download className="w-4 h-4" /> Export CSV
                     </button>
-                </div>
-            </div>
+                )}
+            />
 
             {/* View Tabs */}
             <div className="grid grid-cols-3 gap-2 bg-slate-100 p-2 rounded-xl md:w-fit">
@@ -103,7 +102,7 @@ export const Leads = () => {
                         ${currentView === 'All' ? 'bg-white text-chippy-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}
                     `}
                 >
-                    <LayoutList className="w-4 h-4" /> All Leads
+                    <LayoutList className="w-4 h-4" /> All Customers
                 </button>
                 <button
                     onClick={() => setCurrentView('Appointments')}
@@ -119,7 +118,7 @@ export const Leads = () => {
                         ${currentView === 'CallBacks' ? 'bg-white text-chippy-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}
                     `}
                 >
-                    <PhoneIncoming className="w-4 h-4" /> Call Backs
+                    <PhoneIncoming className="w-4 h-4" /> Callbacks
                 </button>
             </div>
 
@@ -175,7 +174,7 @@ export const Leads = () => {
                                     <tr
                                         key={lead.id}
                                         onClick={() => setSelectedLead(lead)}
-                                        className={`hover:bg-slate-50 transition-colors group cursor-pointer border-l-4 ${lead.priority === 'Hot' ? 'border-l-rose-400' : lead.priority === 'Warm' ? 'border-l-amber-300' : 'border-l-transparent'}`}
+                                        className="hover:bg-slate-50 transition-colors group cursor-pointer"
                                     >
                                         <td className="p-6">
                                             <div className="flex items-center gap-3">
@@ -186,7 +185,7 @@ export const Leads = () => {
                                                     <div className="font-bold text-chippy-navy">{lead.name}</div>
                                                     <div className="flex items-center gap-2 flex-wrap mt-1">
                                                         {lead.priority && (
-                                                            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${lead.priority === 'Hot' ? 'bg-rose-100 text-rose-700' : lead.priority === 'Warm' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-100 text-slate-600 uppercase tracking-wider">
                                                                 {lead.priority}
                                                             </span>
                                                         )}

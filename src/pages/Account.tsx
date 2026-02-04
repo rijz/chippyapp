@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, CreditCard, Lock, Bell, LogOut, ChevronRight, MapPin, Users } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { PageHeader } from '../components/layout/PageHeader';
 import { ProfileSection } from '../components/account/ProfileSection';
 import { BillingSection } from '../components/account/BillingSection';
 import { SecuritySection } from '../components/account/SecuritySection';
@@ -24,13 +25,16 @@ export const Account = () => {
     ];
 
     return (
-        <div className="max-w-6xl mx-auto pb-20 animate-in fade-in duration-500">
-            <h1 className="text-3xl font-bold text-chippy-navy mb-8">Account Settings</h1>
+        <div className="w-full pb-20 animate-in fade-in duration-500">
+            <PageHeader
+                title="Account Settings"
+                subtitle="Manage profile, billing, and access controls."
+            />
 
             <div className="flex flex-col md:flex-row gap-8">
                 {/* Sidebar */}
                 <div className="w-full md:w-64 shrink-0 space-y-8">
-                    <div className="bg-white border border-slate-200 rounded-2xl p-2 shadow-sm">
+                    <div className="bg-white border border-slate-200 rounded-xl p-2">
                         <nav className="space-y-1">
                             {menuItems.map((item) => {
                                 const Icon = item.icon;
@@ -39,16 +43,16 @@ export const Account = () => {
                                     <button
                                         key={item.id}
                                         onClick={() => setActiveTab(item.id as Tab)}
-                                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-all ${isActive
-                                            ? 'bg-chippy-navy text-white shadow-md'
-                                            : 'text-slate-500 hover:bg-slate-50 hover:text-chippy-navy'
+                                        className={`w-full flex items-center justify-between px-4 py-3 rounded-lg text-sm font-semibold transition-all ${isActive
+                                            ? 'bg-slate-900 text-white'
+                                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800'
                                             }`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <Icon className={`w-4 h-4 ${isActive ? 'text-chippy-coral' : 'text-slate-400'}`} />
+                                            <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
                                             {item.label}
                                         </div>
-                                        {isActive && <ChevronRight className="w-4 h-4 text-slate-500" />}
+                                        {isActive && <ChevronRight className="w-4 h-4 text-slate-300" />}
                                     </button>
                                 );
                             })}
@@ -58,7 +62,7 @@ export const Account = () => {
 
                 {/* Main Content Area */}
                 <div className="flex-1 min-w-0">
-                    <div className="bg-white border border-slate-200 rounded-[2rem] p-8 md:p-10 shadow-sm relative overflow-hidden">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-8 md:p-10 relative overflow-hidden">
                         {/* Tab Content */}
                         {activeTab === 'profile' && <ProfileSection />}
                         {activeTab === 'billing' && <BillingSection />}

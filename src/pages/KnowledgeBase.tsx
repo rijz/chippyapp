@@ -3,6 +3,7 @@ import { Zap, LayoutDashboard, Database, Link as LinkIcon, AlertTriangle } from 
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { OnboardingWizard } from '../components/OnboardingWizard';
+import { PageHeader } from '../components/layout/PageHeader';
 import { KnowledgeOverview } from '../components/knowledge/KnowledgeOverview';
 import { KnowledgeData } from '../components/knowledge/KnowledgeData';
 import { KnowledgeSources } from '../components/knowledge/KnowledgeSources';
@@ -42,14 +43,14 @@ export const KnowledgeBase = () => {
 
     if (!knowledgeData && !showWizard) {
         return (
-            <div className="max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
-                <header>
-                    <h2 className="text-3xl font-bold text-chippy-navy tracking-tight">Knowledge Base</h2>
-                    <p className="text-slate-500">Manage exactly what Agent X knows about your business.</p>
-                </header>
-                <div className="bg-white p-20 text-center rounded-[3rem] border border-slate-200">
+            <div className="w-full space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
+                <PageHeader
+                    title="Knowledge"
+                    subtitle="Manage exactly what your assistant knows about your business."
+                />
+                <div className="bg-white p-16 text-center rounded-2xl border border-slate-200">
                     <p className="text-slate-500 mb-6 text-lg">Knowledge base is currently offline.</p>
-                    <button onClick={() => setShowWizard(true)} className="bg-chippy-coral text-white px-10 py-4 rounded-2xl font-black shadow-lg shadow-chippy-coral/20 hover:bg-red-400 transition-all">
+                    <button onClick={() => setShowWizard(true)} className="bg-chippy-navy text-white px-8 py-3 rounded-xl font-bold hover:bg-chippy-navy/90 transition-colors">
                         Build Knowledge
                     </button>
                 </div>
@@ -70,23 +71,23 @@ export const KnowledgeBase = () => {
     const isSourcesEnabled = isFeatureEnabled('Document upload training');
 
     return (
-        <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
+        <div className="w-full space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
             {/* Header with Re-scan */}
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-                <div>
-                    <h2 className="text-3xl font-bold text-chippy-navy tracking-tight">Knowledge Base</h2>
-                    <p className="text-slate-500">Manage exactly what Agent X knows about your business.</p>
-                </div>
-                <button
-                    onClick={() => setShowRescanWarning(true)}
-                    className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-200 text-chippy-navy rounded-2xl font-bold text-xs hover:bg-slate-50 hover:text-chippy-coral transition-all shadow-sm"
-                >
-                    <Zap className="w-4 h-4" /> Re-scan Website
-                </button>
-            </header>
+            <PageHeader
+                title="Knowledge"
+                subtitle="Manage exactly what your assistant knows about your business."
+                actions={(
+                    <button
+                        onClick={() => setShowRescanWarning(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg font-semibold text-xs hover:bg-slate-50 transition-colors"
+                    >
+                        <Zap className="w-4 h-4" /> Re-scan Website
+                    </button>
+                )}
+            />
 
             {/* Navigation Tabs */}
-            <div className="flex p-1 bg-slate-100 rounded-2xl w-fit border border-slate-200">
+            <div className="flex p-1 bg-slate-100 rounded-xl w-fit border border-slate-200">
                 {tabs.map((tab) => {
                     const Icon = tab.icon;
                     const isActive = activeTab === tab.id;
@@ -97,14 +98,14 @@ export const KnowledgeBase = () => {
                             key={tab.id}
                             disabled={isLocked && false} // Let them click to see the upgrade message
                             onClick={() => setActiveTab(tab.id as Tab)}
-                            className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-bold transition-all relative ${isActive
-                                ? 'bg-white text-chippy-navy shadow-sm'
-                                : 'text-slate-500 hover:text-chippy-navy hover:bg-white/50'
+                            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-semibold transition-all relative ${isActive
+                                ? 'bg-white text-slate-800'
+                                : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
                                 } ${isLocked ? 'opacity-70' : ''}`}
                         >
-                            <Icon className={`w-4 h-4 ${isActive ? 'text-chippy-coral' : ''}`} />
+                            <Icon className="w-4 h-4" />
                             {tab.label}
-                            {isLocked && <Zap className="w-3 h-3 text-chippy-yellow fill-chippy-yellow absolute -top-1 -right-1" />}
+                            {isLocked && <Zap className="w-3 h-3 text-slate-400 absolute -top-1 -right-1" />}
                         </button>
                     );
                 })}
@@ -117,18 +118,18 @@ export const KnowledgeBase = () => {
                 isSourcesEnabled ? (
                     <KnowledgeSources />
                 ) : (
-                    <div className="bg-white p-20 text-center rounded-[3rem] border-2 border-dashed border-slate-100 animate-in fade-in zoom-in-95">
-                        <div className="w-20 h-20 bg-chippy-coral/10 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                            <Zap className="w-10 h-10 text-chippy-coral fill-chippy-coral" />
+                    <div className="bg-white p-16 text-center rounded-2xl border border-dashed border-slate-200 animate-in fade-in zoom-in-95">
+                        <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                            <Zap className="w-8 h-8 text-slate-500" />
                         </div>
-                        <h3 className="text-2xl font-black text-chippy-navy mb-2">Upgrade to Unlock Sources</h3>
+                        <h3 className="text-2xl font-bold text-chippy-navy mb-2">Upgrade to Unlock Sources</h3>
                         <p className="text-slate-500 max-w-sm mx-auto mb-8 text-sm">
-                            Training your AI on PDFs, FAQs, and service guides is a **Growth** feature.
-                            Upgrade now to give your assistant deeper knowledge.
+                            Training your assistant on PDFs and guides is a Growth feature.
+                            Upgrade to unlock document sources.
                         </p>
                         <button
                             onClick={() => setShowUpgradeModal(true)}
-                            className="bg-chippy-navy text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-chippy-coral transition-all"
+                            className="bg-chippy-navy text-white px-6 py-2.5 rounded-lg font-semibold text-xs uppercase tracking-wider hover:bg-chippy-navy/90 transition-colors"
                         >
                             View Plans
                         </button>
@@ -140,27 +141,27 @@ export const KnowledgeBase = () => {
 
             {/* Re-scan Warning Modal */}
             {showRescanWarning && (
-                <div className="fixed inset-0 bg-chippy-navy/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-[2rem] p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200 border-4 border-amber-100">
-                        <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-6 mx-auto">
-                            <AlertTriangle className="w-8 h-8 text-amber-500" />
+                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-xl animate-in zoom-in-95 duration-200 border border-slate-200">
+                        <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mb-6 mx-auto">
+                            <AlertTriangle className="w-6 h-6 text-slate-500" />
                         </div>
-                        <h3 className="text-xl font-bold text-chippy-navy text-center mb-2">Warning: Re-scan Website?</h3>
+                        <h3 className="text-xl font-bold text-chippy-navy text-center mb-2">Re-scan Website?</h3>
                         <p className="text-slate-500 text-center mb-8 text-sm leading-relaxed">
                             Re-scanning will overwrite your existing knowledge base with fresh data from your website.
-                            <span className="block mt-2 font-bold text-red-500">Any manual edits you made in the "Data" tab may be lost.</span>
+                            <span className="block mt-2 font-semibold text-slate-700">Any manual edits you made in the "Data" tab may be lost.</span>
                         </p>
 
                         <div className="flex gap-3">
                             <button
                                 onClick={() => setShowRescanWarning(false)}
-                                className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors"
+                                className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-lg font-semibold text-sm hover:bg-slate-200 transition-colors"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={confirmRescan}
-                                className="flex-1 py-3 bg-chippy-navy text-white rounded-xl font-bold text-sm hover:bg-chippy-coral transition-colors shadow-lg"
+                                className="flex-1 py-3 bg-chippy-navy text-white rounded-lg font-semibold text-sm hover:bg-chippy-navy/90 transition-colors"
                             >
                                 Continue & Scan
                             </button>

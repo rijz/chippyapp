@@ -71,19 +71,19 @@ export const KnowledgeData = () => {
         // Custom Renderer for Pricing Plans
         if (field === 'pricing' && Array.isArray(content) && typeof content[0] === 'object') {
             return (
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 transition-all hover:bg-slate-50/50">
+                <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all">
                     <div className="flex justify-between items-start mb-6">
                         <div className="flex items-center gap-3">
-                            <div className="p-2 bg-slate-100 rounded-lg text-chippy-navy">{icon}</div>
-                            <h3 className="font-bold text-chippy-navy">{title}</h3>
+                            <div className="p-2 bg-slate-100 rounded-md text-slate-700">{icon}</div>
+                            <h3 className="font-semibold text-slate-800">{title}</h3>
                         </div>
                         {isEditing ? (
                             <div className="flex gap-2">
-                                <button onClick={cancelEditing} className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg transition-colors"><X className="w-4 h-4" /></button>
-                                <button onClick={saveEditing} className="p-2 bg-chippy-navy text-white hover:bg-chippy-coral rounded-lg transition-colors"><Save className="w-4 h-4" /></button>
+                                <button onClick={cancelEditing} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors"><X className="w-4 h-4" /></button>
+                                <button onClick={saveEditing} className="p-2 bg-slate-900 text-white rounded-md transition-colors"><Save className="w-4 h-4" /></button>
                             </div>
                         ) : (
-                            <button onClick={() => startEditing(field, content)} className="p-2 text-slate-400 hover:text-chippy-navy hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4" /></button>
+                            <button onClick={() => startEditing(field, content)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"><Edit2 className="w-4 h-4" /></button>
                         )}
                     </div>
 
@@ -117,13 +117,13 @@ export const KnowledgeData = () => {
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             {(content as PricingPlan[]).map((plan, idx) => (
-                                <div key={idx} className="border border-slate-200 rounded-2xl p-5 hover:shadow-md transition-shadow bg-white">
-                                    <h4 className="font-bold text-chippy-navy text-lg">{plan.name}</h4>
-                                    <p className="text-chippy-coral font-black text-xl mb-4">{plan.price}</p>
+                                <div key={idx} className="border border-slate-200 rounded-lg p-5 bg-white">
+                                    <h4 className="font-semibold text-slate-800 text-base">{plan.name}</h4>
+                                    <p className="text-slate-700 font-semibold text-lg mb-4">{plan.price}</p>
                                     <ul className="space-y-2">
                                         {plan.features.map((feature, fIdx) => (
                                             <li key={fIdx} className="flex items-start gap-2 text-xs text-slate-600 font-medium">
-                                                <CheckSquare className="w-3 h-3 text-emerald-500 mt-0.5 shrink-0" />
+                                                <CheckSquare className="w-3 h-3 text-slate-500 mt-0.5 shrink-0" />
                                                 <span>{feature}</span>
                                             </li>
                                         ))}
@@ -139,28 +139,28 @@ export const KnowledgeData = () => {
         // Custom Renderer for Services (objects with id, name, pricing, description)
         if (field === 'services' && Array.isArray(content) && content.length > 0 && typeof content[0] === 'object' && 'pricing' in content[0]) {
             return (
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 transition-all hover:bg-slate-50/50">
-                    <div className="flex justify-between items-start mb-6">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-slate-100 rounded-lg text-chippy-navy">{icon}</div>
-                            <div>
-                                <h3 className="font-bold text-chippy-navy">{title}</h3>
-                                <span className="text-xs text-slate-500">{content.length} services</span>
-                            </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all">
+                <div className="flex justify-between items-start mb-6">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-slate-100 rounded-md text-slate-700">{icon}</div>
+                        <div>
+                            <h3 className="font-semibold text-slate-800">{title}</h3>
+                            <span className="text-xs text-slate-500">{content.length} services</span>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {(content as Service[]).map((service) => (
-                            <div key={service.id} className="p-4 border border-slate-200 rounded-xl bg-slate-50 hover:shadow-sm transition-shadow">
-                                <h4 className="font-semibold text-chippy-navy text-sm mb-1">{service.name}</h4>
-                                {service.description && (
-                                    <p className="text-xs text-slate-500 mb-2 line-clamp-2">{service.description}</p>
-                                )}
-                                <div className="flex items-center justify-between text-xs">
-                                    <span className="font-bold text-chippy-coral">{formatServicePrice(service.pricing)}</span>
-                                    {service.duration && (
-                                        <span className="text-slate-400 flex items-center gap-1">
-                                            <Clock className="w-3 h-3" /> {service.duration} min
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {(content as Service[]).map((service) => (
+                        <div key={service.id} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
+                            <h4 className="font-semibold text-slate-800 text-sm mb-1">{service.name}</h4>
+                            {service.description && (
+                                <p className="text-xs text-slate-500 mb-2 line-clamp-2">{service.description}</p>
+                            )}
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="font-semibold text-slate-700">{formatServicePrice(service.pricing)}</span>
+                                {service.duration && (
+                                    <span className="text-slate-400 flex items-center gap-1">
+                                        <Clock className="w-3 h-3" /> {service.duration} min
                                         </span>
                                     )}
                                 </div>
@@ -175,25 +175,25 @@ export const KnowledgeData = () => {
         }
 
         return (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 transition-all hover:bg-slate-50/50">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all">
                 <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-100 rounded-lg text-chippy-navy">
+                        <div className="p-2 bg-slate-100 rounded-md text-slate-700">
                             {icon}
                         </div>
-                        <h3 className="font-bold text-chippy-navy">{title}</h3>
+                        <h3 className="font-semibold text-slate-800">{title}</h3>
                     </div>
                     {isEditing ? (
                         <div className="flex gap-2">
-                            <button onClick={cancelEditing} className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg transition-colors">
+                            <button onClick={cancelEditing} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors">
                                 <X className="w-4 h-4" />
                             </button>
-                            <button onClick={saveEditing} className="p-2 bg-chippy-navy text-white hover:bg-chippy-coral rounded-lg transition-colors">
+                            <button onClick={saveEditing} className="p-2 bg-slate-900 text-white rounded-md transition-colors">
                                 <Save className="w-4 h-4" />
                             </button>
                         </div>
                     ) : (
-                        <button onClick={() => startEditing(field, content)} className="p-2 text-slate-400 hover:text-chippy-navy hover:bg-slate-100 rounded-lg transition-colors">
+                        <button onClick={() => startEditing(field, content)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
                             <Edit2 className="w-4 h-4" />
                         </button>
                     )}
@@ -201,12 +201,12 @@ export const KnowledgeData = () => {
 
                 <div className="pl-[3.25rem]">
                     {isEditing ? (
-                        <textarea
-                            value={tempValue}
-                            onChange={(e) => setTempValue(e.target.value)}
-                            className="w-full h-32 p-3 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-chippy-coral outline-none resize-none"
-                            placeholder={Array.isArray(content) ? "Comma separated values..." : "Enter text..."}
-                        />
+                            <textarea
+                                value={tempValue}
+                                onChange={(e) => setTempValue(e.target.value)}
+                                className="w-full h-32 p-3 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none resize-none"
+                                placeholder={Array.isArray(content) ? "Comma separated values..." : "Enter text..."}
+                            />
                     ) : (
                         <div className={`text-sm text-slate-600 leading-relaxed whitespace-pre-wrap`}>
                             {Array.isArray(content) ? (
@@ -284,28 +284,28 @@ export const KnowledgeData = () => {
         const rulesArray = (knowledgeData?.topRules || '').split('\n').filter(r => r.trim());
 
         return (
-            <div className="bg-gradient-to-br from-chippy-coral/5 to-orange-50 border-2 border-chippy-coral/20 rounded-2xl p-6 transition-all hover:border-chippy-coral/30">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all hover:bg-slate-50/50">
                 <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-chippy-coral/10 rounded-lg text-chippy-coral">
+                        <div className="p-2 bg-slate-100 rounded-md text-slate-700">
                             <ListChecks className="w-5 h-5" />
                         </div>
                         <div>
-                            <h3 className="font-bold text-chippy-navy">Top Rules</h3>
+                            <h3 className="font-semibold text-slate-800">Top Rules</h3>
                             <p className="text-xs text-slate-500">Priority instructions your AI will always follow</p>
                         </div>
                     </div>
                     {isEditing ? (
                         <div className="flex gap-2">
-                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg transition-colors">
+                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors">
                                 <X className="w-4 h-4" />
                             </button>
-                            <button onClick={saveTopRules} className="p-2 bg-chippy-navy text-white hover:bg-chippy-coral rounded-lg transition-colors">
+                            <button onClick={saveTopRules} className="p-2 bg-slate-900 text-white rounded-md transition-colors">
                                 <Save className="w-4 h-4" />
                             </button>
                         </div>
                     ) : (
-                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-chippy-navy hover:bg-slate-100 rounded-lg transition-colors">
+                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
                             <Edit2 className="w-4 h-4" />
                         </button>
                     )}
@@ -317,22 +317,20 @@ export const KnowledgeData = () => {
                             <textarea
                                 value={topRules}
                                 onChange={(e) => setTopRules(e.target.value)}
-                                className="w-full h-40 p-3 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-chippy-coral outline-none resize-none font-mono"
+                                className="w-full h-40 p-3 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none resize-none font-mono"
                                 placeholder="Enter one rule per line, e.g.:
 Always greet customers warmly
 Never discuss competitor pricing
 Prioritize booking appointments over general chat
 Always confirm the service before booking"
                             />
-                            <p className="text-xs text-slate-400 flex items-center gap-1">
-                                💡 Enter one rule per line (max 10 recommended for best results)
-                            </p>
+                            <p className="text-xs text-slate-400">Enter one rule per line (max 10 recommended).</p>
                         </div>
                     ) : rulesArray.length > 0 ? (
                         <ul className="space-y-2">
                             {rulesArray.map((rule, idx) => (
                                 <li key={idx} className="flex items-start gap-2 text-sm text-slate-600">
-                                    <span className="w-5 h-5 bg-chippy-coral/10 text-chippy-coral rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5">
+                                    <span className="w-5 h-5 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5">
                                         {idx + 1}
                                     </span>
                                     <span>{rule}</span>
@@ -377,25 +375,25 @@ Always confirm the service before booking"
         };
 
         return (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 transition-all hover:bg-slate-50/50">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all hover:bg-slate-50/50">
                 <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-100 rounded-lg text-chippy-navy">
+                        <div className="p-2 bg-slate-100 rounded-md text-slate-700">
                             <Tag className="w-5 h-5" />
                         </div>
-                        <h3 className="font-bold text-chippy-navy">Keywords</h3>
+                        <h3 className="font-semibold text-slate-800">Keywords</h3>
                     </div>
                     {isEditing ? (
                         <div className="flex gap-2">
-                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg transition-colors">
+                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors">
                                 <X className="w-4 h-4" />
                             </button>
-                            <button onClick={saveKeywords} className="p-2 bg-chippy-navy text-white hover:bg-chippy-coral rounded-lg transition-colors">
+                            <button onClick={saveKeywords} className="p-2 bg-slate-900 text-white rounded-md transition-colors">
                                 <Save className="w-4 h-4" />
                             </button>
                         </div>
                     ) : (
-                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-chippy-navy hover:bg-slate-100 rounded-lg transition-colors">
+                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
                             <Edit2 className="w-4 h-4" />
                         </button>
                     )}
@@ -406,7 +404,7 @@ Always confirm the service before booking"
                         <div className="space-y-3">
                             <div className="flex flex-wrap gap-2">
                                 {keywords.map((kw, idx) => (
-                                    <span key={idx} className="px-3 py-1.5 bg-chippy-navy/10 text-chippy-navy rounded-full text-xs font-semibold flex items-center gap-2">
+                                    <span key={idx} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full text-xs font-semibold flex items-center gap-2">
                                         {kw}
                                         <button onClick={() => removeKeyword(idx)} className="hover:text-red-500 transition-colors">
                                             <X className="w-3 h-3" />
@@ -415,15 +413,15 @@ Always confirm the service before booking"
                                 ))}
                             </div>
                             <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    value={newKeyword}
-                                    onChange={(e) => setNewKeyword(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && addKeyword()}
-                                    placeholder="Add a keyword..."
-                                    className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none"
-                                />
-                                <button onClick={addKeyword} className="px-4 py-2 bg-chippy-coral text-white rounded-lg text-sm font-bold hover:bg-red-400 transition-colors flex items-center gap-1">
+                                    <input
+                                        type="text"
+                                        value={newKeyword}
+                                        onChange={(e) => setNewKeyword(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && addKeyword()}
+                                        placeholder="Add a keyword..."
+                                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none"
+                                    />
+                                <button onClick={addKeyword} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-1">
                                     <Plus className="w-4 h-4" /> Add
                                 </button>
                             </div>
@@ -478,25 +476,25 @@ Always confirm the service before booking"
         const displayLocations = knowledgeData?.locations || [];
 
         return (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 transition-all hover:bg-slate-50/50">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all">
                 <div className="flex justify-between items-start mb-6">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-100 rounded-lg text-chippy-navy">
+                        <div className="p-2 bg-slate-100 rounded-md text-slate-700">
                             <MapPin className="w-5 h-5" />
                         </div>
-                        <h3 className="font-bold text-chippy-navy">Business Locations</h3>
+                        <h3 className="font-semibold text-slate-800">Business Locations</h3>
                     </div>
                     {isEditing ? (
                         <div className="flex gap-2">
-                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg transition-colors">
+                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors">
                                 <X className="w-4 h-4" />
                             </button>
-                            <button onClick={saveLocations} className="p-2 bg-chippy-navy text-white hover:bg-chippy-coral rounded-lg transition-colors">
+                            <button onClick={saveLocations} className="p-2 bg-slate-900 text-white rounded-md transition-colors">
                                 <Save className="w-4 h-4" />
                             </button>
                         </div>
                     ) : (
-                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-chippy-navy hover:bg-slate-100 rounded-lg transition-colors">
+                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
                             <Edit2 className="w-4 h-4" />
                         </button>
                     )}
@@ -505,13 +503,13 @@ Always confirm the service before booking"
                 {isEditing ? (
                     <div className="space-y-4">
                         {locations.map((loc, idx) => (
-                            <div key={idx} className="p-4 border border-slate-200 rounded-xl bg-slate-50 space-y-3">
+                            <div key={idx} className="p-4 border border-slate-200 rounded-lg bg-slate-50 space-y-3">
                                 <div className="flex justify-between items-center">
                                     <input
                                         type="text"
                                         value={loc.name}
                                         onChange={(e) => updateLocation(idx, 'name', e.target.value)}
-                                        className="font-bold text-chippy-navy bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm"
+                                        className="font-semibold text-slate-800 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm"
                                         placeholder="Location Name"
                                     />
                                     <button onClick={() => removeLocation(idx)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
@@ -528,7 +526,7 @@ Always confirm the service before booking"
                                 </div>
                             </div>
                         ))}
-                        <button onClick={addLocation} className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-slate-500 hover:border-chippy-coral hover:text-chippy-coral transition-colors font-bold text-sm flex items-center justify-center gap-2">
+                        <button onClick={addLocation} className="w-full py-3 border border-dashed border-slate-200 rounded-lg text-slate-500 hover:border-slate-300 hover:text-slate-700 transition-colors font-semibold text-sm flex items-center justify-center gap-2">
                             <Plus className="w-4 h-4" /> Add Location
                         </button>
                     </div>
@@ -536,9 +534,9 @@ Always confirm the service before booking"
                     displayLocations.length > 0 ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {displayLocations.map((loc, idx) => (
-                                <div key={idx} className="p-4 bg-slate-50 border border-slate-100 rounded-xl">
-                                    <h4 className="font-bold text-chippy-navy mb-2 flex items-center gap-2">
-                                        <MapPin className="w-4 h-4 text-chippy-coral" />
+                                <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                                    <h4 className="font-semibold text-slate-800 mb-2 flex items-center gap-2">
+                                        <MapPin className="w-4 h-4 text-slate-500" />
                                         {loc.name}
                                     </h4>
                                     <p className="text-sm text-slate-600">{loc.address}</p>
@@ -556,4 +554,3 @@ Always confirm the service before booking"
         );
     }
 };
-

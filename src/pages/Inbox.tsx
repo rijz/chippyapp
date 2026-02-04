@@ -4,6 +4,7 @@ import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ChatSessionRecord } from '../types';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { PageHeader } from '../components/layout/PageHeader';
 import { syncChatSessions } from '../services/supabaseStorage';
 import clsx from 'clsx';
 
@@ -39,13 +40,11 @@ export const Inbox = () => {
     const newChats = chatSessions.filter(s => new Date(s.timestamp) >= last24h).length;
 
     return (
-        <div className="h-full flex flex-col space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden pb-6">
-            <header className="flex justify-between items-end">
-                <div>
-                    <h2 className="text-3xl font-bold text-chippy-navy tracking-tight">Today</h2>
-                    <p className="text-slate-500">Focus on the items that need a response.</p>
-                </div>
-            </header>
+        <div className="w-full h-[calc(100vh-140px)] md:h-[calc(100vh-180px)] flex flex-col space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden">
+            <PageHeader
+                title="Today"
+                subtitle="Focus on the items that need a response."
+            />
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -108,7 +107,7 @@ export const Inbox = () => {
                                 <div key={s.id} onClick={() => setSelectedSession(s)} className={clsx(
                                     "p-4 cursor-pointer transition-all rounded-xl border",
                                     selectedSession?.id === s.id
-                                        ? 'bg-white border-chippy-coral'
+                                        ? 'bg-white border-slate-300'
                                         : 'bg-white border-transparent hover:border-slate-200'
                                 )}>
                                     <div className="flex justify-between items-start mb-2">
@@ -151,7 +150,7 @@ export const Inbox = () => {
                     {selectedSession ? (
                         <div className="flex-1 flex flex-col min-h-0 animate-in fade-in duration-300">
                             {/* Chat Header */}
-                            <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-white z-10">
+                            <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-10">
                                 <div className="flex items-center gap-4">
                                     <button onClick={() => setSelectedSession(null)} className="md:hidden p-2 hover:bg-slate-100 rounded-lg text-slate-500">
                                         <ArrowLeft className="w-5 h-5" />
@@ -169,13 +168,13 @@ export const Inbox = () => {
                                 <div className="flex items-center gap-2">
                                     <button
                                         onClick={() => updateSessionStatus(selectedSession.id, 'Reviewed')}
-                                        className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 transition-colors text-xs font-bold"
+                                        className="flex items-center gap-2 px-3.5 py-2 bg-chippy-navy text-white rounded-lg hover:bg-chippy-navy/90 transition-colors text-xs font-semibold"
                                     >
-                                        <CheckCircle2 className="w-4 h-4" /> Mark Reviewed
+                                        <CheckCircle2 className="w-4 h-4" /> Reviewed
                                     </button>
                                     <button
                                         onClick={() => updateSessionStatus(selectedSession.id, 'Archived')}
-                                        className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 transition-colors text-xs font-bold"
+                                        className="flex items-center gap-2 px-3.5 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors text-xs font-semibold"
                                     >
                                         <Archive className="w-4 h-4" /> Archive
                                     </button>
@@ -206,7 +205,7 @@ export const Inbox = () => {
                                             <div key={i} className={`flex ${m.role === 'user' ? 'justify-start' : 'justify-end'}`}>
                                                 <div className={`flex flex-col ${m.role === 'user' ? 'items-start' : 'items-end'} max-w-[80%]`}>
                                                     <div className="flex items-center gap-2 mb-1 px-1">
-                                                        <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
                                                             {m.role === 'user' ? selectedSession.customerName : 'Agent X'}
                                                         </span>
                                                         <span className="text-[10px] text-slate-300">
@@ -214,10 +213,10 @@ export const Inbox = () => {
                                                         </span>
                                                     </div>
                                                     <div className={clsx(
-                                                        "p-4 rounded-2xl shadow-sm text-sm leading-relaxed whitespace-pre-wrap",
+                                                        "px-4 py-3 rounded-2xl text-[13px] leading-6 whitespace-pre-wrap",
                                                         m.role === 'user'
                                                             ? 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'
-                                                            : 'bg-chippy-navy text-white rounded-tr-none shadow-md'
+                                                            : 'bg-slate-900 text-white rounded-tr-none'
                                                     )}>
                                                         {m.text || ''}
                                                     </div>

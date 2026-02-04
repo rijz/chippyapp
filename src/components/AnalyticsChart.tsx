@@ -25,13 +25,13 @@ export const AnalyticsChart: React.FC<AnalyticsChartProps> = ({ data }) => {
           }}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-          <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-          <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+          <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+          <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
           <Tooltip 
             contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
           />
-          <Area type="monotone" dataKey="chats" stackId="1" stroke="#6366f1" fill="#818cf8" fillOpacity={0.2} />
-          <Area type="monotone" dataKey="bookings" stackId="2" stroke="#10b981" fill="#34d399" fillOpacity={0.4} />
+          <Area type="monotone" dataKey="chats" stackId="1" stroke="#0f172a" fill="#cbd5e1" fillOpacity={0.35} />
+          <Area type="monotone" dataKey="bookings" stackId="2" stroke="#475569" fill="#e2e8f0" fillOpacity={0.6} />
         </AreaChart>
       </ResponsiveContainer>
     </div>

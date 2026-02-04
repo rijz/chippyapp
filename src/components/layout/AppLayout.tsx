@@ -25,22 +25,31 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
 
     const navItems = [
         { id: '/inbox', label: 'Inbox', icon: InboxIcon },
-        { id: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: '/dashboard', label: 'Overview', icon: LayoutDashboard },
         {
             id: '/leads',
-            label: 'Leads',
+            label: 'Customers',
             icon: Users,
             subItems: [
                 { id: '/leads?view=appointments', label: 'Appointments' },
-                { id: '/leads?view=callbacks', label: 'Call Backs' }
+                { id: '/leads?view=callbacks', label: 'Callbacks' }
             ]
         },
-        { id: '/knowledge', label: 'Knowledge Base', icon: BookOpen },
-        { id: '/widget', label: 'Widget Studio', icon: MessageCircle },
+        { id: '/knowledge', label: 'Knowledge', icon: BookOpen },
+        {
+            id: '/widget',
+            label: 'On-Site Assistant',
+            icon: MessageCircle,
+            subItems: [
+                { id: '/widget?tab=appearance', label: 'Appearance' },
+                { id: '/widget?tab=behavior', label: 'Behavior' },
+                { id: '/widget?tab=followup', label: 'Email Follow-ups' }
+            ]
+        },
         { id: '/integrations', label: 'Integrations', icon: Settings },
         {
             id: '/review',
-            label: 'Review Queue',
+            label: 'Quality Check',
             icon: AlertCircle,
             badge: reviewItems.filter(i => i.status === 'PENDING').length
         },
@@ -124,7 +133,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 flex flex-col md:ml-64 h-full bg-chippy-gray overflow-y-auto p-6 md:p-10 relative">
+            <main className="flex-1 flex flex-col md:ml-64 h-full bg-chippy-gray overflow-y-auto px-6 md:px-10 py-8 md:py-10 relative">
                 <header className="flex justify-between items-center mb-8 md:hidden shrink-0">
                     <div className="flex items-center gap-2 text-white">
                         <img src="/logo.png" alt="Chippy" className="w-8 h-8 rounded-lg" />
@@ -136,7 +145,9 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                 </header>
 
                 <div className="flex-1">
-                    {children}
+                    <div className="w-full max-w-6xl mx-auto">
+                        {children}
+                    </div>
                 </div>
             </main>
         </div>
