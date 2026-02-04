@@ -866,3 +866,37 @@ Business owners can customize AI behavior with rules like:
 ✅ Rules are injected into AI system prompt
 
 ---
+## Fix 20: Calendar Integration UX + Safety Updates
+
+> **Added:** February 4, 2026
+
+### Problems Solved
+1. Calendar loading state was unclear, especially for signed-out users.
+2. Google OAuth scripts were loaded on the Integrations page even when not needed.
+3. Calendar connection edits lacked duration normalization and active state toggling.
+
+### Changes Made
+
+#### src/components/MultiLocationCalendarManager.tsx
+- **Moved Google script loading** into the calendar manager (only loads where needed)
+- **Added loading hint and skeletons** while calendar data is fetched
+- **Added signed-out empty state** prompting users to log in
+- **Added active/inactive toggle** for calendar connections
+- **Normalized appointment duration** to 15-minute steps with minimum 15
+- **Ensured calendar settings state updates** immediately after OAuth completion
+
+#### src/pages/Integrations.tsx
+- **Removed unused handlers/imports** from the deprecated single-calendar flow
+- **Added signed-out guard** for embed domains with a friendly prompt
+- **Added save guard** to prevent saving domains when not signed in
+
+---
+
+## Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `src/components/MultiLocationCalendarManager.tsx` | OAuth script load, loading states, active toggle, duration normalization |
+| `src/pages/Integrations.tsx` | Domain guard, cleanup, script load removed |
+
+---

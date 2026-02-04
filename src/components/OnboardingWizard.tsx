@@ -346,7 +346,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
          <div className="w-full lg:w-[450px] bg-chippy-navy text-white flex flex-col relative shrink-0 border-r border-chippy-navy-light transition-all duration-500 ease-in-out z-20 shadow-2xl">
             {/* Background Effects (CSS Only) */}
             <div className="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-white via-transparent to-transparent"></div>
-            <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-chippy-coral/10 rounded-full blur-[100px] pointer-events-none"></div>
+            <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-white/5 rounded-full blur-[120px] pointer-events-none"></div>
 
             <div className="relative z-10 flex flex-col h-full p-8 lg:p-10">
                {/* 1. Brand Header */}
@@ -380,20 +380,20 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   {step === 2 && (
                      <div className="flex flex-col items-center text-center">
                         <div className="w-40 h-40 bg-white/5 backdrop-blur-xl rounded-full flex items-center justify-center border border-white/10 shadow-2xl relative mb-8">
-                           <MapPin className="w-16 h-16 text-chippy-coral" />
+                           <MapPin className="w-16 h-16 text-slate-200" />
                         </div>
                         <h3 className="text-2xl font-bold text-white mb-2">Business Setup</h3>
                         <p className="text-slate-400 mb-6 max-w-xs mx-auto">
                            Tell us where you serve your customers so Chippy can guide them to the right location.
                         </p>
                         <div className="w-full max-w-[200px] space-y-2 text-left">
-                           <div className={`flex items-center gap-2 text-sm ${businessType === 'storefront' ? 'text-chippy-coral' : 'text-slate-500'}`}>
+                           <div className={`flex items-center gap-2 text-sm ${businessType === 'storefront' ? 'text-slate-200' : 'text-slate-500'}`}>
                               <Store className="w-4 h-4" /> Storefront / Clinic
                            </div>
-                           <div className={`flex items-center gap-2 text-sm ${businessType === 'mobile' ? 'text-chippy-coral' : 'text-slate-500'}`}>
+                           <div className={`flex items-center gap-2 text-sm ${businessType === 'mobile' ? 'text-slate-200' : 'text-slate-500'}`}>
                               <Car className="w-4 h-4" /> Mobile / On-Site
                            </div>
-                           <div className={`flex items-center gap-2 text-sm ${businessType === 'online' ? 'text-chippy-coral' : 'text-slate-500'}`}>
+                           <div className={`flex items-center gap-2 text-sm ${businessType === 'online' ? 'text-slate-200' : 'text-slate-500'}`}>
                               <Laptop className="w-4 h-4" /> Online Only
                            </div>
                         </div>
@@ -405,12 +405,12 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                      <div className="flex flex-col items-center text-center">
                         <div className="w-40 h-40 bg-white/5 backdrop-blur-xl rounded-full flex items-center justify-center border border-white/10 shadow-2xl relative mb-8">
                            {scannedData ? (
-                              <CheckCircle2 className="w-20 h-20 text-emerald-400 animate-in zoom-in spin-in-12" />
+                              <CheckCircle2 className="w-20 h-20 text-slate-200 animate-in zoom-in spin-in-12" />
                            ) : (
                               <>
-                                 <div className="absolute inset-0 rounded-full border-2 border-chippy-coral/30 animate-ping"></div>
-                                 <div className="absolute inset-0 rounded-full border border-chippy-coral/50 animate-[spin_3s_linear_infinite]"></div>
-                                 <Sparkles className="w-16 h-16 text-chippy-coral animate-pulse" />
+                                 <div className="absolute inset-0 rounded-full border-2 border-white/15 animate-ping"></div>
+                                 <div className="absolute inset-0 rounded-full border border-white/25 animate-[spin_3s_linear_infinite]"></div>
+                                 <Sparkles className="w-16 h-16 text-slate-200 animate-pulse" />
                               </>
                            )}
                         </div>
@@ -423,7 +423,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                               <span>Progress</span><span>{Math.round(progress)}%</span>
                            </div>
                            <div className="bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                              <div className="bg-chippy-coral h-full transition-all duration-300 shadow-[0_0_10px_rgba(255,107,94,0.5)]" style={{ width: `${progress}%` }}></div>
+                              <div className="bg-slate-200 h-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
                            </div>
                         </div>
                      </div>
@@ -433,7 +433,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   {step === 4 && (
                      <div className="flex flex-col h-full max-h-[600px]">
                         <div className="mb-6">
-                           <div className="flex items-center gap-2 mb-2 text-chippy-coral">
+                           <div className="flex items-center gap-2 mb-2 text-slate-200">
                               <Sparkles className="w-4 h-4" />
                               <span className="text-xs font-bold uppercase tracking-widest">Review Phase</span>
                            </div>
@@ -451,7 +451,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
 
                         <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 mb-6 backdrop-blur-sm">
                            <div className="flex items-center gap-2 mb-3">
-                              <Upload className="w-4 h-4 text-chippy-coral" />
+                              <Upload className="w-4 h-4 text-slate-200" />
                               <span className="text-sm font-semibold text-white">Missing Info?</span>
                            </div>
                            <label className={`flex items-center justify-center w-full py-3 border border-dashed rounded-lg cursor-pointer transition-all gap-2 text-sm ${isProcessingFile ? 'bg-indigo-900/20 border-indigo-500/50 text-indigo-300' : 'bg-slate-800/50 border-slate-600 text-slate-300 hover:bg-slate-700 hover:border-slate-500'}`}>
@@ -459,11 +459,11 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                               <span>{isProcessingFile ? 'Processing...' : 'Upload File'}</span>
                               <input type="file" className="hidden" accept=".txt,.md,.pdf,.csv" disabled={isProcessingFile} onChange={(e) => handleFileUpload(e.target.files)} />
                            </label>
-                           {uploadFeedback && <div className="mt-2 text-[10px] text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> {uploadFeedback}</div>}
+                           {uploadFeedback && <div className="mt-2 text-[10px] text-slate-200 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> {uploadFeedback}</div>}
                         </div>
 
-                        <button onClick={handleTrainAndLaunch} disabled={!allApproved || isTraining} className="w-full py-4 bg-white hover:bg-chippy-coral hover:text-white text-chippy-navy font-bold rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed">
-                           {isTraining ? <><Loader2 className="w-5 h-5 animate-spin text-chippy-coral" /><span>Building...</span></> : <><BrainCircuit className="w-5 h-5 text-chippy-coral" />Train Agent</>}
+                        <button onClick={handleTrainAndLaunch} disabled={!allApproved || isTraining} className="w-full py-4 bg-white hover:bg-slate-100 text-slate-900 font-semibold rounded-xl shadow-[0_0_12px_rgba(15,23,42,0.08)] transition-all flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed">
+                           {isTraining ? <><Loader2 className="w-5 h-5 animate-spin text-slate-600" /><span>Building...</span></> : <><BrainCircuit className="w-5 h-5 text-slate-700" />Train Agent</>}
                         </button>
                      </div>
                   )}
@@ -473,12 +473,12 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                      <div className="flex flex-col items-center text-center">
                         <div className="w-40 h-40 bg-white/5 backdrop-blur-xl rounded-full flex items-center justify-center border border-white/10 shadow-2xl relative mb-8">
                            {trainingPhase >= 4 ? (
-                              <CheckCircle2 className="w-20 h-20 text-emerald-400 animate-in zoom-in spin-in-12" />
+                              <CheckCircle2 className="w-20 h-20 text-slate-200 animate-in zoom-in spin-in-12" />
                            ) : (
                               <>
-                                 <div className="absolute inset-0 rounded-full border-2 border-chippy-coral/30 animate-ping"></div>
-                                 <div className="absolute inset-0 rounded-full border border-chippy-coral/50 animate-[spin_3s_linear_infinite]"></div>
-                                 <BrainCircuit className="w-16 h-16 text-chippy-coral animate-pulse" />
+                                 <div className="absolute inset-0 rounded-full border-2 border-white/15 animate-ping"></div>
+                                 <div className="absolute inset-0 rounded-full border border-white/25 animate-[spin_3s_linear_infinite]"></div>
+                                 <BrainCircuit className="w-16 h-16 text-slate-200 animate-pulse" />
                               </>
                            )}
                         </div>
@@ -491,7 +491,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                               <span>Progress</span><span>{Math.min(trainingPhase * 25, 100)}%</span>
                            </div>
                            <div className="bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                              <div className={`h-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(255,107,94,0.5)] ${trainingPhase >= 4 ? 'bg-emerald-500' : 'bg-chippy-coral'}`} style={{ width: `${Math.min(trainingPhase * 25, 100)}%` }}></div>
+                              <div className={`h-full transition-all duration-700 ease-out ${trainingPhase >= 4 ? 'bg-slate-200' : 'bg-slate-400'}`} style={{ width: `${Math.min(trainingPhase * 25, 100)}%` }}></div>
                            </div>
                         </div>
                      </div>
@@ -503,7 +503,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   <span>Step {step} of 5</span>
                   <div className="flex gap-1">
                      {[1, 2, 3, 4, 5].map(i => (
-                        <div key={i} className={`h-1 rounded-full transition-all duration-300 ${i <= step ? 'w-8 bg-chippy-coral' : 'w-2 bg-slate-700'}`} />
+                        <div key={i} className={`h-1 rounded-full transition-all duration-300 ${i <= step ? 'w-8 bg-slate-200' : 'w-2 bg-slate-700'}`} />
                      ))}
                   </div>
                </div>
@@ -520,17 +520,19 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                      <button onClick={onCancel} className="absolute top-8 right-8 text-slate-400 hover:text-slate-600 flex items-center gap-2 text-sm font-medium transition-colors">Skip <ArrowRight className="w-4 h-4" /></button>
                      <div className="max-w-md w-full">
                         <div className="text-center mb-10">
-                           <div className="w-16 h-16 bg-white rounded-2xl shadow-lg shadow-chippy-coral/10 flex items-center justify-center mx-auto mb-6 border border-slate-100"><Globe className="w-8 h-8 text-chippy-coral" /></div>
-                           <h2 className="text-2xl font-bold text-chippy-navy mb-2">Connect Your Business</h2>
+                           <div className="w-16 h-16 bg-white rounded-xl flex items-center justify-center mx-auto mb-6 border border-slate-200">
+                              <Globe className="w-7 h-7 text-slate-700" />
+                           </div>
+                           <h2 className="text-2xl font-semibold text-chippy-navy mb-2">Connect Your Business</h2>
                            <p className="text-slate-500">Enter your website URL to start the auto-discovery process.</p>
                         </div>
-                        <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-sm focus-within:ring-2 focus-within:ring-chippy-coral focus-within:border-chippy-coral transition-all">
+                        <div className="bg-white p-2 rounded-lg border border-slate-200 focus-within:ring-2 focus-within:ring-slate-900/10 transition-all">
                            <div className="flex items-center">
                               <div className="pl-4 pr-3 text-slate-400"><Search className="w-5 h-5" /></div>
                               <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://yourcompany.com" className="flex-1 py-3 bg-transparent outline-none text-slate-900 placeholder:text-slate-300" onKeyDown={(e) => e.key === 'Enter' && handleProceedToBusinessType()} />
                            </div>
                         </div>
-                        <button onClick={handleProceedToBusinessType} disabled={!url} className="w-full mt-6 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-semibold py-4 rounded-xl transition-all shadow-lg shadow-chippy-coral/20 hover:shadow-chippy-coral/30 hover:-translate-y-0.5 disabled:opacity-50 disabled:shadow-none disabled:translate-y-0 flex items-center justify-center gap-2">Continue <ArrowRight className="w-5 h-5" /></button>
+                        <button onClick={handleProceedToBusinessType} disabled={!url} className="w-full mt-6 bg-slate-900 hover:bg-slate-900/90 text-white font-semibold py-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2">Continue <ArrowRight className="w-5 h-5" /></button>
                      </div>
                   </div>
                )}
@@ -540,8 +542,10 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   <div className="h-full flex flex-col items-center justify-center p-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
                      <div className="max-w-2xl w-full">
                         <div className="text-center mb-10">
-                           <div className="w-16 h-16 bg-white rounded-2xl shadow-lg shadow-chippy-coral/10 flex items-center justify-center mx-auto mb-6 border border-slate-100"><MapPin className="w-8 h-8 text-chippy-coral" /></div>
-                           <h2 className="text-2xl font-bold text-chippy-navy mb-2">Where Do You Serve Customers?</h2>
+                           <div className="w-16 h-16 bg-white rounded-xl flex items-center justify-center mx-auto mb-6 border border-slate-200">
+                              <MapPin className="w-7 h-7 text-slate-700" />
+                           </div>
+                           <h2 className="text-2xl font-semibold text-chippy-navy mb-2">Where Do You Serve Customers?</h2>
                            <p className="text-slate-500">This helps Chippy guide customers to your location or service area.</p>
                         </div>
 
@@ -549,26 +553,26 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         <div className="grid grid-cols-3 gap-4 mb-8">
                            <button
                               onClick={() => setBusinessType('storefront')}
-                              className={`p-6 rounded-xl border-2 transition-all text-left ${businessType === 'storefront' ? 'border-chippy-coral bg-chippy-coral/5 shadow-lg' : 'border-slate-200 bg-white hover:border-chippy-coral/50'}`}
+                              className={`p-6 rounded-lg border transition-all text-left ${businessType === 'storefront' ? 'border-slate-900 bg-slate-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
                            >
-                              <Store className={`w-8 h-8 mb-3 ${businessType === 'storefront' ? 'text-chippy-coral' : 'text-slate-400'}`} />
-                              <h3 className="font-bold text-slate-900 mb-1">Storefront / Clinic</h3>
+                              <Store className="w-7 h-7 mb-3 text-slate-600" />
+                              <h3 className="font-semibold text-slate-900 mb-1">Storefront / Clinic</h3>
                               <p className="text-xs text-slate-500">Customers visit your location(s)</p>
                            </button>
                            <button
                               onClick={() => setBusinessType('mobile')}
-                              className={`p-6 rounded-xl border-2 transition-all text-left ${businessType === 'mobile' ? 'border-chippy-coral bg-chippy-coral/5 shadow-lg' : 'border-slate-200 bg-white hover:border-chippy-coral/50'}`}
+                              className={`p-6 rounded-lg border transition-all text-left ${businessType === 'mobile' ? 'border-slate-900 bg-slate-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
                            >
-                              <Car className={`w-8 h-8 mb-3 ${businessType === 'mobile' ? 'text-chippy-coral' : 'text-slate-400'}`} />
-                              <h3 className="font-bold text-slate-900 mb-1">Mobile / On-Site</h3>
+                              <Car className="w-7 h-7 mb-3 text-slate-600" />
+                              <h3 className="font-semibold text-slate-900 mb-1">Mobile / On-Site</h3>
                               <p className="text-xs text-slate-500">You visit the customer</p>
                            </button>
                            <button
                               onClick={() => setBusinessType('online')}
-                              className={`p-6 rounded-xl border-2 transition-all text-left ${businessType === 'online' ? 'border-chippy-coral bg-chippy-coral/5 shadow-lg' : 'border-slate-200 bg-white hover:border-chippy-coral/50'}`}
+                              className={`p-6 rounded-lg border transition-all text-left ${businessType === 'online' ? 'border-slate-900 bg-slate-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
                            >
-                              <Laptop className={`w-8 h-8 mb-3 ${businessType === 'online' ? 'text-chippy-coral' : 'text-slate-400'}`} />
-                              <h3 className="font-bold text-slate-900 mb-1">Online Only</h3>
+                              <Laptop className="w-7 h-7 mb-3 text-slate-600" />
+                              <h3 className="font-semibold text-slate-900 mb-1">Online Only</h3>
                               <p className="text-xs text-slate-500">Virtual / digital services</p>
                            </button>
                         </div>
@@ -577,15 +581,15 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         {businessType === 'storefront' && (
                            <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4 animate-in fade-in slide-in-from-bottom-2">
                               <div className="flex items-center justify-between mb-2">
-                                 <h4 className="font-bold text-slate-900 flex items-center gap-2"><MapPin className="w-4 h-4 text-chippy-coral" /> Your Locations</h4>
+                                 <h4 className="font-semibold text-slate-800 flex items-center gap-2"><MapPin className="w-4 h-4 text-slate-500" /> Your Locations</h4>
                                  {locations.length < 5 && (
-                                    <button onClick={() => setLocations([...locations, { name: `Location ${locations.length + 1}`, address: '', city: '', state: '', zip: '' }])} className="text-sm text-chippy-coral font-semibold flex items-center gap-1 hover:underline">
+                                    <button onClick={() => setLocations([...locations, { name: `Location ${locations.length + 1}`, address: '', city: '', state: '', zip: '' }])} className="text-sm text-slate-700 font-semibold flex items-center gap-1 hover:underline">
                                        <Plus className="w-4 h-4" /> Add Location
                                     </button>
                                  )}
                               </div>
                               {locations.map((loc, i) => (
-                                 <div key={i} className="p-4 bg-slate-50 rounded-lg border border-slate-100 space-y-3">
+                                 <div key={i} className="p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-3">
                                     <div className="flex items-center justify-between">
                                        <input
                                           type="text"
@@ -649,7 +653,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         {/* Service Area (For Mobile) */}
                         {businessType === 'mobile' && (
                            <div className="bg-white rounded-xl border border-slate-200 p-6 animate-in fade-in slide-in-from-bottom-2">
-                              <h4 className="font-bold text-slate-900 flex items-center gap-2 mb-4"><Car className="w-4 h-4 text-chippy-coral" /> Service Area (Optional)</h4>
+                              <h4 className="font-semibold text-slate-800 flex items-center gap-2 mb-4"><Car className="w-4 h-4 text-slate-500" /> Service Area (Optional)</h4>
                               <input
                                  type="text"
                                  value={locations[0]?.city || ''}
@@ -663,9 +667,9 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
 
                         {/* Online - No Location Needed */}
                         {businessType === 'online' && (
-                           <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-6 text-center animate-in fade-in slide-in-from-bottom-2">
-                              <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
-                              <p className="text-emerald-800 font-medium">No physical location needed for online services!</p>
+                           <div className="bg-slate-50 rounded-xl border border-slate-200 p-6 text-center animate-in fade-in slide-in-from-bottom-2">
+                              <CheckCircle2 className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                              <p className="text-slate-700 font-medium">No physical location needed for online services.</p>
                            </div>
                         )}
 
@@ -682,7 +686,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                               handleStartScan();
                            }}
                            disabled={!businessType || (businessType === 'storefront' && !locations[0]?.address)}
-                           className="w-full mt-8 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-semibold py-4 rounded-xl transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2"
+                           className="w-full mt-8 bg-slate-900 hover:bg-slate-900/90 text-white font-semibold py-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
                            {!businessType ? 'Select a Business Type' : (businessType === 'storefront' && !locations[0]?.address) ? 'Enter Address to Continue' : 'Begin Analysis'} <ArrowRight className="w-5 h-5" />
                         </button>
@@ -694,7 +698,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                {step === 3 && (
                   <div className="h-full flex flex-col p-12">
                      <div className="flex items-center gap-2 mb-8">
-                        <Terminal className="w-5 h-5 text-chippy-coral" /><h4 className="font-bold text-slate-900 uppercase tracking-wider">Discovery Protocol</h4>
+                        <Terminal className="w-5 h-5 text-slate-500" />
+                        <h4 className="font-semibold text-slate-900 tracking-wide">Discovery</h4>
                      </div>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                         <StatusItem label="Identity" status={getStatus(20)} icon={<LayoutTemplate className="w-4 h-4" />} />
@@ -710,7 +715,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         <div className="mt-8 flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2">
                            {logs.map((log, i) => (
                               <div key={log.id} className={`flex gap-3 animate-in slide-in-from-left-2 fade-in duration-300 ${i === logs.length - 1 ? 'text-white' : 'text-slate-400'}`}>
-                                 <span className="text-chippy-coral shrink-0">➜</span><span>{log.message}</span>
+                                 <span className="text-slate-500 shrink-0">➜</span><span>{log.message}</span>
                               </div>
                            ))}
                            <div ref={logsEndRef} />
@@ -754,7 +759,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                  });
                               }
                               setStep(4);
-                           }} className="w-full h-14 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-bold text-lg rounded-xl transition-all shadow-lg hover:shadow-chippy-coral/20 hover:-translate-y-0.5 flex items-center justify-center gap-2 animate-in slide-in-from-bottom-2 fade-in">
+                           }} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-lg rounded-xl transition-all shadow-sm hover:shadow flex items-center justify-center gap-2 animate-in slide-in-from-bottom-2 fade-in">
                               {scannedData ? "Proceed to Review" : "Continue Manually"} <ArrowRight className="w-5 h-5" />
                            </button>
                         )}
@@ -772,29 +777,29 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                {step === 4 && scannedData && (
                   <div className="max-w-4xl mx-auto p-6 lg:p-12 space-y-6 pb-32 animate-in fade-in slide-in-from-right-4 duration-500">
                      <div id="card-identity">
-                        <ReviewCard title="Identity & Summary" icon={<LayoutTemplate className="w-5 h-5 text-chippy-coral" />} isExpanded={expandedSection === 'identity'} isApproved={sectionStatus.identity} onToggle={() => setExpandedSection(expandedSection === 'identity' ? null : 'identity')} onApprove={() => toggleApproval('identity')}>
+                        <ReviewCard title="Identity & Summary" icon={<LayoutTemplate className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'identity'} isApproved={sectionStatus.identity} onToggle={() => setExpandedSection(expandedSection === 'identity' ? null : 'identity')} onApprove={() => toggleApproval('identity')}>
                            <div className="space-y-4">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                  <div>
                                     <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Building className="w-3 h-3" /> Company Name</label>
-                                    <input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral" value={scannedData.companyName || ''} onChange={(e) => setScannedData({ ...scannedData, companyName: e.target.value })} placeholder="e.g. Acme Inc." />
+                                    <input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.companyName || ''} onChange={(e) => setScannedData({ ...scannedData, companyName: e.target.value })} placeholder="e.g. Acme Inc." />
                                  </div>
                                  <div>
                                     <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Link2 className="w-3 h-3" /> Website URL</label>
-                                    <input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral" value={scannedData.website || url} onChange={(e) => setScannedData({ ...scannedData, website: e.target.value })} />
+                                    <input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.website || url} onChange={(e) => setScannedData({ ...scannedData, website: e.target.value })} />
                                  </div>
                               </div>
                               <div>
                                  <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Phone className="w-3 h-3" /> Phone Number</label>
-                                 <input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral" value={scannedData.phoneNumber || ''} onChange={(e) => setScannedData({ ...scannedData, phoneNumber: e.target.value })} placeholder="e.g. +1 (555) 000-0000" />
+                                 <input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.phoneNumber || ''} onChange={(e) => setScannedData({ ...scannedData, phoneNumber: e.target.value })} placeholder="e.g. +1 (555) 000-0000" />
                               </div>
-                              <div><label className="text-xs font-bold text-slate-500 uppercase">Category</label><input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral" value={scannedData.businessCategory} onChange={(e) => setScannedData({ ...scannedData, businessCategory: e.target.value })} /></div>
-                              <div><label className="text-xs font-bold text-slate-500 uppercase">Executive Summary</label><textarea rows={3} className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral" value={scannedData.summary} onChange={(e) => setScannedData({ ...scannedData, summary: e.target.value })} /></div>
+                              <div><label className="text-xs font-bold text-slate-500 uppercase">Category</label><input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.businessCategory} onChange={(e) => setScannedData({ ...scannedData, businessCategory: e.target.value })} /></div>
+                              <div><label className="text-xs font-bold text-slate-500 uppercase">Executive Summary</label><textarea rows={3} className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.summary} onChange={(e) => setScannedData({ ...scannedData, summary: e.target.value })} /></div>
                            </div>
                         </ReviewCard>
                      </div>
                      <div id="card-services">
-                        <ReviewCard title="Services" icon={<Tag className="w-5 h-5 text-blue-600" />} isExpanded={expandedSection === 'services'} isApproved={sectionStatus.services} onToggle={() => setExpandedSection(expandedSection === 'services' ? null : 'services')} onApprove={() => toggleApproval('services')} badgeCount={scannedData.services.length}>
+                        <ReviewCard title="Services" icon={<Tag className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'services'} isApproved={sectionStatus.services} onToggle={() => setExpandedSection(expandedSection === 'services' ? null : 'services')} onApprove={() => toggleApproval('services')} badgeCount={scannedData.services.length}>
                            <ServiceEditor
                               services={scannedData.services}
                               onChange={(newServices) => setScannedData({ ...scannedData, services: newServices })}
@@ -868,26 +873,26 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         </ReviewCard>
                      </div>
                      <div id="card-operations">
-                        <ReviewCard title="Operations" icon={<Clock className="w-5 h-5 text-emerald-600" />} isExpanded={expandedSection === 'operations'} isApproved={sectionStatus.operations} onToggle={() => setExpandedSection(expandedSection === 'operations' ? null : 'operations')} onApprove={() => toggleApproval('operations')}>
+                        <ReviewCard title="Operations" icon={<Clock className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'operations'} isApproved={sectionStatus.operations} onToggle={() => setExpandedSection(expandedSection === 'operations' ? null : 'operations')} onApprove={() => toggleApproval('operations')}>
                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div><label className="text-xs font-bold text-slate-500 uppercase">Business Hours</label><input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral" value={scannedData.businessHours} onChange={(e) => setScannedData({ ...scannedData, businessHours: e.target.value })} /></div>
-                              <div><label className="text-xs font-bold text-slate-500 uppercase">Contact Info</label><input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral" value={scannedData.contactInfo} onChange={(e) => setScannedData({ ...scannedData, contactInfo: e.target.value })} /></div>
+                              <div><label className="text-xs font-bold text-slate-500 uppercase">Business Hours</label><input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.businessHours} onChange={(e) => setScannedData({ ...scannedData, businessHours: e.target.value })} /></div>
+                              <div><label className="text-xs font-bold text-slate-500 uppercase">Contact Info</label><input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.contactInfo} onChange={(e) => setScannedData({ ...scannedData, contactInfo: e.target.value })} /></div>
                            </div>
                         </ReviewCard>
                      </div>
                      <div id="card-pricing">
-                        <ReviewCard title="Pricing & Rates" icon={<DollarSign className="w-5 h-5 text-amber-600" />} isExpanded={expandedSection === 'pricing'} isApproved={sectionStatus.pricing} onToggle={() => setExpandedSection(expandedSection === 'pricing' ? null : 'pricing')} onApprove={() => toggleApproval('pricing')} isEmpty={!scannedData.pricing}>
+                        <ReviewCard title="Pricing & Rates" icon={<DollarSign className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'pricing'} isApproved={sectionStatus.pricing} onToggle={() => setExpandedSection(expandedSection === 'pricing' ? null : 'pricing')} onApprove={() => toggleApproval('pricing')} isEmpty={!scannedData.pricing}>
                            <div>
-                              {!scannedData.pricing && <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-sm mb-3 flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><div><p className="font-semibold">Missing Pricing Data</p><p className="text-xs">We couldn't find pricing on the site.</p></div></div>}
-                              <textarea rows={6} placeholder="e.g. \nBasic Plan: $50/mo" className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral font-mono" value={scannedData.pricing || ''} onChange={(e) => setScannedData({ ...scannedData, pricing: e.target.value })} />
+                              {!scannedData.pricing && <div className="bg-slate-50 text-slate-600 p-3 rounded-lg text-sm mb-3 flex items-start gap-2 border border-slate-200"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><div><p className="font-semibold">Missing Pricing Data</p><p className="text-xs">We couldn't find pricing on the site.</p></div></div>}
+                              <textarea rows={6} placeholder="e.g. \nBasic Plan: $50/mo" className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400 font-mono" value={scannedData.pricing || ''} onChange={(e) => setScannedData({ ...scannedData, pricing: e.target.value })} />
                            </div>
                         </ReviewCard>
                      </div>
                      <div id="card-policies">
-                        <ReviewCard title="Policies & Cancellation" icon={<ShieldCheck className="w-5 h-5 text-purple-600" />} isExpanded={expandedSection === 'policies'} isApproved={sectionStatus.policies} onToggle={() => setExpandedSection(expandedSection === 'policies' ? null : 'policies')} onApprove={() => toggleApproval('policies')} isEmpty={!scannedData.policies}>
+                        <ReviewCard title="Policies & Cancellation" icon={<ShieldCheck className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'policies'} isApproved={sectionStatus.policies} onToggle={() => setExpandedSection(expandedSection === 'policies' ? null : 'policies')} onApprove={() => toggleApproval('policies')} isEmpty={!scannedData.policies}>
                            <div>
-                              {!scannedData.policies && <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-sm mb-3 flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><div><p className="font-semibold">Missing Policy Data</p><p className="text-xs">Please add cancellation terms.</p></div></div>}
-                              <textarea rows={4} placeholder="e.g. 24-hour notice required." className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-chippy-coral" value={scannedData.policies || ''} onChange={(e) => setScannedData({ ...scannedData, policies: e.target.value })} />
+                              {!scannedData.policies && <div className="bg-slate-50 text-slate-600 p-3 rounded-lg text-sm mb-3 flex items-start gap-2 border border-slate-200"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><div><p className="font-semibold">Missing Policy Data</p><p className="text-xs">Please add cancellation terms.</p></div></div>}
+                              <textarea rows={4} placeholder="e.g. 24-hour notice required." className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.policies || ''} onChange={(e) => setScannedData({ ...scannedData, policies: e.target.value })} />
                            </div>
                         </ReviewCard>
                      </div>
@@ -899,8 +904,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   <div className="h-full flex flex-col items-center justify-center p-12 relative">
                      <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-700">
                         <div className="text-center mb-10">
-                           <div className="w-16 h-16 bg-chippy-coral/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-chippy-coral/20"><Cpu className="w-8 h-8 text-chippy-coral" /></div>
-                           <h2 className="text-2xl font-bold text-slate-900">System Optimization</h2>
+                           <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-slate-200"><Cpu className="w-8 h-8 text-slate-600" /></div>
+                           <h2 className="text-2xl font-semibold text-slate-900">System Optimization</h2>
                            <p className="text-slate-500 text-sm mt-1">Configuring neural weights for {new URL(url).hostname}</p>
                         </div>
 
@@ -910,15 +915,15 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                            <TrainingItem label="Calibrating response tone & safety" active={trainingPhase >= 2} completed={trainingPhase > 2} />
                            <TrainingItem label="Compiling system instructions" active={trainingPhase >= 3} completed={trainingPhase > 3} />
                            {trainingPhase >= 4 && (
-                              <div className="flex items-center gap-3 p-4 rounded-xl border bg-emerald-50 border-emerald-200 animate-in slide-in-from-bottom-2 fade-in">
-                                 <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                 <span className="text-emerald-800 font-semibold">Agent Successfully Built</span>
+                              <div className="flex items-center gap-3 p-4 rounded-xl border bg-slate-50 border-slate-200 animate-in slide-in-from-bottom-2 fade-in">
+                                 <CheckCircle2 className="w-5 h-5 text-slate-700" />
+                                 <span className="text-slate-800 font-semibold">Agent Successfully Built</span>
                               </div>
                            )}
                         </div>
 
                         {trainingPhase >= 4 && (
-                           <button onClick={() => onComplete(scannedData!)} className="w-full py-4 bg-chippy-coral hover:bg-chippy-coral-hover text-white font-bold rounded-xl shadow-lg hover:shadow-chippy-coral/20 hover:-translate-y-0.5 transition-all flex items-center justify-center gap-3 animate-in slide-in-from-bottom-4 fade-in duration-500">
+                           <button onClick={() => onComplete(scannedData!)} className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl shadow-sm hover:shadow transition-all flex items-center justify-center gap-3 animate-in slide-in-from-bottom-4 fade-in duration-500">
                               <Sparkles className="w-5 h-5" /> Customize Widget <ArrowRight className="w-5 h-5" />
                            </button>
                         )}
@@ -935,25 +940,25 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
 // --- SUB-COMPONENTS ---
 
 const NavStatusItem = ({ label, isApproved, onClick }: { label: string, isApproved: boolean, onClick: () => void }) => (
-   <button onClick={onClick} className={`w-full flex items-center justify-between p-3 rounded-lg transition-all text-sm group ${isApproved ? 'bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+   <button onClick={onClick} className={`w-full flex items-center justify-between p-3 rounded-lg transition-all text-sm group ${isApproved ? 'bg-slate-800/40 text-slate-200 hover:bg-slate-800/60' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}>
       <span className="font-medium">{label}</span>
-      {isApproved ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-600 group-hover:border-slate-400"></div>}
+      {isApproved ? <CheckCircle2 className="w-4 h-4 text-slate-200" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-600 group-hover:border-slate-400"></div>}
    </button>
 );
 
 const StatusItem = ({ label, status, icon, count }: { label: string, status: 'pending' | 'loading' | 'complete' | 'error', icon: React.ReactNode, count?: number }) => (
-   <div className={`flex items-center justify-between p-4 rounded-xl border transition-all duration-300 ${status === 'complete' ? 'bg-chippy-coral/10 border-chippy-coral/20' : 'bg-slate-50 border-slate-100'}`}>
+   <div className={`flex items-center justify-between p-4 rounded-xl border transition-all duration-300 ${status === 'complete' ? 'bg-slate-100 border-slate-200' : 'bg-slate-50 border-slate-100'}`}>
       <div className="flex items-center gap-3">
-         <div className={`p-2 rounded-lg transition-colors ${status === 'complete' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}>{status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin text-chippy-coral" /> : icon}</div>
-         <span className={`text-sm font-semibold ${status === 'complete' ? 'text-slate-900' : 'text-slate-400'}`}>{label}</span>
+         <div className={`p-2 rounded-lg transition-colors ${status === 'complete' ? 'bg-slate-200 text-slate-700' : 'bg-slate-200 text-slate-400'}`}>{status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : icon}</div>
+         <span className={`text-sm font-semibold ${status === 'complete' ? 'text-slate-900' : 'text-slate-500'}`}>{label}</span>
       </div>
-      {status === 'complete' ? <div className="flex items-center gap-2 animate-in zoom-in">{count !== undefined && <span className="text-xs font-bold bg-white border border-chippy-coral/20 px-2 py-0.5 rounded-full text-chippy-coral">{count}</span>}<CheckCircle2 className="w-5 h-5 text-emerald-500" /></div> : <div className="w-5 h-5 rounded-full border-2 border-slate-200"></div>}
+      {status === 'complete' ? <div className="flex items-center gap-2 animate-in zoom-in">{count !== undefined && <span className="text-xs font-bold bg-white border border-slate-200 px-2 py-0.5 rounded-full text-slate-600">{count}</span>}<CheckCircle2 className="w-5 h-5 text-slate-700" /></div> : <div className="w-5 h-5 rounded-full border-2 border-slate-200"></div>}
    </div>
 );
 
 const TrainingItem = ({ label, active, completed }: { label: string, active: boolean, completed: boolean }) => (
-   <div className={`flex items-center gap-3 p-4 rounded-xl border transition-all duration-500 ${completed ? 'bg-blue-50 border-blue-200 text-chippy-navy' : active ? 'bg-white border-blue-300 text-slate-800 shadow-sm' : 'bg-transparent border-transparent text-slate-400'}`}>
-      {completed ? <CheckCircle2 className="w-5 h-5 text-blue-600" /> : active ? <Loader2 className="w-5 h-5 animate-spin text-blue-600" /> : <div className="w-5 h-5 rounded-full border-2 border-slate-200"></div>}
+   <div className={`flex items-center gap-3 p-4 rounded-xl border transition-all duration-500 ${completed ? 'bg-slate-50 border-slate-200 text-slate-900' : active ? 'bg-white border-slate-300 text-slate-800 shadow-sm' : 'bg-transparent border-transparent text-slate-400'}`}>
+      {completed ? <CheckCircle2 className="w-5 h-5 text-slate-700" /> : active ? <Loader2 className="w-5 h-5 animate-spin text-slate-600" /> : <div className="w-5 h-5 rounded-full border-2 border-slate-200"></div>}
       <span className={`text-sm font-medium ${completed || active ? 'opacity-100' : 'opacity-60'}`}>{label}</span>
    </div>
 );
@@ -964,27 +969,27 @@ interface ReviewCardProps {
 
 const ReviewCard: React.FC<ReviewCardProps> = ({ title, icon, children, isExpanded, isApproved, onToggle, onApprove, badgeCount, isEmpty }) => {
    return (
-      <div className={`bg-white rounded-xl border transition-all duration-300 shadow-sm ${isApproved ? 'border-emerald-200 shadow-emerald-50 ring-1 ring-emerald-100' : isEmpty ? 'border-amber-200' : 'border-slate-200 hover:border-chippy-coral/30 hover:shadow-md'} ${isExpanded ? 'ring-2 ring-chippy-coral border-transparent shadow-lg' : ''}`}>
+      <div className={`bg-white rounded-xl border transition-all duration-300 shadow-sm ${isApproved ? 'border-slate-200 ring-1 ring-slate-200/60' : isEmpty ? 'border-slate-200' : 'border-slate-200 hover:border-slate-300 hover:shadow-md'} ${isExpanded ? 'ring-2 ring-slate-300 border-slate-300 shadow-lg' : ''}`}>
          <div className="p-5 flex items-center justify-between cursor-pointer hover:bg-slate-50 rounded-t-xl transition-colors" onClick={onToggle}>
             <div className="flex items-center gap-4">
-               <div className={`p-2.5 rounded-xl transition-colors ${isApproved ? 'bg-emerald-100' : 'bg-slate-100 group-hover:bg-white'}`}>{isApproved ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : icon}</div>
+               <div className={`p-2.5 rounded-xl transition-colors ${isApproved ? 'bg-slate-100' : 'bg-slate-100 group-hover:bg-white'}`}>{isApproved ? <CheckCircle2 className="w-5 h-5 text-slate-700" /> : icon}</div>
                <div>
-                  <h3 className={`font-bold text-sm ${isApproved ? 'text-emerald-900' : 'text-slate-900'}`}>{title}</h3>
-                  {!isExpanded && !isApproved && isEmpty && <span className="text-xs text-amber-600 font-medium flex items-center gap-1 mt-0.5"><AlertCircle className="w-3 h-3" /> Missing Data</span>}
+                  <h3 className={`font-semibold text-sm ${isApproved ? 'text-slate-900' : 'text-slate-900'}`}>{title}</h3>
+                  {!isExpanded && !isApproved && isEmpty && <span className="text-xs text-slate-500 font-medium flex items-center gap-1 mt-0.5"><AlertCircle className="w-3 h-3" /> Missing Data</span>}
                   {!isExpanded && !isApproved && !isEmpty && <span className="text-xs text-slate-500 mt-0.5 block">Tap to review</span>}
-                  {!isExpanded && isApproved && <span className="text-xs text-emerald-600 font-medium mt-0.5 block">Verified</span>}
+                  {!isExpanded && isApproved && <span className="text-xs text-slate-600 font-medium mt-0.5 block">Verified</span>}
                </div>
             </div>
             <div className="flex items-center gap-4">
                {badgeCount !== undefined && <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full text-xs font-bold">{badgeCount}</span>}
-               <div className={`p-1 rounded-full transition-transform duration-300 ${isExpanded ? 'rotate-180 bg-slate-100' : ''}`}><ChevronDown className={`w-5 h-5 ${isExpanded ? 'text-chippy-coral' : 'text-slate-400'}`} /></div>
+               <div className={`p-1 rounded-full transition-transform duration-300 ${isExpanded ? 'rotate-180 bg-slate-100' : ''}`}><ChevronDown className={`w-5 h-5 ${isExpanded ? 'text-slate-500' : 'text-slate-400'}`} /></div>
             </div>
          </div>
          {isExpanded && (
             <div className="px-5 pb-5 animate-in slide-in-from-top-2">
                <div className="pt-4 pb-6 border-t border-slate-100">{children}</div>
                <div className="flex justify-end pt-2 border-t border-slate-50">
-                  {isApproved ? <button onClick={(e) => { e.stopPropagation(); onApprove(); }} className="text-sm text-slate-500 hover:text-slate-800 font-medium px-4 py-2 flex items-center gap-2"><Unlock className="w-3 h-3" /> Edit Again</button> : <button onClick={(e) => { e.stopPropagation(); onApprove(); }} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-6 py-2.5 rounded-lg transition-all shadow-md hover:shadow-emerald-200 hover:-translate-y-0.5"><CheckCircle2 className="w-4 h-4" /> Approve & Lock</button>}
+                  {isApproved ? <button onClick={(e) => { e.stopPropagation(); onApprove(); }} className="text-sm text-slate-500 hover:text-slate-800 font-medium px-4 py-2 flex items-center gap-2"><Unlock className="w-3 h-3" /> Edit Again</button> : <button onClick={(e) => { e.stopPropagation(); onApprove(); }} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold px-6 py-2.5 rounded-lg transition-all shadow-sm hover:shadow"><CheckCircle2 className="w-4 h-4" /> Approve & Lock</button>}
                </div>
             </div>
          )}

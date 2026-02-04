@@ -9,12 +9,14 @@ import { ContactFieldSelector } from '../components/ui/Shared';
 import { ContactFieldRequirement, LeadCaptureMode } from '../types';
 
 export const WidgetStudio = () => {
-    const { widgetConfig, setWidgetConfig } = useData();
+    const { widgetConfig, setWidgetConfig, tenantConfig } = useData();
     const { session } = useAuth();
     const { showToast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const [activeTab, setActiveTab] = useState<'appearance' | 'behavior' | 'followup'>('appearance');
     const [isSendingTest, setIsSendingTest] = useState(false);
+    const [previewRecipient, setPreviewRecipient] = useState<'customer' | 'owner'>('customer');
+    const [testEmail, setTestEmail] = useState('');
 
     useEffect(() => {
         const tab = searchParams.get('tab');
@@ -23,9 +25,20 @@ export const WidgetStudio = () => {
         }
     }, [searchParams]);
 
+    useEffect(() => {
+        if (!testEmail && session?.user?.email) {
+            setTestEmail(session.user.email);
+        }
+    }, [session?.user?.email, testEmail]);
+
     const sendTestEmail = async (mode: 'customer' | 'owner') => {
         if (!session?.access_token || !session?.user?.id || !session?.user?.email) {
             showToast('You must be logged in to send a test email.', 'error');
+            return;
+        }
+
+        if (!testEmail.trim()) {
+            showToast('Enter an email address to send the test.', 'error');
             return;
         }
 
@@ -34,8 +47,8 @@ export const WidgetStudio = () => {
             const templateVars = {
                 customer_name: 'Alex',
                 customer_email: 'alex@example.com',
-                company_name: 'Acme Co.',
-                company_url: 'https://example.com',
+                company_name: tenantConfig.companyName || 'Your Business',
+                company_url: tenantConfig.companyUrl || 'https://example.com',
                 summary: 'Asked about pricing and next available appointment.',
                 next_action: 'Suggested: book a consultation this week.',
                 priority: 'Warm',
@@ -57,7 +70,7 @@ export const WidgetStudio = () => {
                 },
                 body: JSON.stringify({
                     userId: session.user.id,
-                    toEmail: session.user.email,
+                    toEmail: testEmail.trim(),
                     mode,
                     subject,
                     body,
@@ -403,6 +416,16 @@ export const WidgetStudio = () => {
                                         </div>
                                     </div>
 
+                                    <div className="space-y-2 pt-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Send Test To</label>
+                                        <input
+                                            type="email"
+                                            value={testEmail}
+                                            onChange={(e) => setTestEmail(e.target.value)}
+                                            className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                            placeholder="name@company.com"
+                                        />
+                                    </div>
                                     <div className="flex gap-2 pt-2">
                                         <button
                                             onClick={() => sendTestEmail('customer')}
@@ -444,9 +467,7 @@ export const WidgetStudio = () => {
                                 <h3 className="font-bold text-lg text-chippy-navy">Follow-Up Emails</h3>
                                 <p className="text-sm text-slate-500">Send a short, helpful recap after a chat ends.</p>
 
-                                <div className="space-y-4">
-                                    <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">Settings</p>
-
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
                                         <div>
                                             <p className="text-sm font-semibold text-slate-800">Enable follow-ups</p>
@@ -463,43 +484,41 @@ export const WidgetStudio = () => {
                                         />
                                     </label>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Timing</label>
-                                            <select
-                                                value={widgetConfig.followUp.delayMinutes}
-                                                onChange={(e) => setWidgetConfig({
-                                                    ...widgetConfig,
-                                                    followUp: { ...widgetConfig.followUp, delayMinutes: Number(e.target.value) }
-                                                })}
-                                                className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                                disabled={!widgetConfig.followUp.enabled}
-                                            >
-                                                <option value={0}>Send immediately</option>
-                                                <option value={30}>Send after 30 minutes</option>
-                                                <option value={120}>Send after 2 hours</option>
-                                                <option value={1440}>Send next morning</option>
-                                            </select>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Reply-To Email</label>
-                                            <input
-                                                type="email"
-                                                value={widgetConfig.followUp.replyToEmail || ''}
-                                                onChange={(e) => setWidgetConfig({
-                                                    ...widgetConfig,
-                                                    followUp: { ...widgetConfig.followUp, replyToEmail: e.target.value }
-                                                })}
-                                                className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                                placeholder="owner@business.com"
-                                                disabled={!widgetConfig.followUp.enabled}
-                                            />
-                                            <p className="text-xs text-slate-500">Replies from customers will go to this address.</p>
-                                        </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Timing</label>
+                                        <select
+                                            value={widgetConfig.followUp.delayMinutes}
+                                            onChange={(e) => setWidgetConfig({
+                                                ...widgetConfig,
+                                                followUp: { ...widgetConfig.followUp, delayMinutes: Number(e.target.value) }
+                                            })}
+                                            className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                            disabled={!widgetConfig.followUp.enabled}
+                                        >
+                                            <option value={0}>Send immediately</option>
+                                            <option value={30}>Send after 30 minutes</option>
+                                            <option value={120}>Send after 2 hours</option>
+                                            <option value={1440}>Send next morning</option>
+                                        </select>
                                     </div>
 
                                     <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Reply-To Email</label>
+                                        <input
+                                            type="email"
+                                            value={widgetConfig.followUp.replyToEmail || ''}
+                                            onChange={(e) => setWidgetConfig({
+                                                ...widgetConfig,
+                                                followUp: { ...widgetConfig.followUp, replyToEmail: e.target.value }
+                                            })}
+                                            className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                            placeholder="owner@business.com"
+                                            disabled={!widgetConfig.followUp.enabled}
+                                        />
+                                        <p className="text-xs text-slate-500">Replies from customers will go to this address.</p>
+                                    </div>
+
+                                    <div className="space-y-2 md:col-span-2">
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Recipients</label>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                             <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
@@ -533,9 +552,25 @@ export const WidgetStudio = () => {
                                 </div>
 
                                 <div className="space-y-4">
-                                    <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">Templates</p>
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">Templates</p>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setPreviewRecipient('customer')}
+                                                className={`px-3 py-1.5 rounded-md text-xs font-semibold border ${previewRecipient === 'customer' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'}`}
+                                            >
+                                                Customer
+                                            </button>
+                                            <button
+                                                onClick={() => setPreviewRecipient('owner')}
+                                                className={`px-3 py-1.5 rounded-md text-xs font-semibold border ${previewRecipient === 'owner' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'}`}
+                                            >
+                                                Owner
+                                            </button>
+                                        </div>
+                                    </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    {previewRecipient === 'customer' ? (
                                         <div className="space-y-3">
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Customer Subject</label>
@@ -558,27 +593,12 @@ export const WidgetStudio = () => {
                                                         ...widgetConfig,
                                                         followUp: { ...widgetConfig.followUp, customerBody: e.target.value }
                                                     })}
-                                                    className="w-full h-36 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
+                                                    className="w-full h-48 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
                                                     disabled={!widgetConfig.followUp.enabled}
                                                 />
                                             </div>
-
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview (Customer)</label>
-                                                <div className="bg-white border border-slate-200 rounded-lg p-3 text-sm whitespace-pre-wrap">
-                                                    {(widgetConfig.followUp.customerBody || '')
-                                                        .replace(/{{customer_name}}/g, 'Alex')
-                                                        .replace(/{{customer_email}}/g, 'alex@example.com')
-                                                        .replace(/{{company_name}}/g, 'Acme Co.')
-                                                        .replace(/{{company_url}}/g, 'https://example.com')
-                                                        .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
-                                                        .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
-                                                        .replace(/{{priority}}/g, 'Warm')
-                                                        .replace(/{{intent}}/g, 'Pricing + booking')}
-                                                </div>
-                                            </div>
                                         </div>
-
+                                    ) : (
                                         <div className="space-y-3">
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Owner Subject</label>
@@ -601,27 +621,12 @@ export const WidgetStudio = () => {
                                                         ...widgetConfig,
                                                         followUp: { ...widgetConfig.followUp, ownerBody: e.target.value }
                                                     })}
-                                                    className="w-full h-36 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
+                                                    className="w-full h-48 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
                                                     disabled={!widgetConfig.followUp.enabled}
                                                 />
                                             </div>
-
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview (Owner)</label>
-                                                <div className="bg-white border border-slate-200 rounded-lg p-3 text-sm whitespace-pre-wrap">
-                                                    {(widgetConfig.followUp.ownerBody || '')
-                                                        .replace(/{{customer_name}}/g, 'Alex')
-                                                        .replace(/{{customer_email}}/g, 'alex@example.com')
-                                                        .replace(/{{company_name}}/g, 'Acme Co.')
-                                                        .replace(/{{company_url}}/g, 'https://example.com')
-                                                        .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
-                                                        .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
-                                                        .replace(/{{priority}}/g, 'Warm')
-                                                        .replace(/{{intent}}/g, 'Pricing + booking')}
-                                                </div>
-                                            </div>
                                         </div>
-                                    </div>
+                                    )}
 
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview Tokens</label>
@@ -668,7 +673,7 @@ export const WidgetStudio = () => {
                                     <div className="flex items-center justify-between">
                                         <div className="space-y-1">
                                             <p className="text-xs text-slate-400 uppercase">From</p>
-                                            <p className="text-sm text-slate-700">Acme Co. &lt;notifications@hellochippy.com&gt;</p>
+                                            <p className="text-sm text-slate-700">{tenantConfig.companyName || 'Your Business'} &lt;notifications@hellochippy.com&gt;</p>
                                         </div>
                                         <div className="space-y-1">
                                             <p className="text-xs text-slate-400 uppercase">To</p>
@@ -682,8 +687,8 @@ export const WidgetStudio = () => {
                                         {(widgetConfig.followUp.customerSubject || '')
                                             .replace(/{{customer_name}}/g, 'Alex')
                                             .replace(/{{customer_email}}/g, 'alex@example.com')
-                                            .replace(/{{company_name}}/g, 'Acme Co.')
-                                            .replace(/{{company_url}}/g, 'https://example.com')
+                                            .replace(/{{company_name}}/g, tenantConfig.companyName || 'Your Business')
+                                            .replace(/{{company_url}}/g, tenantConfig.companyUrl || 'https://example.com')
                                             .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
                                             .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
                                             .replace(/{{priority}}/g, 'Warm')
@@ -694,8 +699,8 @@ export const WidgetStudio = () => {
                                     {(widgetConfig.followUp.customerBody || '')
                                         .replace(/{{customer_name}}/g, 'Alex')
                                         .replace(/{{customer_email}}/g, 'alex@example.com')
-                                        .replace(/{{company_name}}/g, 'Acme Co.')
-                                        .replace(/{{company_url}}/g, 'https://example.com')
+                                        .replace(/{{company_name}}/g, tenantConfig.companyName || 'Your Business')
+                                        .replace(/{{company_url}}/g, tenantConfig.companyUrl || 'https://example.com')
                                         .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
                                         .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
                                         .replace(/{{priority}}/g, 'Warm')

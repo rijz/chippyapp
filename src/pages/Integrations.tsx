@@ -1,20 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Calendar, CheckCircle2, RefreshCw, Clock, CalendarDays, Settings, LogOut, ChevronRight, Globe, Plus, X, Shield, AlertCircle, Loader2 } from 'lucide-react';
+import { CheckCircle2, Globe, Plus, X, Shield, AlertCircle, Loader2 } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { PageHeader } from '../components/layout/PageHeader';
-import { handleAuthClick, loadGoogleScripts, fetchCalendars, handleSignOut } from '../services/calendarAuth';
-import { CalendarSettings, CalendarItem } from '../types';
 import { MultiLocationCalendarManager } from '../components/MultiLocationCalendarManager';
 
 export const Integrations = () => {
-    const { tenantConfig, setTenantConfig, calendarSettings, setCalendarSettings, refreshData } = useData();
+    const { refreshData } = useData();
     const { session } = useAuth();
     const { showToast } = useToast();
     const userId = session?.user?.id || '';
-    const [isLoading, setIsLoading] = useState(false);
-    const [availableCalendars, setAvailableCalendars] = useState<CalendarItem[]>([]);
 
     // Embed domain state
     const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
@@ -24,15 +20,13 @@ export const Integrations = () => {
     const [isSavingDomains, setIsSavingDomains] = useState(false);
     const [hasChanges, setHasChanges] = useState(false);
 
-    useEffect(() => {
-        loadGoogleScripts();
-        // Calendar list fetching removed - backend integration uses owner's primary calendar by default
-    }, []);
-
     // Load allowed embed domains
     useEffect(() => {
         const loadEmbedDomains = async () => {
-            if (!userId) return;
+            if (!userId) {
+                setIsLoadingDomains(false);
+                return;
+            }
 
             try {
                 const response = await fetch(`/api/embed-domains/${userId}`);
@@ -80,6 +74,10 @@ export const Integrations = () => {
     };
 
     const saveDomains = async () => {
+        if (!userId) {
+            showToast('Please sign in to save domains', 'warning');
+            return;
+        }
         setIsSavingDomains(true);
         try {
             const response = await fetch(`/api/embed-domains/${userId}`, {
@@ -107,90 +105,6 @@ export const Integrations = () => {
             setAllowedDomains(prev => [...prev, defaultDomain]);
             setHasChanges(true);
         }
-    };
-
-    const handleConnectCalendar = async () => {
-        setIsLoading(true);
-        try {
-            // Get Auth Code (Code Flow)
-            const { code } = await handleAuthClick();
-
-            if (userId) {
-                // Exchange code for tokens via backend
-                const response = await fetch('/api/calendar/connect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ code, userId })
-                });
-
-                const result = await response.json();
-
-                if (response.ok && result.success) {
-                    // Update local state
-                    const settings: CalendarSettings = {
-                        email: result.email,
-                        calendars: [],
-                        bookingCalendarId: 'primary',
-                        appointmentDuration: 30
-                    };
-                    setCalendarSettings(settings);
-                    setTenantConfig(prev => ({ ...prev, isConnected: true, bookingPlatform: 'GOOGLE_CALENDAR' }));
-
-                    showToast(`✅ Connected to Google Calendar of ${result.email}`, 'success');
-
-                    // Refresh data to show the new connection immediately
-                    await refreshData();
-                } else {
-                    console.error('Backend connection failed:', result.error);
-                    showToast('❌ Failed to connect calendar: ' + (result.error || 'Unknown error'), 'error');
-                }
-            } else {
-                showToast('⚠️ Please sign in to save connection', 'warning');
-            }
-        } catch (err: any) {
-            console.error('Connection error:', err);
-            showToast('❌ Connection canceled or failed', 'error');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-
-    const handleDisconnect = async () => {
-        if (confirm("Are you sure you want to disconnect Google Calendar?")) {
-            try {
-                // Delete from database if userId exists
-                if (userId) {
-                    const { supabase } = await import('../services/supabaseClient');
-                    const { error } = await supabase
-                        .from('calendar_connections')
-                        .delete()
-                        .eq('user_id', userId)
-                        .eq('provider', 'google');
-
-                    if (error) {
-                        console.error('Failed to delete calendar connection:', error);
-                        showToast('⚠️ Failed to disconnect calendar from database', 'error');
-                        return;
-                    }
-                }
-
-                // Update local state
-                setTenantConfig(prev => ({ ...prev, isConnected: false, bookingPlatform: null }));
-                setCalendarSettings(null);
-                showToast('✅ Calendar disconnected successfully', 'success');
-            } catch (err) {
-                console.error('Disconnect error:', err);
-                showToast('❌ Failed to disconnect calendar', 'error');
-            }
-        }
-    };
-
-    const toggleCalendarSelection = (calId: string) => {
-        const updated = calendarSettings.calendars.map(c =>
-            c.id === calId ? { ...c, selected: !c.selected } : c
-        );
-        setCalendarSettings({ ...calendarSettings, calendars: updated });
     };
 
     return (
@@ -312,6 +226,16 @@ export const Integrations = () => {
                         {isLoadingDomains ? (
                             <div className="flex items-center justify-center py-8">
                                 <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                            </div>
+                        ) : !userId ? (
+                            <div className="flex items-start gap-2 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                                <AlertCircle className="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="text-sm text-slate-600 font-medium">Sign in to manage domains</p>
+                                    <p className="text-xs text-slate-500">
+                                        You need to be signed in to add or save allowed embed domains.
+                                    </p>
+                                </div>
                             </div>
                         ) : (
                             <>

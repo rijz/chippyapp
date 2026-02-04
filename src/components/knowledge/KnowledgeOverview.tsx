@@ -8,6 +8,7 @@ export const KnowledgeOverview = () => {
     const [isEditing, setIsEditing] = useState(false);
 
     // Temp state for editing
+    const [companyName, setCompanyName] = useState('');
     const [summary, setSummary] = useState('');
     const [category, setCategory] = useState('');
     const [website, setWebsite] = useState('');
@@ -17,6 +18,7 @@ export const KnowledgeOverview = () => {
     if (!knowledgeData) return null;
 
     const startEditing = () => {
+        setCompanyName(tenantConfig.companyName || '');
         setSummary(knowledgeData.summary || '');
         setCategory(knowledgeData.businessCategory || '');
         setWebsite(tenantConfig.companyUrl);
@@ -39,7 +41,8 @@ export const KnowledgeOverview = () => {
         });
         setTenantConfig({
             ...tenantConfig,
-            companyUrl: website
+            companyUrl: website,
+            companyName: companyName || tenantConfig.companyName
         });
         setIsEditing(false);
     };
@@ -68,17 +71,28 @@ export const KnowledgeOverview = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
                     <div className="md:col-span-2 space-y-3">
                         <div>
-                            <h2 className="text-2xl font-bold text-chippy-navy">{tenantConfig.companyName}</h2>
                             {isEditing ? (
-                                <input
-                                    type="text"
-                                    value={category}
-                                    onChange={(e) => setCategory(e.target.value)}
-                                    className="mt-1 w-full max-w-sm bg-white border border-slate-200 rounded-md px-3 py-1.5 text-sm text-slate-600 focus:ring-2 focus:ring-chippy-coral outline-none"
-                                    placeholder="Business category"
-                                />
+                                <div className="space-y-2">
+                                    <input
+                                        type="text"
+                                        value={companyName}
+                                        onChange={(e) => setCompanyName(e.target.value)}
+                                        className="w-full max-w-sm bg-white border border-slate-200 rounded-md px-3 py-1.5 text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-chippy-coral outline-none"
+                                        placeholder="Business name"
+                                    />
+                                    <input
+                                        type="text"
+                                        value={category}
+                                        onChange={(e) => setCategory(e.target.value)}
+                                        className="w-full max-w-sm bg-white border border-slate-200 rounded-md px-3 py-1.5 text-sm text-slate-600 focus:ring-2 focus:ring-chippy-coral outline-none"
+                                        placeholder="Business category"
+                                    />
+                                </div>
                             ) : (
-                                <p className="text-slate-500 text-sm">{knowledgeData.businessCategory || 'Business category not set'}</p>
+                                <div>
+                                    <h2 className="text-2xl font-bold text-chippy-navy">{tenantConfig.companyName}</h2>
+                                    <p className="text-slate-500 text-sm">{knowledgeData.businessCategory || 'Business category not set'}</p>
+                                </div>
                             )}
                         </div>
 
