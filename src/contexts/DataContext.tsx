@@ -28,6 +28,8 @@ import {
     syncReviewItems
 } from '../services/supabaseStorage';
 import { fetchCalendarConnections, canAddCalendar } from '../services/calendarConnections';
+import { compileBusinessMemory } from '../bdl/compiler';
+import { bdlService } from '../services/bdlService';
 
 // Default Configs (Copied from App.tsx)
 const DEFAULT_TENANT_CONFIG: TenantConfig = {
@@ -287,7 +289,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         }
         if (session?.user?.id && knowledgeData) {
             const timeout = setTimeout(() => syncKnowledgeBase(knowledgeData, session.user.id), 2000);
-            return () => clearTimeout(timeout);
+            const bdlTimeout = setTimeout(() => {
+                try {
+                    const snapshot = compileBusinessMemory(knowledgeData, {
+                        tenantId: session.user.id
+                    });
+                    bdlService.upsertBusinessMemory(snapshot);
+                } catch (error) {
+                    console.error('[BDL] Failed to compile business memory', error);
+                }
+            }, 2500);
+            return () => {
+                clearTimeout(timeout);
+                clearTimeout(bdlTimeout);
+            };
         }
     }, [knowledgeData, session?.user?.id]);
 

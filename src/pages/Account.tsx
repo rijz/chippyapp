@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, CreditCard, Lock, Bell, LogOut, ChevronRight, MapPin, Users } from 'lucide-react';
+import { User, CreditCard, Lock, Bell, LogOut, ChevronRight, MapPin, Users, Sparkles } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { PageHeader } from '../components/layout/PageHeader';
 import { ProfileSection } from '../components/account/ProfileSection';
@@ -8,8 +8,9 @@ import { SecuritySection } from '../components/account/SecuritySection';
 import { NotificationsSection } from '../components/account/NotificationsSection';
 import { LocationsSection } from '../components/account/LocationsSection';
 import { AdminsSection } from '../components/account/AdminsSection';
+import { SkillsSection } from '../components/account/SkillsSection';
 
-type Tab = 'profile' | 'billing' | 'locations' | 'admins' | 'security' | 'notifications';
+type Tab = 'profile' | 'billing' | 'locations' | 'admins' | 'security' | 'notifications' | 'skills';
 
 export const Account = () => {
     const { signOut } = useAuth();
@@ -20,6 +21,7 @@ export const Account = () => {
         { id: 'billing', label: 'Billing & Plan', icon: CreditCard },
         { id: 'locations', label: 'Locations', icon: MapPin },
         { id: 'admins', label: 'Admin Access', icon: Users },
+        { id: 'skills', label: 'Skills', icon: Sparkles },
         { id: 'security', label: 'Security', icon: Lock },
         { id: 'notifications', label: 'Notifications', icon: Bell },
     ];
@@ -68,6 +70,7 @@ export const Account = () => {
                         {activeTab === 'billing' && <BillingSection />}
                         {activeTab === 'locations' && <LocationsSection />}
                         {activeTab === 'admins' && <AdminsSection />}
+                        {activeTab === 'skills' && <SkillsSection />}
                         {activeTab === 'security' && <SecuritySection />}
                         {activeTab === 'notifications' && <NotificationsSection />}
                     </div>

@@ -54,6 +54,44 @@ export const emailService = {
     },
 
     /**
+     * Send an appointment reminder to the customer
+     */
+    async sendAppointmentReminder(toEmail, customerName, details) {
+        const resend = getResendClient();
+        if (!resend) {
+            console.warn('[Email] Skipping reminder email (No API Key)');
+            return;
+        }
+
+        try {
+            const subject = details.subject || 'Upcoming Appointment Reminder';
+            await resend.emails.send({
+                from: FROM_EMAIL,
+                to: [toEmail],
+                subject,
+                html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2>Appointment Reminder ⏰</h2>
+            <p>Hi ${customerName || 'there'},</p>
+            <p>This is a friendly reminder about your upcoming appointment.</p>
+            <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 20px 0;">
+              <p><strong>Date:</strong> ${new Date(details.startTime).toLocaleDateString()}</p>
+              <p><strong>Time:</strong> ${new Date(details.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+              ${details.location ? `<p><strong>Location:</strong> ${details.location}</p>` : ''}
+              ${details.service ? `<p><strong>Service:</strong> ${details.service}</p>` : ''}
+            </div>
+            <p>If you need to reschedule, reply to this email.</p>
+            <p>Best,<br>The Team</p>
+          </div>
+        `
+            });
+            console.log(`[Email] Appointment reminder sent to ${toEmail}`);
+        } catch (error) {
+            console.error('[Email] Failed to send appointment reminder:', error);
+        }
+    },
+
+    /**
      * Send a notification to the business owner about a new lead/booking
      */
     async sendOwnerNotification(ownerEmail, type, data) {
@@ -130,6 +168,38 @@ export const emailService = {
         }
     }
     ,
+
+    /**
+     * Send a daily admin report to the business owner
+     */
+    async sendDailyReport(ownerEmail, stats) {
+        if (!process.env.RESEND_API_KEY) return;
+        const resend = getResendClient();
+        if (!resend) return;
+
+        try {
+            await resend.emails.send({
+                from: FROM_EMAIL,
+                to: [ownerEmail],
+                subject: '🗓️ Chippy Daily Report',
+                html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2>Daily Summary</h2>
+            <p>Here is your daily activity summary:</p>
+            <ul>
+              <li><strong>Bookings:</strong> ${stats.bookings || 0}</li>
+              <li><strong>Leads:</strong> ${stats.leads || 0}</li>
+              <li><strong>Chats:</strong> ${stats.chats || 0}</li>
+            </ul>
+            <p>Have a great day!</p>
+          </div>
+        `
+            });
+            console.log(`[Email] Daily report sent to ${ownerEmail}`);
+        } catch (error) {
+            console.error('[Email] Failed to send daily report:', error);
+        }
+    },
 
     /**
      * Send follow-up email to the customer after a chat (no booking)

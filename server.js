@@ -2259,6 +2259,202 @@ app.post('/api/memory/memorize', async (req, res) => {
   }
 });
 
+// =====================
+// Business Decision Layer (BDL) Endpoints
+// =====================
+
+/**
+ * GET /api/bdl/memory/:userId
+ * Retrieves the compiled business memory snapshot for a tenant
+ */
+app.get('/api/bdl/memory/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ error: 'Missing userId' });
+
+    const { data, error } = await supabaseAdmin
+      .from('business_memory')
+      .select('*')
+      .eq('tenant_id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    res.json({ memory: data || null });
+  } catch (error) {
+    console.error('[BDL] Memory fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch business memory' });
+  }
+});
+
+/**
+ * POST /api/bdl/memory
+ * Upserts the compiled business memory snapshot for a tenant
+ */
+app.post('/api/bdl/memory', async (req, res) => {
+  try {
+    const { tenantId, version, compiledAt, bmsText, sourceHash } = req.body || {};
+
+    if (!tenantId || !bmsText || !sourceHash) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('business_memory')
+      .upsert({
+        tenant_id: tenantId,
+        version: version || 1,
+        compiled_at: compiledAt || new Date().toISOString(),
+        bms_text: bmsText,
+        source_hash: sourceHash,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'tenant_id' });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[BDL] Memory upsert error:', error);
+    res.status(500).json({ error: 'Failed to save business memory' });
+  }
+});
+
+/**
+ * GET /api/bdl/faq/:userId
+ * Retrieves tenant FAQ memory entries
+ */
+app.get('/api/bdl/faq/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const limit = Number(req.query.limit || 50);
+
+    if (!userId) return res.status(400).json({ error: 'Missing userId' });
+
+    const { data, error } = await supabaseAdmin
+      .from('tenant_faq')
+      .select('*')
+      .eq('tenant_id', userId)
+      .order('usage_count', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    res.json({ faq: data || [] });
+  } catch (error) {
+    console.error('[BDL] FAQ fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch tenant FAQ' });
+  }
+});
+
+/**
+ * POST /api/bdl/faq
+ * Inserts a new tenant FAQ entry
+ */
+app.post('/api/bdl/faq', async (req, res) => {
+  try {
+    const { tenantId, question, answer, source, createdAt } = req.body || {};
+
+    if (!tenantId || !question || !answer || !source) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('tenant_faq')
+      .insert({
+        tenant_id: tenantId,
+        question,
+        answer,
+        source,
+        created_at: createdAt || new Date().toISOString()
+      });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[BDL] FAQ insert error:', error);
+    res.status(500).json({ error: 'Failed to save tenant FAQ' });
+  }
+});
+
+/**
+ * POST /api/bdl/events
+ * Persists a BDL event for skill orchestration
+ */
+app.post('/api/bdl/events', async (req, res) => {
+  try {
+    const { tenantId, type, occurredAt, payload, source } = req.body || {};
+
+    if (!tenantId || !type || !payload || !source) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('bdl_events')
+      .insert({
+        tenant_id: tenantId,
+        type,
+        occurred_at: occurredAt || new Date().toISOString(),
+        payload,
+        source
+      });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[BDL] Event insert error:', error);
+    res.status(500).json({ error: 'Failed to persist event' });
+  }
+});
+
+/**
+ * GET /api/bdl/skills/:userId
+ * Retrieves skill subscriptions for a tenant
+ */
+app.get('/api/bdl/skills/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ error: 'Missing userId' });
+
+    const { data, error } = await supabaseAdmin
+      .from('skill_subscriptions')
+      .select('skill_id, status')
+      .eq('tenant_id', userId);
+
+    if (error) throw error;
+    res.json({ skills: data || [] });
+  } catch (error) {
+    console.error('[BDL] Skill fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch skill subscriptions' });
+  }
+});
+
+/**
+ * POST /api/bdl/skills
+ * Upserts a skill subscription
+ */
+app.post('/api/bdl/skills', async (req, res) => {
+  try {
+    const { tenantId, skillId, status, config } = req.body || {};
+
+    if (!tenantId || !skillId || !status) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('skill_subscriptions')
+      .upsert({
+        tenant_id: tenantId,
+        skill_id: skillId,
+        status,
+        config: config || {},
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'tenant_id,skill_id' });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[BDL] Skill upsert error:', error);
+    res.status(500).json({ error: 'Failed to save skill subscription' });
+  }
+});
+
 
 // Handle SPA routing: return index.html for all non-file requests
 app.get('*', (req, res) => {
@@ -2390,6 +2586,238 @@ const processScheduledFollowUps = async () => {
 // Run every 2 minutes
 cron.schedule('*/5 * * * *', async () => {
   await processScheduledFollowUps();
+});
+
+// =====================
+// BDL Event + Job Processor (v0.2)
+// =====================
+const BDL_DEFAULT_ON_SKILLS = new Set(['appointment-reminders', 'daily-admin-report']);
+
+const isSkillActive = async (tenantId, skillId) => {
+  const { data, error } = await supabaseAdmin
+    .from('skill_subscriptions')
+    .select('status')
+    .eq('tenant_id', tenantId)
+    .eq('skill_id', skillId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('[BDL] Skill lookup error:', error);
+    return false;
+  }
+
+  if (!data) return BDL_DEFAULT_ON_SKILLS.has(skillId);
+  return data.status === 'active';
+};
+
+const enqueueBdlJob = async (tenantId, type, executeAt, payload, idempotencyKey) => {
+  const { error } = await supabaseAdmin
+    .from('bdl_jobs')
+    .insert({
+      tenant_id: tenantId,
+      type,
+      execute_at: executeAt,
+      status: 'queued',
+      payload,
+      idempotency_key: idempotencyKey
+    });
+
+  if (error && error.code !== '23505') {
+    console.error('[BDL] Job enqueue error:', error);
+  }
+};
+
+const processBdlEvents = async () => {
+  try {
+    const since = new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString();
+    const { data: events, error } = await supabaseAdmin
+      .from('bdl_events')
+      .select('id, tenant_id, type, occurred_at, payload')
+      .gte('occurred_at', since)
+      .order('occurred_at', { ascending: false })
+      .limit(200);
+
+    if (error) throw error;
+    if (!events || events.length === 0) return;
+
+    for (const event of events) {
+      if (event.type === 'booking.created') {
+        const active = await isSkillActive(event.tenant_id, 'appointment-reminders');
+        if (!active) continue;
+
+        const startAt = event.payload?.start_at || event.payload?.startAt;
+        if (!startAt) continue;
+
+        const startTime = new Date(startAt);
+        const offsets = [
+          { label: '24h', ms: 24 * 60 * 60 * 1000 },
+          { label: '2h', ms: 2 * 60 * 60 * 1000 }
+        ];
+
+        for (const offset of offsets) {
+          const executeAt = new Date(startTime.getTime() - offset.ms).toISOString();
+          if (new Date(executeAt) < new Date()) continue;
+
+          await enqueueBdlJob(
+            event.tenant_id,
+            'appointment-reminder',
+            executeAt,
+            {
+              customer: event.payload?.customer,
+              service: event.payload?.service,
+              location_id: event.payload?.location_id,
+              start_at: startAt
+            },
+            `${event.id}:appointment-reminder:${offset.label}`
+          );
+        }
+      }
+
+      if (event.type === 'report.daily') {
+        const active = await isSkillActive(event.tenant_id, 'daily-admin-report');
+        if (!active) continue;
+
+        await enqueueBdlJob(
+          event.tenant_id,
+          'daily-admin-report',
+          event.occurred_at,
+          { date: event.payload?.date || event.occurred_at },
+          `${event.id}:daily-admin-report`
+        );
+      }
+    }
+  } catch (error) {
+    console.error('[BDL] Event processor error:', error);
+  }
+};
+
+const processBdlJobs = async () => {
+  try {
+    const { data: jobs, error } = await supabaseAdmin
+      .from('bdl_jobs')
+      .select('*')
+      .eq('status', 'queued')
+      .lte('execute_at', new Date().toISOString())
+      .order('execute_at', { ascending: true })
+      .limit(20);
+
+    if (error) throw error;
+    if (!jobs || jobs.length === 0) return;
+
+    for (const job of jobs) {
+      await supabaseAdmin
+        .from('bdl_jobs')
+        .update({ status: 'running' })
+        .eq('id', job.id);
+
+      try {
+        if (job.type === 'appointment-reminder') {
+          const customerEmail = job.payload?.customer?.email;
+          if (customerEmail) {
+            const customerName = job.payload?.customer?.name || 'Customer';
+            await emailService.sendAppointmentReminder(customerEmail, customerName, {
+              startTime: job.payload?.start_at,
+              service: job.payload?.service
+            });
+          }
+        }
+
+        if (job.type === 'daily-admin-report') {
+          const { data: { user } } = await supabaseAdmin.auth.admin.getUserById(job.tenant_id);
+          if (user?.email) {
+            const since = new Date();
+            since.setDate(since.getDate() - 1);
+
+            const { count: bookingCount } = await supabaseAdmin
+              .from('bookings')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', job.tenant_id)
+              .gte('created_at', since.toISOString());
+
+            const { count: leadCount } = await supabaseAdmin
+              .from('leads')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', job.tenant_id)
+              .gte('created_at', since.toISOString());
+
+            const { count: chatCount } = await supabaseAdmin
+              .from('chat_sessions')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', job.tenant_id)
+              .gte('created_at', since.toISOString());
+
+            await emailService.sendDailyReport(user.email, {
+              bookings: bookingCount || 0,
+              leads: leadCount || 0,
+              chats: chatCount || 0
+            });
+          }
+        }
+
+        await supabaseAdmin
+          .from('bdl_jobs')
+          .update({ status: 'completed' })
+          .eq('id', job.id);
+      } catch (jobErr) {
+        console.error('[BDL] Job execution error:', jobErr);
+        await supabaseAdmin
+          .from('bdl_jobs')
+          .update({ status: 'failed' })
+          .eq('id', job.id);
+      }
+    }
+  } catch (error) {
+    console.error('[BDL] Job processor error:', error);
+  }
+};
+
+cron.schedule('*/2 * * * *', async () => {
+  await processBdlEvents();
+});
+
+cron.schedule('* * * * *', async () => {
+  await processBdlJobs();
+});
+
+// Daily report events at 7:00 AM server time
+cron.schedule('0 7 * * *', async () => {
+  try {
+    const { data: subscriptions, error } = await supabaseAdmin
+      .from('skill_subscriptions')
+      .select('tenant_id, status')
+      .eq('skill_id', 'daily-admin-report');
+
+    if (error) throw error;
+    const { data: settings, error: settingsError } = await supabaseAdmin
+      .from('settings')
+      .select('user_id');
+
+    if (settingsError) throw settingsError;
+
+    const statusByTenant = new Map((subscriptions || []).map(s => [s.tenant_id, s.status]));
+    const activeTenantIds = new Set((subscriptions || []).filter(s => s.status === 'active').map(s => s.tenant_id));
+    const allTenantIds = (settings || []).map(s => s.user_id).filter(Boolean);
+    const combinedTenantIds = Array.from(new Set([...allTenantIds, ...activeTenantIds]));
+
+    if (combinedTenantIds.length === 0) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    for (const tenantId of combinedTenantIds) {
+      const status = statusByTenant.get(tenantId);
+      const shouldSend = status === 'active' || (status === undefined && BDL_DEFAULT_ON_SKILLS.has('daily-admin-report'));
+      if (!shouldSend) continue;
+
+      await supabaseAdmin.from('bdl_events').insert({
+        tenant_id: tenantId,
+        type: 'report.daily',
+        occurred_at: new Date().toISOString(),
+        payload: { date: today },
+        source: 'system'
+      });
+    }
+  } catch (error) {
+    console.error('[BDL] Daily report scheduler error:', error);
+  }
 });
 
 // =====================

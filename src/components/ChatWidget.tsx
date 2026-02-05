@@ -2,12 +2,14 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Send, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
 import { Message, TenantConfig, WidgetConfig, BusinessLocation, CalendarConnection } from '../types';
-import { createAgentSession, analyzeInteraction } from '../services/geminiService';
+import { createAgentSession, createBdlAgentSession, analyzeInteraction } from '../services/geminiService';
 import { CALENDAR_TOOLS, executeCalendarTool, ToolContext, CallbackRequestData } from '../services/calendarTools';
 import { LOCATION_TOOL, executeFindClosestLocation, getLocationSelectionPrompt } from '../services/locationTools';
 import { ChatSession } from '@google/generative-ai';
 import DOMPurify from 'dompurify';
 import { DateTimePicker } from './DateTimePicker';
+import { bdlService } from '../services/bdlService';
+import { createEvent } from '../bdl/events';
 
 // Simple Markdown renderer for chat messages with XSS protection
 const FormattedMessage: React.FC<{ text: string }> = ({ text }) => {
@@ -427,6 +429,86 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       const result = await executeCalendarTool(name, args, toolContext);
       setStatusMessage('');
 
+      if (result.success) {
+        try {
+          if (name === 'book_appointment') {
+            const startAt = args.datetime;
+            const duration = args.duration_minutes || 60;
+            const endAt = startAt ? new Date(new Date(startAt).getTime() + duration * 60000).toISOString() : undefined;
+
+            await bdlService.emitEvent(createEvent({
+              tenantId: tenantConfig.userId,
+              type: 'booking.created',
+              source: 'chat',
+              payload: {
+                booking_id: result.data?.eventId,
+                customer: {
+                  name: args.customer_name,
+                  email: args.customer_email,
+                  phone: args.customer_phone
+                },
+                service: args.service_type,
+                location_id: args.location_id,
+                start_at: startAt,
+                end_at: endAt
+              }
+            }));
+          }
+
+          if (name === 'cancel_appointment') {
+            await bdlService.emitEvent(createEvent({
+              tenantId: tenantConfig.userId,
+              type: 'booking.canceled',
+              source: 'chat',
+              payload: {
+                booking_id: args.appointment_id,
+                customer: {
+                  email: args.customer_email
+                },
+                reason: args.reason
+              }
+            }));
+          }
+
+          if (name === 'reschedule_appointment') {
+            await bdlService.emitEvent(createEvent({
+              tenantId: tenantConfig.userId,
+              type: 'booking.updated',
+              source: 'chat',
+              payload: {
+                booking_id: args.appointment_id,
+                customer: {
+                  email: args.customer_email
+                },
+                new_start_at: args.new_datetime
+              }
+            }));
+          }
+
+          if (name === 'request_callback') {
+            await bdlService.emitEvent(createEvent({
+              tenantId: tenantConfig.userId,
+              type: 'callback.requested',
+              source: 'chat',
+              payload: {
+                request_id: `cb_${Date.now()}`,
+                customer: {
+                  name: args.customer_name,
+                  email: args.customer_email,
+                  phone: args.customer_phone
+                },
+                service: args.service,
+                purpose: args.purpose,
+                preferred_time: args.preferred_time,
+                requested_datetime: args.requested_datetime
+              }
+            }));
+          }
+        } catch (error) {
+          console.warn('[BDL] Failed to emit event', error);
+        }
+      }
+
       // Capture available slots for clickable UI
       if (name === 'get_available_slots' && result.success && result.data?.slots) {
         setClickableSlots(result.data.slots);
@@ -464,7 +546,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       { functionDeclarations: [LOCATION_TOOL] }
     ];
 
-    const session = await createAgentSession(
+    const session = await createBdlAgentSession(
       systemInstruction,
       allTools,
       toolExecutor,

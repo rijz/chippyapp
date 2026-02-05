@@ -4,6 +4,7 @@ import {
   HarmBlockThreshold
 } from "@google/generative-ai";
 import { KnowledgeBaseData, KnowledgeConflict, ReviewItem, Sentiment, Message, EnquiryType } from "../types";
+import { bdlService } from "./bdlService";
 import { getEnv } from "../utils/env";
 
 // ALWAYS use the proxy to keep the API key secure on the backend
@@ -231,6 +232,43 @@ export const createAgentSession = async (
       temperature: 0.7,
     },
   });
+};
+
+/**
+ * v0.2 BDL session factory: enriches system instruction with Business Memory + Tenant FAQ.
+ * This keeps the chat model provider-agnostic while grounding responses in curated knowledge.
+ */
+export const createBdlAgentSession = async (
+  systemInstruction: string,
+  tools?: any[],
+  toolExecutor?: (name: string, args: any) => Promise<any>,
+  context?: { userId: string; sessionId: string }
+): Promise<any> => {
+  let bdlContext = '';
+
+  if (context?.userId) {
+    try {
+      const [memory, faq] = await Promise.all([
+        bdlService.getBusinessMemory(context.userId),
+        bdlService.getTenantFaq(context.userId, 25)
+      ]);
+
+      const memoryBlock = memory?.bmsText
+        ? `BEGIN BUSINESS MEMORY\\n${memory.bmsText}\\nEND BUSINESS MEMORY`
+        : 'BEGIN BUSINESS MEMORY\\nNo business memory available.\\nEND BUSINESS MEMORY';
+
+      const faqLines = (faq || []).map(entry => `- Q: ${entry.question}\\n  A: ${entry.answer}`);
+      const faqBlock = faqLines.length > 0
+        ? `BEGIN TENANT FAQ\\n${faqLines.join('\\n')}\\nEND TENANT FAQ`
+        : 'BEGIN TENANT FAQ\\nNo tenant FAQ available.\\nEND TENANT FAQ';
+
+      bdlContext = `\\n\\nBDL CONTEXT (AUTHORITATIVE):\\n${memoryBlock}\\n\\n${faqBlock}\\n\\nUse the BDL context as the primary source of truth. If the answer is missing, ask a clarification question instead of guessing.`;
+    } catch (error) {
+      console.warn('[BDL] Failed to load memory/FAQ', error);
+    }
+  }
+
+  return createAgentSession(`${systemInstruction}${bdlContext}`, tools, toolExecutor, context);
 };
 
 /**
