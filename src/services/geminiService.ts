@@ -322,7 +322,7 @@ export const classifySession = async (messages: Message[]): Promise<{ type: Enqu
         "summary": "User asked about monthly rates.",
         "sentiment": "neutral"
       }
-      `);
+      `;
     const rawText = USE_PROXY
       ? await proxyGenerateContent(prompt)
       : (await getClientModel().getGenerativeModel({ model: 'gemini-2.0-flash' }).generateContent(prompt)).response.text();
@@ -362,7 +362,7 @@ export const analyzeInteraction = async (query: string, response: string): Promi
         "confidence": 0.9,
         "topics": ["topic1", "topic2"]
       }
-      `);
+      `;
     const rawText = USE_PROXY
       ? await proxyGenerateContent(prompt)
       : (await getClientModel().getGenerativeModel({ model: 'gemini-2.0-flash' }).generateContent(prompt)).response.text();
@@ -438,7 +438,7 @@ export const analyzeRawText = async (textContext: string, fileName: string): Pro
               "policies": "Policy/Cancellation information found in text"
             }
             
-            Return ONLY the JSON object.`);
+            Return ONLY the JSON object.`;
     const rawText = USE_PROXY
       ? await proxyGenerateContent(prompt)
       : (await getClientModel().getGenerativeModel({ model: 'gemini-2.0-flash' }).generateContent(prompt)).response.text();
@@ -479,7 +479,7 @@ export const detectConflicts = async (current: KnowledgeBaseData, incoming: Know
                 }
             ]
             
-            If no significant conflicts, return [] (empty array).`);
+            If no significant conflicts, return [] (empty array).`;
     const rawText = USE_PROXY
       ? await proxyGenerateContent(prompt)
       : (await getClientModel().getGenerativeModel({ model: 'gemini-2.0-flash' }).generateContent(prompt)).response.text();
@@ -505,7 +505,7 @@ export const suggestCorrection = async (query: string, poorResponse: string): Pr
             User Query: "${query}"
             Agent Response: "${poorResponse}"
             
-            Please rewrite the response to be more helpful, professional, and goal-oriented (driving towards a booking).`);
+            Please rewrite the response to be more helpful, professional, and goal-oriented (driving towards a booking).`;
     if (USE_PROXY) {
       return await proxyGenerateContent(prompt);
     }

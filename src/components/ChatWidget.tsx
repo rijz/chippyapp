@@ -15,22 +15,98 @@ import { createEvent } from '../bdl/events';
 const FormattedMessage: React.FC<{ text: string }> = ({ text }) => {
   // Convert markdown to HTML and sanitize to prevent XSS
   const sanitizedHtml = useMemo(() => {
-    const formatted = text
-      // Bold: **text** or __text__
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/__(.*?)__/g, '<strong>$1</strong>')
-      // Italic: *text* or _text_
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/_(.*?)_/g, '<em>$1</em>')
-      // Bullet points: - item or * item
-      .replace(/^[-*]\s+(.*)$/gm, '<li class="ml-4 list-disc">$1</li>')
-      // Line breaks
-      .replace(/\n/g, '<br />');
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const lines = text.split('\n');
+    const output: string[] = [];
+    let inUl = false;
+    let inOl = false;
+
+    const closeLists = () => {
+      if (inUl) {
+        output.push('</ul>');
+        inUl = false;
+      }
+      if (inOl) {
+        output.push('</ol>');
+        inOl = false;
+      }
+    };
+
+    const applyInline = (value: string) => {
+      return value
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/__(.*?)__/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/_(.*?)_/g, '<em>$1</em>')
+        .replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 rounded bg-slate-100 text-slate-700">$1</code>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" class="text-chippy-coral underline" target="_blank" rel="noopener noreferrer">$1</a>');
+    };
+
+    for (const rawLine of lines) {
+      const line = rawLine.trimEnd();
+
+      if (!line.trim()) {
+        closeLists();
+        output.push('<br />');
+        continue;
+      }
+
+      if (line.startsWith('### ')) {
+        closeLists();
+        output.push(`<div class="font-semibold text-sm text-slate-800 mt-2">${applyInline(escapeHtml(line.slice(4)))}</div>`);
+        continue;
+      }
+      if (line.startsWith('## ')) {
+        closeLists();
+        output.push(`<div class="font-bold text-base text-slate-800 mt-2">${applyInline(escapeHtml(line.slice(3)))}</div>`);
+        continue;
+      }
+      if (line.startsWith('# ')) {
+        closeLists();
+        output.push(`<div class="font-bold text-lg text-slate-900 mt-2">${applyInline(escapeHtml(line.slice(2)))}</div>`);
+        continue;
+      }
+
+      const ulMatch = line.match(/^[-*]\s+(.*)$/);
+      if (ulMatch) {
+        if (!inUl) {
+          closeLists();
+          output.push('<ul class="list-disc ml-5 space-y-1">');
+          inUl = true;
+        }
+        output.push(`<li>${applyInline(escapeHtml(ulMatch[1]))}</li>`);
+        continue;
+      }
+
+      const olMatch = line.match(/^\d+\.\s+(.*)$/);
+      if (olMatch) {
+        if (!inOl) {
+          closeLists();
+          output.push('<ol class="list-decimal ml-5 space-y-1">');
+          inOl = true;
+        }
+        output.push(`<li>${applyInline(escapeHtml(olMatch[1]))}</li>`);
+        continue;
+      }
+
+      closeLists();
+      output.push(`<p class="leading-relaxed">${applyInline(escapeHtml(line))}</p>`);
+    }
+
+    closeLists();
+    const formatted = output.join('\n');
 
     // Sanitize HTML to prevent XSS attacks
     return DOMPurify.sanitize(formatted, {
-      ALLOWED_TAGS: ['strong', 'em', 'li', 'br', 'ul', 'ol', 'p', 'span'],
-      ALLOWED_ATTR: ['class']
+      ALLOWED_TAGS: ['strong', 'em', 'li', 'br', 'ul', 'ol', 'p', 'span', 'div', 'code', 'a'],
+      ALLOWED_ATTR: ['class', 'href', 'target', 'rel']
     });
   }, [text]);
 
@@ -82,6 +158,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [statusMessage, setStatusMessage] = useState<string>(''); // For showing "Checking calendar..." etc.
   const [clickableSlots, setClickableSlots] = useState<string[]>([]); // Slots user can click to book
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   // Rotating placeholder messages
   const placeholderMessages = [
@@ -101,6 +178,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [leadData, setLeadData] = useState({ name: '', email: '', phone: '' });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasUserMessage = useMemo(() => messages.some(m => m.role === 'user'), [messages]);
 
   // Determine if we should show lead form based on config
   const isPreChatMode = widgetConfig.leadCaptureMode === 'pre-chat';
@@ -162,6 +240,9 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     'Can I book an appointment?',
     'What are your business hours?'
   ];
+
+  const initialPromptTitle = widgetConfig.welcomeTitle || `Welcome to ${tenantConfig.companyName}.`;
+  const initialPromptSubtitle = widgetConfig.welcomeSubtitle || 'How can I help?';
 
   // Initialize welcome message and restore persisted messages
   useEffect(() => {
@@ -594,12 +675,26 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
   // No need for visitor authentication or pending booking state
 
   const scrollToBottom = () => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+      return;
+    }
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isOpen, showLeadForm]);
+    const frame = requestAnimationFrame(() => {
+      scrollToBottom();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [messages, isOpen, showLeadForm, isLoading, clickableSlots]);
+
+  const resetChatSession = () => {
+    const newSessionId = `session_${Date.now()}`;
+    localStorage.setItem('chatSessionId', newSessionId);
+    localStorage.removeItem(`chatMessages_${sessionId}`);
+    window.location.reload();
+  };
 
   // Sanitize user input to prevent XSS and prompt injection
   const sanitizeInput = (text: string): string => {
@@ -787,9 +882,9 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
   return (
     <div className={`fixed bottom-6 z-50 flex flex-col ${positionClass}`}>
       {isOpen && (
-        <div className="bg-white w-[350px] h-[520px] rounded-2xl shadow-2xl border border-slate-200 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+        <div className="bg-white/95 w-[380px] h-[600px] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur">
           {/* Header */}
-          <div className="p-4 flex items-center justify-between text-white" style={{ backgroundColor: widgetConfig.color }}>
+          <div className="px-5 py-4 flex items-center justify-between text-white border-b border-white/20" style={{ backgroundColor: widgetConfig.color }}>
             <div className="flex items-center gap-2">
               <img src="/logo.png" alt="Chippy" className="w-5 h-5 rounded" />
               <div>
@@ -798,33 +893,6 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* Sound Toggle */}
-              <button
-                onClick={() => {
-                  const newValue = !soundEnabled;
-                  setSoundEnabled(newValue);
-                  localStorage.setItem('chatSoundEnabled', String(newValue));
-                }}
-                className="hover:bg-white/20 p-1.5 rounded transition-colors"
-                title={soundEnabled ? 'Mute notifications' : 'Enable notifications'}
-              >
-                {soundEnabled ? '🔔' : '🔕'}
-              </button>
-
-              {/* New Chat Button */}
-              <button
-                onClick={() => {
-                  const newSessionId = `session_${Date.now()} `;
-                  localStorage.setItem('chatSessionId', newSessionId);
-                  localStorage.removeItem(`chatMessages_${sessionId} `);
-                  window.location.reload(); // Reload to start fresh
-                }}
-                className="hover:bg-white/20 p-1.5 rounded transition-colors text-xs"
-                title="Start new conversation"
-              >
-                🔄
-              </button>
-
               {/* Close Button */}
               <button onClick={() => {
                 // Save session before closing
@@ -839,7 +907,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col">
+          <div ref={chatScrollRef} className="flex-1 overflow-y-auto bg-slate-50/70 flex flex-col">
             {showLeadForm ? (
               <div className="p-6 flex-1 flex flex-col">
                 <div className="mb-6">
@@ -913,13 +981,18 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
               </div>
             ) : (
               <>
-                <div className="flex-1 p-4 space-y-4">
+                <div className="flex-1 p-5 space-y-4">
+                  {!hasUserMessage && (
+                    <div className="text-center py-6">
+                      <h2 className="text-2xl font-semibold text-slate-900">{initialPromptTitle}</h2>
+                      <p className="text-lg font-semibold mt-1" style={{ color: widgetConfig.color }}>{initialPromptSubtitle}</p>
+                    </div>
+                  )}
 
-
-                  {messages.map((msg) => (
+                  {messages.filter(msg => !(msg.id === 'welcome' && !hasUserMessage)).map((msg) => (
                     <div key={msg.id}>
                       <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-none'}`} style={msg.role === 'user' ? { backgroundColor: widgetConfig.color } : {}}>
+                        <div className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'text-white rounded-br-md' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-md'}`} style={msg.role === 'user' ? { backgroundColor: widgetConfig.color } : {}}>
                           {msg.role === 'user' ? msg.text : <FormattedMessage text={msg.text} />}
                         </div>
                       </div>
@@ -929,7 +1002,6 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                       </div>
                     </div>
                   ))}
-
 
 
                   {/* Calendar Time Picker - Show when slots are available */}
@@ -953,14 +1025,14 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
 
                   {isLoading && (
                     <div className="flex justify-start">
-                      <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm">
+                      <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-500">thinking..</span>
                           <div className="flex gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                            <span className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                            <span className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                            <span className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }}></span>
                           </div>
+                          <span className="text-xs text-slate-500">Assistant is typing</span>
                         </div>
                       </div>
                     </div>
@@ -970,8 +1042,16 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                   <div ref={messagesEndRef} />
                 </div>
 
-                <div className="p-3 bg-white border-t border-slate-100">
-                  <div className="flex items-center gap-2 bg-slate-50 rounded-full px-4 py-2 border border-slate-200 focus-within:border-chippy-coral transition-colors">
+                <div className="p-4 bg-white border-t border-slate-100">
+                  <div className="flex justify-end mb-2">
+                    <button
+                      onClick={resetChatSession}
+                      className="text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-3 py-1 hover:bg-slate-200 transition-colors"
+                    >
+                      Reset chat
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3 bg-white rounded-2xl px-4 py-3 border border-slate-200 shadow-sm focus-within:border-chippy-coral transition-colors">
                     <input
                       type="text"
                       value={inputText}
@@ -984,6 +1064,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                       <Send className="w-4 h-4" />
                     </button>
                   </div>
+                  <p className="text-[10px] text-slate-400 mt-2">AI-generated answers may contain errors. Always verify information.</p>
                   {showPoweredBy && (
                     <div className="text-center mt-2">
                       <a
