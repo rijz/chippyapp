@@ -160,6 +160,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [statusMessage, setStatusMessage] = useState<string>(''); // For showing "Checking calendar..." etc.
   const [clickableSlots, setClickableSlots] = useState<string[]>([]); // Slots user can click to book
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const [isMounted, setIsMounted] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const [feedbackRating, setFeedbackRating] = useState<number | null>(null);
   const [feedbackComment, setFeedbackComment] = useState('');
@@ -199,6 +200,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       setPlaceholderIndex(prev => prev + 1);
     }, 3000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    setIsMounted(true);
   }, []);
 
   useEffect(() => {
@@ -923,10 +928,12 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
 
   const positionClass = widgetConfig.position === 'left' ? 'left-6 items-start' : 'right-6 items-end';
 
+  if (!isMounted) return null;
+
   return (
     <div className={`fixed bottom-6 z-50 flex flex-col ${positionClass} pointer-events-none`}>
       {isOpen && (
-        <div className="bg-white/95 w-[380px] h-[600px] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur pointer-events-auto">
+        <div className="bg-white/95 w-[380px] max-w-[calc(100vw-24px)] h-[600px] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur pointer-events-auto">
           {/* Header */}
           <div className="px-5 py-4 flex items-center justify-between text-white border-b border-white/20" style={{ backgroundColor: widgetConfig.color }}>
             <div className="flex items-center gap-2">
@@ -951,7 +958,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
           </div>
 
           {/* Body */}
-          <div ref={chatScrollRef} className="flex-1 overflow-y-auto bg-slate-50/70 flex flex-col">
+          <div className="flex-1 bg-slate-50/70 flex flex-col overflow-hidden">
             {showLeadForm ? (
               <div className="p-6 flex-1 flex flex-col">
                 <div className="mb-6">
@@ -1025,7 +1032,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
               </div>
             ) : (
               <>
-                <div className="flex-1 p-5 space-y-4">
+                <div ref={chatScrollRef} className="flex-1 p-5 space-y-4 overflow-y-auto">
                   {!hasUserMessage && (
                     <div className="text-center py-6">
                       <h2 className="text-2xl font-semibold text-slate-900">{initialPromptTitle}</h2>
@@ -1086,7 +1093,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                   <div ref={messagesEndRef} />
                 </div>
 
-                <div className="p-4 bg-white border-t border-slate-100">
+                <div className="p-4 bg-white border-t border-slate-100 sticky bottom-0 z-10">
                   {hasModelMessage && !feedbackSubmitted && (
                     <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3">
                       <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Rate this chat</p>
