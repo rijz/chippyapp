@@ -14,7 +14,38 @@ const USE_PROXY = true;
 // Initialize the client for non-chat operations (scanning, classification, etc.)
 // These run in the authenticated app, not in public embeds
 const apiKey = getEnv('VITE_GEMINI_API_KEY');
-const genAI = new GoogleGenerativeAI(apiKey || '');
+const genAI = USE_PROXY ? null : new GoogleGenerativeAI(apiKey || '');
+
+const getClientModel = () => {
+  if (USE_PROXY) {
+    throw new Error('[Gemini] Direct SDK usage is disabled when USE_PROXY=true.');
+  }
+  if (!genAI) {
+    throw new Error('[Gemini] Client SDK not initialized.');
+  }
+  return genAI;
+};
+
+const proxyGenerateContent = async (prompt: string, temperature = 0.2): Promise<string> => {
+  const response = await fetch('/api-proxy/v1beta/models/gemini-2.0-flash:generateContent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature }
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error?.error || 'Proxy generation failed');
+  }
+
+  const data = await response.json();
+  const content = data?.candidates?.[0]?.content;
+  if (!content?.parts?.length) return '';
+  return content.parts.map((p: any) => p.text || '').join('');
+};
 
 // Custom chat session implementation for proxy mode with Function Calling support
 class ProxyChatSession {
@@ -218,11 +249,7 @@ export const createAgentSession = async (
     return new ProxyChatSession(systemInstruction, tools, toolExecutor, context);
   }
 
-  if (!genAI) {
-    throw new Error('Gemini API not initialized');
-  }
-
-  const model = genAI.getGenerativeModel({
+  const model = getClientModel().getGenerativeModel({
     model: 'gemini-2.0-flash',
     systemInstruction: systemInstruction,
   });
@@ -279,9 +306,7 @@ export const classifySession = async (messages: Message[]): Promise<{ type: Enqu
 
   try {
     const transcript = messages.map(m => `${m.role}: ${m.text}`).join('\n');
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
-    const result = await model.generateContent(`Analyze this chat transcript.
+    const prompt = `Analyze this chat transcript.
       
       TRANSCRIPT:
       ${transcript.substring(0, 5000)}
@@ -298,10 +323,12 @@ export const classifySession = async (messages: Message[]): Promise<{ type: Enqu
         "sentiment": "neutral"
       }
       `);
+    const rawText = USE_PROXY
+      ? await proxyGenerateContent(prompt)
+      : (await getClientModel().getGenerativeModel({ model: 'gemini-2.0-flash' }).generateContent(prompt)).response.text();
 
-    let text = result.response.text();
-    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    const json = JSON.parse(text);
+    const cleaned = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+    const json = JSON.parse(cleaned);
 
     return {
       type: json.type || 'General',
@@ -319,8 +346,7 @@ export const classifySession = async (messages: Message[]): Promise<{ type: Enqu
  */
 export const analyzeInteraction = async (query: string, response: string): Promise<Partial<ReviewItem>> => {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    const result = await model.generateContent(`Analyze this chat interaction between a User and an AI Agent.
+    const prompt = `Analyze this chat interaction between a User and an AI Agent.
       
       User: "${query}"
       AI: "${response}"
@@ -337,10 +363,12 @@ export const analyzeInteraction = async (query: string, response: string): Promi
         "topics": ["topic1", "topic2"]
       }
       `);
+    const rawText = USE_PROXY
+      ? await proxyGenerateContent(prompt)
+      : (await getClientModel().getGenerativeModel({ model: 'gemini-2.0-flash' }).generateContent(prompt)).response.text();
 
-    let text = result.response.text();
-    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    return JSON.parse(text);
+    const cleaned = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+    return JSON.parse(cleaned);
   } catch (error) {
     // Fallback default
     return {
@@ -389,8 +417,7 @@ export const analyzeCompanyContent = async (url: string): Promise<KnowledgeBaseD
  */
 export const analyzeRawText = async (textContext: string, fileName: string): Promise<KnowledgeBaseData | null> => {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    const result = await model.generateContent(`Analyze the following text content from a document named "${fileName}".
+    const prompt = `Analyze the following text content from a document named "${fileName}".
             Extract key business information into a structured format.
             
             Focus heavily on extracting SERVICES, PRICING, and POLICIES if they exist in the text.
@@ -412,13 +439,14 @@ export const analyzeRawText = async (textContext: string, fileName: string): Pro
             }
             
             Return ONLY the JSON object.`);
+    const rawText = USE_PROXY
+      ? await proxyGenerateContent(prompt)
+      : (await getClientModel().getGenerativeModel({ model: 'gemini-2.0-flash' }).generateContent(prompt)).response.text();
+    const cleaned = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
 
-    let text = result.response.text();
-    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    if (!cleaned) return null;
 
-    if (!text) return null;
-
-    const parsedData = JSON.parse(text) as KnowledgeBaseData;
+    const parsedData = JSON.parse(cleaned) as KnowledgeBaseData;
     parsedData.sources = [`Document: ${fileName}`];
     parsedData.lastUpdated = new Date();
 
@@ -434,8 +462,7 @@ export const analyzeRawText = async (textContext: string, fileName: string): Pro
  */
 export const detectConflicts = async (current: KnowledgeBaseData, incoming: KnowledgeBaseData): Promise<KnowledgeConflict[]> => {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    const result = await model.generateContent(`Compare these two business knowledge sets (Current vs New).
+    const prompt = `Compare these two business knowledge sets (Current vs New).
             Identify SIGNIFICANT semantic discrepancies that a human should review.
             Ignore minor formatting differences (e.g., "9am-5pm" vs "09:00 - 17:00" is NOT a conflict).
             
@@ -453,12 +480,13 @@ export const detectConflicts = async (current: KnowledgeBaseData, incoming: Know
             ]
             
             If no significant conflicts, return [] (empty array).`);
+    const rawText = USE_PROXY
+      ? await proxyGenerateContent(prompt)
+      : (await getClientModel().getGenerativeModel({ model: 'gemini-2.0-flash' }).generateContent(prompt)).response.text();
+    const cleaned = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
 
-    let text = result.response.text();
-    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
-
-    if (!text) return [];
-    return JSON.parse(text) as KnowledgeConflict[];
+    if (!cleaned) return [];
+    return JSON.parse(cleaned) as KnowledgeConflict[];
 
   } catch (error) {
     console.error("Conflict detection failed", error);
@@ -471,14 +499,17 @@ export const detectConflicts = async (current: KnowledgeBaseData, incoming: Know
  */
 export const suggestCorrection = async (query: string, poorResponse: string): Promise<string> => {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    const result = await model.generateContent(`You are a QA specialist for an AI booking agent. 
+    const prompt = `You are a QA specialist for an AI booking agent. 
             The agent gave a low-confidence or incorrect response.
             
             User Query: "${query}"
             Agent Response: "${poorResponse}"
             
             Please rewrite the response to be more helpful, professional, and goal-oriented (driving towards a booking).`);
+    if (USE_PROXY) {
+      return await proxyGenerateContent(prompt);
+    }
+    const result = await getClientModel().getGenerativeModel({ model: 'gemini-2.0-flash' }).generateContent(prompt);
     return result.response.text();
   } catch (e) {
     return "";
