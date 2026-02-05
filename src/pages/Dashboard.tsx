@@ -2,7 +2,9 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { AnalyticsChart } from '../components/AnalyticsChart';
 import { PageHeader } from '../components/layout/PageHeader';
 import { useData } from '../contexts/DataContext';
-import { ChartDataPoint } from '../types';
+import { ChartDataPoint, OverviewMetricsResponse } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { fetchOverviewMetrics } from '../services/overviewMetrics';
 
 // Skeleton component for loading state
 const StatSkeleton = () => (
@@ -28,59 +30,60 @@ const ChartSkeleton = () => (
 );
 
 export const Dashboard = () => {
-    const { chatSessions } = useData();
+    const { dashboardData } = useData();
+    const { session } = useAuth();
     const [isLoading, setIsLoading] = useState(true);
+    const [metrics, setMetrics] = useState<OverviewMetricsResponse | null>(null);
 
-    // Simulate initial data load delay
+    // Load overview metrics
     useEffect(() => {
-        const timer = setTimeout(() => setIsLoading(false), 800);
-        return () => clearTimeout(timer);
-    }, []);
-
-    // Compute real metrics from chat sessions
-    const { totalChats, totalBookings, chartData } = useMemo(() => {
-        const total = chatSessions.length;
-
-        // Count bookings (sessions with type 'Booking' or status 'Closed' as proxy)
-        const bookings = chatSessions.filter(s => s.type === 'Booking').length;
-
-        // Generate last 7 days chart data
-        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        const chartMap = new Map<string, ChartDataPoint>();
-
-        for (let i = 6; i >= 0; i--) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            d.setHours(0, 0, 0, 0);
-            const key = d.toISOString().split('T')[0];
-            chartMap.set(key, {
-                name: days[d.getDay()],
-                chats: 0,
-                bookings: 0
-            });
-        }
-
-        // Populate with real session data
-        chatSessions.forEach(session => {
-            const sessionDate = new Date(session.timestamp);
-            sessionDate.setHours(0, 0, 0, 0);
-            const key = sessionDate.toISOString().split('T')[0];
-
-            if (chartMap.has(key)) {
-                const point = chartMap.get(key)!;
-                point.chats += 1;
-                if (session.type === 'Booking') {
-                    point.bookings += 1;
-                }
+        let isActive = true;
+        const load = async () => {
+            if (!session?.user?.id || !session?.access_token) {
+                setIsLoading(false);
+                return;
             }
-        });
+            setIsLoading(true);
+            const response = await fetchOverviewMetrics(session.user.id, session.access_token, 7);
+            if (isActive) {
+                setMetrics(response);
+                setIsLoading(false);
+            }
+        };
+        load();
+        return () => {
+            isActive = false;
+        };
+    }, [session?.user?.id, session?.access_token]);
 
-        const chartData = Array.from(chartMap.values());
+    const chartData = useMemo<ChartDataPoint[]>(() => {
+        if (dashboardData.length > 0) return dashboardData;
+        return [
+            { name: 'Mon', chats: 0, bookings: 0 },
+            { name: 'Tue', chats: 0, bookings: 0 },
+            { name: 'Wed', chats: 0, bookings: 0 },
+            { name: 'Thu', chats: 0, bookings: 0 },
+            { name: 'Fri', chats: 0, bookings: 0 },
+            { name: 'Sat', chats: 0, bookings: 0 },
+            { name: 'Sun', chats: 0, bookings: 0 }
+        ];
+    }, [dashboardData]);
 
-        return { totalChats: total, totalBookings: bookings, chartData };
-    }, [chatSessions]);
-
-    const conversionRate = totalChats > 0 ? ((totalBookings / totalChats) * 100).toFixed(1) : '0';
+    const totalChats = metrics?.chats.total ?? 0;
+    const uniqueVisitors = metrics?.chats.uniqueVisitors ?? 0;
+    const totalBookings = metrics?.outcomes.bookingsCreated ?? 0;
+    const leadsCaptured = metrics?.outcomes.leadsCaptured ?? 0;
+    const conversionRate = metrics?.outcomes.chatToBookingConversion !== undefined
+        ? (metrics.outcomes.chatToBookingConversion * 100).toFixed(1)
+        : '0';
+    const avgResponseTime = metrics?.chats.avgResponseTimeMs
+        ? `${(metrics.chats.avgResponseTimeMs / 1000).toFixed(1)}s`
+        : '—';
+    const avgRating = metrics?.quality.avgFeedbackRating !== null && metrics?.quality.avgFeedbackRating !== undefined
+        ? metrics.quality.avgFeedbackRating.toFixed(1)
+        : '—';
+    const topIntents = metrics?.insights.topIntents || [];
+    const topTopics = metrics?.insights.topReviewTopics || [];
 
     return (
         <div className="w-full space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -100,18 +103,34 @@ export const Dashboard = () => {
                 </>
             ) : (
                 <>
-                    <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
-                        <div className="flex items-center justify-between px-6 py-4">
-                            <p className="text-sm text-slate-600">Total Chats</p>
-                            <span className="text-lg font-semibold text-chippy-navy">{totalChats}</span>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <p className="text-xs font-semibold text-slate-500 uppercase">Total Chats</p>
+                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{totalChats}</p>
                         </div>
-                        <div className="flex items-center justify-between px-6 py-4">
-                            <p className="text-sm text-slate-600">Confirmed Bookings</p>
-                            <span className="text-lg font-semibold text-chippy-navy">{totalBookings}</span>
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <p className="text-xs font-semibold text-slate-500 uppercase">Unique Visitors</p>
+                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{uniqueVisitors}</p>
                         </div>
-                        <div className="flex items-center justify-between px-6 py-4">
-                            <p className="text-sm text-slate-600">Conversion Rate</p>
-                            <span className="text-lg font-semibold text-chippy-navy">{conversionRate}%</span>
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <p className="text-xs font-semibold text-slate-500 uppercase">Bookings</p>
+                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{totalBookings}</p>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <p className="text-xs font-semibold text-slate-500 uppercase">Leads Captured</p>
+                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{leadsCaptured}</p>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <p className="text-xs font-semibold text-slate-500 uppercase">Conversion Rate</p>
+                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{conversionRate}%</p>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <p className="text-xs font-semibold text-slate-500 uppercase">Avg Response Time</p>
+                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{avgResponseTime}</p>
+                        </div>
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <p className="text-xs font-semibold text-slate-500 uppercase">Avg Rating</p>
+                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{avgRating}</p>
                         </div>
                     </div>
                     <div className="bg-white p-6 rounded-xl border border-slate-200">
@@ -120,6 +139,39 @@ export const Dashboard = () => {
                             <span className="text-xs text-slate-400">Last 7 days</span>
                         </div>
                         <AnalyticsChart data={chartData} />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Top Intents</h3>
+                            {topIntents.length === 0 ? (
+                                <p className="text-sm text-slate-400">No intent data yet.</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {topIntents.map(item => (
+                                        <div key={item.name} className="flex items-center justify-between text-sm">
+                                            <span className="text-slate-600">{item.name}</span>
+                                            <span className="font-semibold text-chippy-navy">{item.value}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="bg-white p-6 rounded-xl border border-slate-200">
+                            <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Top Review Topics</h3>
+                            {topTopics.length === 0 ? (
+                                <p className="text-sm text-slate-400">No review topics yet.</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {topTopics.map(item => (
+                                        <div key={item.name} className="flex items-center justify-between text-sm">
+                                            <span className="text-slate-600">{item.name}</span>
+                                            <span className="font-semibold text-chippy-navy">{item.value}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </>
             )}

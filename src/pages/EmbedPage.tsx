@@ -174,6 +174,26 @@ export const EmbedPage = () => {
         }
     };
 
+    const handleFeedback = async (data: { rating: number; sentiment?: 'positive' | 'neutral' | 'negative'; comment?: string }) => {
+        if (!tenantConfig.userId) return;
+
+        try {
+            await fetch('/api/widget/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: tenantConfig.userId,
+                    sessionId: sessionIdRef.current,
+                    rating: data.rating,
+                    sentiment: data.sentiment,
+                    comment: data.comment
+                })
+            });
+        } catch (e) {
+            console.error('[EmbedPage] Failed to save feedback:', e);
+        }
+    };
+
     // Lead capture handler
     const handleLeadCapture = async (leadData: { name: string; email: string; phone: string }) => {
         if (!tenantConfig.userId) return;
@@ -369,6 +389,7 @@ export const EmbedPage = () => {
                 widgetConfig={widgetConfig}
                 knowledgeSummary={knowledgeData ? JSON.stringify(knowledgeData) : ""}
                 onInteraction={handleInteraction}
+                onFeedback={handleFeedback}
                 onLeadCapture={handleLeadCapture}
                 onSessionUpdate={handleSessionUpdate}
                 onBookingComplete={handleBookingComplete}

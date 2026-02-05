@@ -709,6 +709,51 @@ app.post('/api/widget/session', widgetDataLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Missing userId or session data' });
     }
 
+    // Compute response time metrics from messages (if timestamps exist)
+    const parseMessageTimestamp = (value) => {
+      if (!value) return null;
+      const date = value instanceof Date ? value : new Date(value);
+      const ts = date.getTime();
+      return Number.isFinite(ts) ? ts : null;
+    };
+
+    const computeResponseStats = (messages) => {
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return { firstResponseMs: null, avgResponseMs: null };
+      }
+
+      const responseTimes = [];
+      for (let i = 0; i < messages.length; i += 1) {
+        const msg = messages[i];
+        if (!msg || msg.role !== 'user') continue;
+        const userTs = parseMessageTimestamp(msg.timestamp);
+        if (!userTs) continue;
+
+        for (let j = i + 1; j < messages.length; j += 1) {
+          const next = messages[j];
+          if (next && next.role === 'model') {
+            const modelTs = parseMessageTimestamp(next.timestamp);
+            if (modelTs) {
+              responseTimes.push(Math.max(0, modelTs - userTs));
+            }
+            break;
+          }
+        }
+      }
+
+      if (responseTimes.length === 0) {
+        return { firstResponseMs: null, avgResponseMs: null };
+      }
+
+      const total = responseTimes.reduce((sum, value) => sum + value, 0);
+      return {
+        firstResponseMs: responseTimes[0],
+        avgResponseMs: Math.round(total / responseTimes.length)
+      };
+    };
+
+    const responseStats = computeResponseStats(session.messages);
+
     // Upsert session to chat_sessions table
     const { error } = await supabaseAdmin
       .from('chat_sessions')
@@ -723,7 +768,9 @@ app.post('/api/widget/session', widgetDataLimiter, async (req, res) => {
         type: session.type || 'General',
         sentiment: session.sentiment || 'neutral',
         status: session.status || 'Opened',
-        created_at: session.timestamp || new Date().toISOString()
+        created_at: session.timestamp || new Date().toISOString(),
+        first_response_ms: responseStats.firstResponseMs,
+        avg_response_ms: responseStats.avgResponseMs
       }, { onConflict: 'id' });
 
     if (error) throw error;
@@ -851,6 +898,273 @@ app.post('/api/widget/interaction', widgetDataLimiter, async (req, res) => {
   } catch (error) {
     console.error('[API] Widget interaction error:', error);
     res.status(500).json({ error: 'Failed to save interaction' });
+  }
+});
+
+/**
+ * POST /api/widget/feedback
+ * Saves user feedback rating for a chat session
+ */
+app.post('/api/widget/feedback', widgetDataLimiter, async (req, res) => {
+  try {
+    const userId = sanitizeInput(req.body.userId);
+    const sessionId = sanitizeInput(req.body.sessionId);
+    const rating = req.body?.rating;
+    const sentiment = sanitizeInput(req.body?.sentiment);
+    const comment = sanitizeInput(req.body?.comment);
+
+    if (!userId || !sessionId || rating === undefined || rating === null) {
+      return res.status(400).json({ error: 'Missing userId, sessionId, or rating' });
+    }
+
+    const ratingValue = Number(rating);
+    if (!Number.isFinite(ratingValue) || ratingValue < 1 || ratingValue > 5) {
+      return res.status(400).json({ error: 'Rating must be a number between 1 and 5' });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('chat_sessions')
+      .update({
+        feedback_rating: ratingValue,
+        feedback_sentiment: sentiment || null,
+        feedback_comment: comment || null,
+        feedback_created_at: new Date().toISOString()
+      })
+      .eq('id', sessionId)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[API] Widget feedback error:', error);
+    res.status(500).json({ error: 'Failed to save feedback' });
+  }
+});
+
+/**
+ * GET /api/overview-metrics/:userId
+ * Aggregates chat + interaction + outcome metrics for the dashboard
+ */
+app.get('/api/overview-metrics/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const days = Number(req.query.days || 7);
+
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+
+    // =====================
+    // SECURITY: Verify the caller owns this userId
+    // =====================
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    if (user.id !== userId) {
+      return res.status(403).json({ error: 'You can only access your own metrics' });
+    }
+    // =====================
+
+    const since = new Date();
+    since.setDate(since.getDate() - (Number.isFinite(days) ? days : 7));
+    const sinceIso = since.toISOString();
+
+    const parseMessages = (messages) => {
+      if (!messages) return [];
+      if (Array.isArray(messages)) return messages;
+      if (typeof messages === 'string') {
+        try {
+          const parsed = JSON.parse(messages);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    };
+
+    const { data: chats, error: chatError } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('id, customer_email, customer_phone, messages, sentiment, type, status, triage, followup_status, created_at, first_response_ms, avg_response_ms, feedback_rating')
+      .eq('user_id', userId)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false });
+
+    if (chatError) throw chatError;
+
+    const chatRows = chats || [];
+    const totalChats = chatRows.length;
+
+    const uniqueChatters = new Set();
+    const chatEmailSet = new Set();
+    const sentimentCounts = {};
+    const intentCounts = {};
+    let totalMessages = 0;
+    let followupRequired = 0;
+    let followupSent = 0;
+    let responseTimeSum = 0;
+    let responseTimeCount = 0;
+    let feedbackSum = 0;
+    let feedbackCount = 0;
+
+    for (const chat of chatRows) {
+      const email = chat.customer_email ? String(chat.customer_email).toLowerCase() : null;
+      const phone = chat.customer_phone || null;
+      if (email) {
+        uniqueChatters.add(`email:${email}`);
+        chatEmailSet.add(email);
+      } else if (phone) {
+        uniqueChatters.add(`phone:${phone}`);
+      } else if (chat.id) {
+        uniqueChatters.add(`session:${chat.id}`);
+      }
+
+      const messages = parseMessages(chat.messages);
+      totalMessages += messages.length;
+
+      const sentiment = chat.sentiment || 'neutral';
+      sentimentCounts[sentiment] = (sentimentCounts[sentiment] || 0) + 1;
+
+      let intent = chat.type || 'General';
+      if (chat.triage && typeof chat.triage === 'object') {
+        intent = chat.triage.intent || intent;
+      } else if (typeof chat.triage === 'string') {
+        try {
+          const parsed = JSON.parse(chat.triage);
+          intent = parsed?.intent || intent;
+        } catch {
+          // ignore parse errors
+        }
+      }
+      intentCounts[intent] = (intentCounts[intent] || 0) + 1;
+
+      if (chat.followup_status === 'scheduled' || chat.followup_status === 'sent') {
+        followupRequired += 1;
+      }
+      if (chat.followup_status === 'sent') {
+        followupSent += 1;
+      }
+
+      const avgResponseMs = chat.avg_response_ms || null;
+      if (avgResponseMs !== null && avgResponseMs !== undefined) {
+        responseTimeSum += Number(avgResponseMs) || 0;
+        responseTimeCount += 1;
+      }
+
+      if (chat.feedback_rating !== null && chat.feedback_rating !== undefined) {
+        feedbackSum += Number(chat.feedback_rating) || 0;
+        feedbackCount += 1;
+      }
+    }
+
+    const avgMessagesPerChat = totalChats > 0 ? Number((totalMessages / totalChats).toFixed(2)) : 0;
+    const avgResponseTimeMs = responseTimeCount > 0 ? Math.round(responseTimeSum / responseTimeCount) : null;
+    const avgFeedbackRating = feedbackCount > 0 ? Number((feedbackSum / feedbackCount).toFixed(2)) : null;
+
+    const { data: reviewItems, error: reviewError } = await supabaseAdmin
+      .from('review_items')
+      .select('confidence, sentiment, topics, created_at')
+      .eq('user_id', userId)
+      .gte('created_at', sinceIso);
+
+    if (reviewError) throw reviewError;
+
+    const reviewRows = reviewItems || [];
+    const lowConfidenceCount = reviewRows.length;
+    const topicCounts = {};
+    for (const item of reviewRows) {
+      const topics = Array.isArray(item.topics) ? item.topics : [];
+      for (const topic of topics) {
+        if (!topic) continue;
+        topicCounts[topic] = (topicCounts[topic] || 0) + 1;
+      }
+    }
+
+    const { data: leads, error: leadsError } = await supabaseAdmin
+      .from('leads')
+      .select('id, source, created_at')
+      .eq('user_id', userId)
+      .gte('created_at', sinceIso);
+
+    if (leadsError) throw leadsError;
+    const leadRows = leads || [];
+    const leadsCaptured = leadRows.length;
+    const leadsFromChat = leadRows.filter(lead => lead.source === 'AI Chat').length;
+
+    const { data: bookings, error: bookingsError } = await supabaseAdmin
+      .from('bookings')
+      .select('id, customer_email, created_at')
+      .eq('user_id', userId)
+      .gte('created_at', sinceIso);
+
+    if (bookingsError) throw bookingsError;
+    const bookingRows = bookings || [];
+    const bookingsCreated = bookingRows.length;
+    const bookingsFromChat = bookingRows.filter(b => {
+      const email = b.customer_email ? String(b.customer_email).toLowerCase() : null;
+      return email && chatEmailSet.has(email);
+    }).length;
+
+    const chatToLeadConversion = totalChats > 0 ? Number((leadsFromChat / totalChats).toFixed(3)) : 0;
+    const chatToBookingConversion = totalChats > 0 ? Number((bookingsFromChat / totalChats).toFixed(3)) : 0;
+    const lowConfidenceRate = totalChats > 0 ? Number((lowConfidenceCount / totalChats).toFixed(3)) : 0;
+    const followupRequiredRate = totalChats > 0 ? Number((followupRequired / totalChats).toFixed(3)) : 0;
+    const followupSentRate = totalChats > 0 ? Number((followupSent / totalChats).toFixed(3)) : 0;
+
+    const topIntents = Object.entries(intentCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, value]) => ({ name, value }));
+
+    const topTopics = Object.entries(topicCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, value]) => ({ name, value }));
+
+    res.json({
+      range: {
+        days,
+        since: sinceIso
+      },
+      chats: {
+        total: totalChats,
+        uniqueVisitors: uniqueChatters.size,
+        avgMessagesPerChat,
+        sentiment: sentimentCounts,
+        avgResponseTimeMs,
+        followupRequiredRate,
+        followupSentRate
+      },
+      quality: {
+        lowConfidenceCount,
+        lowConfidenceRate,
+        avgFeedbackRating
+      },
+      outcomes: {
+        leadsCaptured,
+        bookingsCreated,
+        leadsFromChat,
+        bookingsFromChat,
+        chatToLeadConversion,
+        chatToBookingConversion
+      },
+      insights: {
+        topIntents,
+        topReviewTopics: topTopics
+      }
+    });
+  } catch (error) {
+    console.error('[API] Overview metrics error:', error);
+    res.status(500).json({ error: 'Failed to load overview metrics' });
   }
 });
 

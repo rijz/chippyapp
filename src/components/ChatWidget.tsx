@@ -128,6 +128,7 @@ interface ChatWidgetProps {
   onBookingComplete?: (customerEmail: string, customerName?: string, customerPhone?: string, service?: string, locationId?: string, locationName?: string) => void;
   onCancellation?: (customerEmail: string) => void;
   onCallbackRequest?: (data: CallbackRequestData) => void;
+  onFeedback?: (data: { rating: number; sentiment?: 'positive' | 'neutral' | 'negative'; comment?: string }) => void;
   showPoweredBy?: boolean; // Show "Powered by Chippy" badge for free users
   locations?: BusinessLocation[]; // Business locations for multi-location support
   calendarConnections?: CalendarConnection[]; // Calendar connections per location
@@ -144,6 +145,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   onBookingComplete,
   onCancellation,
   onCallbackRequest,
+  onFeedback,
   showPoweredBy = false,
   locations = [],
   calendarConnections = []
@@ -159,6 +161,9 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [clickableSlots, setClickableSlots] = useState<string[]>([]); // Slots user can click to book
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const [feedbackRating, setFeedbackRating] = useState<number | null>(null);
+  const [feedbackComment, setFeedbackComment] = useState('');
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
   // Rotating placeholder messages
   const placeholderMessages = [
@@ -179,6 +184,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasUserMessage = useMemo(() => messages.some(m => m.role === 'user'), [messages]);
+  const hasModelMessage = useMemo(() => messages.some(m => m.role === 'model'), [messages]);
+  const feedbackStorageKey = useMemo(() => `chatFeedback_${sessionId}`, [sessionId]);
 
   // Determine if we should show lead form based on config
   const isPreChatMode = widgetConfig.leadCaptureMode === 'pre-chat';
@@ -193,6 +200,21 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     }, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(feedbackStorageKey);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored);
+      if (parsed?.rating) {
+        setFeedbackRating(parsed.rating);
+        setFeedbackComment(parsed.comment || '');
+        setFeedbackSubmitted(true);
+      }
+    } catch {
+      // Ignore invalid storage
+    }
+  }, [feedbackStorageKey]);
 
   // Sound notification function
   const playNotificationSound = () => {
@@ -693,7 +715,29 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     const newSessionId = `session_${Date.now()}`;
     localStorage.setItem('chatSessionId', newSessionId);
     localStorage.removeItem(`chatMessages_${sessionId}`);
+    localStorage.removeItem(feedbackStorageKey);
     window.location.reload();
+  };
+
+  const submitFeedback = async () => {
+    if (feedbackSubmitted || !feedbackRating) return;
+    const sentiment = feedbackRating >= 4 ? 'positive' : feedbackRating <= 2 ? 'negative' : 'neutral';
+    if (onFeedback) {
+      onFeedback({
+        rating: feedbackRating,
+        sentiment,
+        comment: feedbackComment.trim() ? feedbackComment.trim() : undefined
+      });
+    }
+    localStorage.setItem(
+      feedbackStorageKey,
+      JSON.stringify({
+        rating: feedbackRating,
+        comment: feedbackComment.trim(),
+        submittedAt: new Date().toISOString()
+      })
+    );
+    setFeedbackSubmitted(true);
   };
 
   // Sanitize user input to prevent XSS and prompt injection
@@ -880,9 +924,9 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
   const positionClass = widgetConfig.position === 'left' ? 'left-6 items-start' : 'right-6 items-end';
 
   return (
-    <div className={`fixed bottom-6 z-50 flex flex-col ${positionClass}`}>
+    <div className={`fixed bottom-6 z-50 flex flex-col ${positionClass} pointer-events-none`}>
       {isOpen && (
-        <div className="bg-white/95 w-[380px] h-[600px] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur">
+        <div className="bg-white/95 w-[380px] h-[600px] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur pointer-events-auto">
           {/* Header */}
           <div className="px-5 py-4 flex items-center justify-between text-white border-b border-white/20" style={{ backgroundColor: widgetConfig.color }}>
             <div className="flex items-center gap-2">
@@ -1043,6 +1087,42 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                 </div>
 
                 <div className="p-4 bg-white border-t border-slate-100">
+                  {hasModelMessage && !feedbackSubmitted && (
+                    <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                      <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Rate this chat</p>
+                      <div className="flex items-center gap-2 mb-2">
+                        {[1, 2, 3, 4, 5].map(value => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setFeedbackRating(value)}
+                            className={`w-8 h-8 rounded-full text-xs font-semibold border transition-colors ${feedbackRating === value ? 'text-white' : 'bg-white text-slate-600 border-slate-200'}`}
+                            style={feedbackRating === value ? { backgroundColor: widgetConfig.color, borderColor: widgetConfig.color } : {}}
+                          >
+                            {value}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea
+                        value={feedbackComment}
+                        onChange={(e) => setFeedbackComment(e.target.value)}
+                        placeholder="Optional feedback..."
+                        className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-chippy-coral"
+                        rows={2}
+                      />
+                      <div className="flex justify-end mt-2">
+                        <button
+                          type="button"
+                          onClick={submitFeedback}
+                          disabled={!feedbackRating}
+                          className="text-xs font-semibold px-3 py-1 rounded-full text-white disabled:opacity-50"
+                          style={{ backgroundColor: widgetConfig.color }}
+                        >
+                          Submit
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex justify-end mb-2">
                     <button
                       onClick={resetChatSession}
@@ -1086,7 +1166,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
 
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="text-white p-4 rounded-full shadow-lg hover:scale-110 transition-all duration-300"
+        className="text-white p-4 rounded-full shadow-lg hover:scale-110 transition-all duration-300 pointer-events-auto"
         style={{ backgroundColor: widgetConfig.color }}
       >
         {isOpen ? <X className="w-6 h-6" /> : <img src="/logo.png" alt="Chippy" className="w-6 h-6 rounded" />}

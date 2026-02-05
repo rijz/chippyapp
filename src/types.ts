@@ -97,6 +97,12 @@ export interface ChatSessionRecord {
   sentiment: Sentiment;
   timestamp: Date;
   status: 'Opened' | 'Closed' | 'Archived' | 'Reviewed';
+  firstResponseMs?: number;
+  avgResponseMs?: number;
+  feedbackRating?: number;
+  feedbackComment?: string;
+  feedbackSentiment?: Sentiment;
+  feedbackCreatedAt?: Date;
   triage?: {
     summary?: string;
     intent?: string;
@@ -106,6 +112,39 @@ export interface ChatSessionRecord {
   followUpStatus?: 'disabled' | 'scheduled' | 'sent' | 'skipped' | 'none';
   followUpScheduledAt?: Date;
   followUpSentAt?: Date;
+}
+
+export interface OverviewMetricsResponse {
+  range: {
+    days: number;
+    since: string;
+  };
+  chats: {
+    total: number;
+    uniqueVisitors: number;
+    avgMessagesPerChat: number;
+    sentiment: Record<string, number>;
+    avgResponseTimeMs: number | null;
+    followupRequiredRate: number;
+    followupSentRate: number;
+  };
+  quality: {
+    lowConfidenceCount: number;
+    lowConfidenceRate: number;
+    avgFeedbackRating: number | null;
+  };
+  outcomes: {
+    leadsCaptured: number;
+    bookingsCreated: number;
+    leadsFromChat: number;
+    bookingsFromChat: number;
+    chatToLeadConversion: number;
+    chatToBookingConversion: number;
+  };
+  insights: {
+    topIntents: Array<{ name: string; value: number }>;
+    topReviewTopics: Array<{ name: string; value: number }>;
+  };
 }
 
 export interface ChartDataPoint {
