@@ -35,6 +35,55 @@
     };
 
     // Create and inject the iframe
+    function applyClosedStyles(iframe) {
+        iframe.dataset.chippyState = 'closed';
+        iframe.style.width = '88px';
+        iframe.style.height = '88px';
+        iframe.style.maxHeight = '88px';
+        iframe.style.bottom = '16px';
+        iframe.style.borderRadius = '9999px';
+        iframe.style.left = config.position === 'left' ? '16px' : 'auto';
+        iframe.style.right = config.position === 'right' ? '16px' : 'auto';
+    }
+
+    function applyOpenStyles(iframe) {
+        iframe.dataset.chippyState = 'open';
+        iframe.style.width = '400px';
+        iframe.style.height = '700px';
+        iframe.style.maxHeight = '90vh';
+        iframe.style.bottom = '0';
+        iframe.style.borderRadius = '24px';
+        if (config.position === 'left') {
+            iframe.style.left = '0';
+            iframe.style.right = 'auto';
+        } else {
+            iframe.style.right = '0';
+            iframe.style.left = 'auto';
+        }
+    }
+
+    function applyMobileClosedStyles(iframe) {
+        iframe.dataset.chippyState = 'closed';
+        iframe.style.width = '72px';
+        iframe.style.height = '72px';
+        iframe.style.maxHeight = '72px';
+        iframe.style.bottom = '16px';
+        iframe.style.left = 'auto';
+        iframe.style.right = '16px';
+        iframe.style.borderRadius = '9999px';
+    }
+
+    function applyMobileOpenStyles(iframe) {
+        iframe.dataset.chippyState = 'open';
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.style.maxHeight = '100%';
+        iframe.style.bottom = '0';
+        iframe.style.left = '0';
+        iframe.style.right = '0';
+        iframe.style.borderRadius = '0';
+    }
+
     function createWidget() {
         var iframe = document.createElement('iframe');
         iframe.id = config.iframeId;
@@ -61,15 +110,11 @@
             'transition: opacity 0.3s ease'
         ].join('; ');
 
-        // Mobile responsive
+        // Default to closed state so the page remains clickable
         if (window.innerWidth <= 480) {
-            iframe.style.width = '100%';
-            iframe.style.height = '100%';
-            iframe.style.maxHeight = '100%';
-            iframe.style.bottom = '0';
-            iframe.style.right = '0';
-            iframe.style.left = '0';
-            iframe.style.borderRadius = '0';
+            applyMobileClosedStyles(iframe);
+        } else {
+            applyClosedStyles(iframe);
         }
 
         document.body.appendChild(iframe);
@@ -77,24 +122,31 @@
         // Handle window resize for mobile
         window.addEventListener('resize', function () {
             var isMobile = window.innerWidth <= 480;
+            var isOpen = iframe.dataset.chippyState === 'open';
             if (isMobile) {
-                iframe.style.width = '100%';
-                iframe.style.height = '100%';
-                iframe.style.maxHeight = '100%';
-                iframe.style.left = '0';
-                iframe.style.right = '0';
-                iframe.style.borderRadius = '0';
-            } else {
-                iframe.style.width = '400px';
-                iframe.style.height = '700px';
-                iframe.style.maxHeight = '90vh';
-                if (config.position === 'left') {
-                    iframe.style.left = '0';
-                    iframe.style.right = 'auto';
+                if (isOpen) {
+                    applyMobileOpenStyles(iframe);
                 } else {
-                    iframe.style.right = '0';
-                    iframe.style.left = 'auto';
+                    applyMobileClosedStyles(iframe);
                 }
+            } else {
+                if (isOpen) {
+                    applyOpenStyles(iframe);
+                } else {
+                    applyClosedStyles(iframe);
+                }
+            }
+        });
+
+        // Listen for open/close events from the iframe
+        window.addEventListener('message', function (event) {
+            if (!event.data || event.data.type !== 'chippy:widget-state') return;
+            var isOpen = !!event.data.open;
+            var isMobile = window.innerWidth <= 480;
+            if (isMobile) {
+                isOpen ? applyMobileOpenStyles(iframe) : applyMobileClosedStyles(iframe);
+            } else {
+                isOpen ? applyOpenStyles(iframe) : applyClosedStyles(iframe);
             }
         });
     }

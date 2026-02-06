@@ -716,6 +716,11 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     return () => cancelAnimationFrame(frame);
   }, [messages, isOpen, showLeadForm, isLoading, clickableSlots]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.parent?.postMessage({ type: 'chippy:widget-state', open: isOpen }, '*');
+  }, [isOpen]);
+
   const resetChatSession = () => {
     const newSessionId = `session_${Date.now()}`;
     localStorage.setItem('chatSessionId', newSessionId);
@@ -933,7 +938,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
   return (
     <div className={`fixed bottom-6 z-50 flex flex-col ${positionClass} pointer-events-none`}>
       {isOpen && (
-        <div className="bg-white/95 w-[380px] max-w-[calc(100vw-24px)] h-[600px] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur pointer-events-auto">
+        <div className="bg-white/95 w-[calc(100vw-24px)] sm:w-[380px] h-[600px] max-h-[calc(100vh-120px)] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur pointer-events-auto">
           {/* Header */}
           <div className="px-5 py-4 flex items-center justify-between text-white border-b border-white/20" style={{ backgroundColor: widgetConfig.color }}>
             <div className="flex items-center gap-2">
@@ -1094,7 +1099,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                 </div>
 
                 <div className="p-4 bg-white border-t border-slate-100 sticky bottom-0 z-10">
-                  {hasModelMessage && !feedbackSubmitted && (
+                  {hasModelMessage && hasUserMessage && !feedbackSubmitted && (
                     <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3">
                       <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Rate this chat</p>
                       <div className="flex items-center gap-2 mb-2">
