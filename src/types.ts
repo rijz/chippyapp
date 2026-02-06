@@ -203,6 +203,7 @@ export interface KnowledgeBaseData {
   services: Service[];        // NEW: Structured services with pricing
   legacyServices?: string[];  // OLD: For migration - string array format
   businessHours: string | null;
+  businessHoursByDay?: Record<string, string>;
   contactInfo: string | null;
   pricing?: string | null;    // DEPRECATED: Legacy pricing text (kept for migration)
   policies: string | null;
@@ -262,6 +263,23 @@ export interface CalendarSettings {
   bookingCalendarId: string;
   appointmentDuration: number;
   connections?: CalendarConnection[]; // New multi-location connections
+}
+
+export interface BookingRecord {
+  id: string;
+  userId: string;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  serviceType?: string;
+  description?: string;
+  startTime: Date;
+  endTime: Date;
+  status?: 'confirmed' | 'cancelled' | 'completed';
+  provider?: string;
+  locationId?: string;
+  createdAt?: Date;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Subscription {

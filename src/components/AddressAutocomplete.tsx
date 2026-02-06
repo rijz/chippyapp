@@ -15,6 +15,7 @@ interface AddressAutocompleteProps {
     placeholder?: string;
     className?: string;
     error?: boolean;
+    autoComplete?: string;
 }
 
 // Declare google globally
@@ -31,7 +32,8 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
     onPlaceSelect,
     placeholder = "Start typing your address...",
     className = "",
-    error = false
+    error = false,
+    autoComplete = 'street-address'
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -161,6 +163,9 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
                     componentRestrictions: { country: ['us', 'ca'] },
                     types: ['address'],
                 });
+
+                placeAutocomplete.setAttribute('placeholder', placeholder);
+                placeAutocomplete.setAttribute('autocomplete', autoComplete);
 
                 // Style the element to match our design
                 placeAutocomplete.style.cssText = `
@@ -294,6 +299,7 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 placeholder={placeholder}
+                autoComplete={autoComplete}
                 className={`w-full pl-10 p-2 border rounded-lg text-sm bg-white ${error
                         ? 'border-red-300 focus:ring-red-200'
                         : 'border-slate-200 focus:ring-2 focus:ring-chippy-coral'

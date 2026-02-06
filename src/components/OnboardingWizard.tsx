@@ -75,6 +75,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       state: '',
       zip: ''
    }]);
+   const [isAutoFillingAddress, setIsAutoFillingAddress] = useState(false);
+   const autoFillAttemptedRef = useRef(false);
 
    // Step 2 State
    const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -109,6 +111,103 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
          logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }
    }, [logs]);
+
+   const extractAddressFromComponents = (components: Array<{ types: string[]; long_name?: string; short_name?: string }>) => {
+      let streetNumber = '';
+      let streetName = '';
+      let city = '';
+      let state = '';
+      let zip = '';
+
+      for (const component of components) {
+         const types = component.types || [];
+         if (types.includes('street_number')) {
+            streetNumber = component.long_name || component.short_name || '';
+         } else if (types.includes('route')) {
+            streetName = component.long_name || component.short_name || '';
+         } else if (types.includes('locality') || types.includes('sublocality_level_1')) {
+            city = component.long_name || component.short_name || '';
+         } else if (types.includes('administrative_area_level_1')) {
+            state = component.short_name || component.long_name || '';
+         } else if (types.includes('postal_code')) {
+            zip = component.long_name || component.short_name || '';
+         }
+      }
+
+      return {
+         address: `${streetNumber} ${streetName}`.trim(),
+         city,
+         state,
+         zip
+      };
+   };
+
+   const autoFillAddressFromLocation = async () => {
+      if (isAutoFillingAddress) return;
+      if (!navigator.geolocation) return;
+      if (!window?.google?.maps?.Geocoder) return;
+
+      setIsAutoFillingAddress(true);
+
+      try {
+         const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 8000 });
+         });
+
+         const geocoder = new window.google.maps.Geocoder();
+         const { latitude, longitude } = position.coords;
+
+         geocoder.geocode({ location: { lat: latitude, lng: longitude } }, (results: any, status: string) => {
+            if (status !== 'OK' || !results || !results[0]) {
+               setIsAutoFillingAddress(false);
+               return;
+            }
+
+            const components = results[0].address_components || [];
+            const parsed = extractAddressFromComponents(components);
+            if (!parsed.address) {
+               setIsAutoFillingAddress(false);
+               return;
+            }
+
+            setLocations(prev => {
+               const next = [...prev];
+               const target = next[0] || { name: 'Main Location', address: '', city: '', state: '', zip: '' };
+               next[0] = {
+                  ...target,
+                  address: parsed.address || target.address,
+                  city: parsed.city || target.city,
+                  state: parsed.state || target.state,
+                  zip: parsed.zip || target.zip
+               };
+               return next;
+            });
+
+            setIsAutoFillingAddress(false);
+         });
+      } catch {
+         setIsAutoFillingAddress(false);
+      }
+   };
+
+   useEffect(() => {
+      if (step !== 2) return;
+      if (businessType !== 'storefront') return;
+      if (autoFillAttemptedRef.current) return;
+      if (locations[0]?.address) return;
+
+      autoFillAttemptedRef.current = true;
+
+      const waitForGoogle = async () => {
+         const start = Date.now();
+         while (!window?.google?.maps?.Geocoder && Date.now() - start < 5000) {
+            await new Promise(resolve => setTimeout(resolve, 150));
+         }
+         await autoFillAddressFromLocation();
+      };
+
+      waitForGoogle();
+   }, [step, businessType, locations]);
 
    const addLog = (message: string, status: LogEntry['status'] = 'processing') => {
       setLogs(prev => [...prev, {
@@ -587,6 +686,17 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                        <Plus className="w-4 h-4" /> Add Location
                                     </button>
                                  )}
+                              </div>
+                              <div className="flex items-center justify-between text-xs text-slate-500">
+                                 <span>Use your current location to autofill.</span>
+                                 <button
+                                    type="button"
+                                    onClick={autoFillAddressFromLocation}
+                                    disabled={isAutoFillingAddress}
+                                    className="text-slate-700 font-semibold hover:underline disabled:opacity-50"
+                                 >
+                                    {isAutoFillingAddress ? 'Detecting...' : 'Use current location'}
+                                 </button>
                               </div>
                               {locations.map((loc, i) => (
                                  <div key={i} className="p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-3">

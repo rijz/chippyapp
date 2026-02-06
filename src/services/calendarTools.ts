@@ -386,7 +386,7 @@ async function bookAppointment(
                 userId,
                 summary: `Appointment with ${args.customer_name}${args.service_type ? ` - ${args.service_type}` : ''}`,
                 description: [
-                    `Customer: ${args.customer_name}`,
+                    `Name: ${args.customer_name}`,
                     `Email: ${args.customer_email}`,
                     args.customer_phone ? `Phone: ${args.customer_phone}` : '',
                     args.location_name ? `Location: ${args.location_name}` : '',
@@ -403,7 +403,11 @@ async function bookAppointment(
                 locationId: args.location_id,
                 locationName: args.location_name,
                 calendarId: targetCalendar?.calendarId,
-                providerEmail: targetCalendar?.providerEmail
+                providerEmail: targetCalendar?.providerEmail,
+                customerName: args.customer_name,
+                customerEmail: args.customer_email,
+                customerPhone: args.customer_phone,
+                serviceType: args.service_type || undefined
             })
         });
 

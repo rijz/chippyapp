@@ -11,7 +11,8 @@ import {
     Subscription,
     PLAN_DETAILS,
     Lead,
-    CalendarConnection
+    CalendarConnection,
+    BookingRecord
 } from '../types';
 import { storage } from '../services/storage';
 import {
@@ -25,6 +26,7 @@ import {
     syncChatSessions,
     syncLeads,
     fetchLeads,
+    fetchBookings,
     syncReviewItems
 } from '../services/supabaseStorage';
 import { fetchCalendarConnections, canAddCalendar } from '../services/calendarConnections';
@@ -116,10 +118,14 @@ interface DataContextType {
     setChatSessions: React.Dispatch<React.SetStateAction<ChatSessionRecord[]>>;
     reviewItems: ReviewItem[];
     setReviewItems: React.Dispatch<React.SetStateAction<ReviewItem[]>>;
+    bookings: BookingRecord[];
+    setBookings: React.Dispatch<React.SetStateAction<BookingRecord[]>>;
     subscription: Subscription;
     setSubscription: React.Dispatch<React.SetStateAction<Subscription>>;
     leads: Lead[];
     setLeads: React.Dispatch<React.SetStateAction<Lead[]>>;
+    bookings: BookingRecord[];
+    setBookings: React.Dispatch<React.SetStateAction<BookingRecord[]>>;
     addLead: (lead: Omit<Lead, 'id' | 'date'>) => void;
     updateLeadStatus: (email: string, status: Lead['status']) => void;
     isFeatureEnabled: (feature: string) => boolean;
@@ -180,6 +186,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const [reviewItems, setReviewItems] = useState<ReviewItem[]>(() => storage.getReviewItems([]));
     const [subscription, setSubscription] = useState<Subscription>(DEFAULT_SUBSCRIPTION);
     const [leads, setLeads] = useState<Lead[]>(() => storage.getLeads([]));
+    const [bookings, setBookings] = useState<BookingRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true); // Track initial data loading
 
     // Helper to add a new lead
@@ -269,6 +276,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         const remoteLeads = await fetchLeads(userId);
         if (remoteLeads && remoteLeads.length > 0) {
             setLeads(remoteLeads);
+        }
+
+        const remoteBookings = await fetchBookings(userId);
+        if (remoteBookings && remoteBookings.length > 0) {
+            setBookings(remoteBookings);
         }
     };
 
@@ -389,6 +401,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             subscription: { ...subscription, usage: currentUsage },
             setSubscription,
             leads, setLeads, addLead, updateLeadStatus,
+            bookings, setBookings,
             isFeatureEnabled,
             getOverageCost,
             canAddMoreCalendars,

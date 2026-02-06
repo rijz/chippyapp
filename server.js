@@ -2104,7 +2104,13 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
       endTime,
       attendees = [],
       timezone = 'America/New_York',
-      provider = 'google'
+      provider = 'google',
+      customerName,
+      customerEmail,
+      customerPhone,
+      serviceType,
+      locationId,
+      locationName
     } = req.body;
 
     if (!userId || !summary || !startTime || !endTime) {
@@ -2130,21 +2136,27 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
           description,
           startTime: new Date(startTime),
           endTime: new Date(endTime),
-          attendees,
+          attendees: Array.isArray(attendees)
+            ? attendees
+                .filter(Boolean)
+                .map(a => (typeof a === 'string' ? { email: a } : a))
+            : [],
           timezone
         }
       );
 
       // Send transactional emails asynchronously
       try {
-        const customerEmail = attendees.find(a => a.email)?.email;
-        if (customerEmail) {
-          // Send confirmation to customer
-          // Parse name from summary or description if possible, else use "Customer"
-          // Start legacy description parsing... ideally we pass structured data
-          const custName = description?.match(/Name: (.*?)(\n|$)/)?.[1] || 'Valued Customer';
+        const emailFromAttendees = Array.isArray(attendees)
+          ? attendees.find(a => typeof a === 'string' ? a : a?.email)?.email || attendees.find(a => typeof a === 'string') || null
+          : null;
+        const resolvedCustomerEmail = customerEmail || emailFromAttendees || null;
+        const resolvedCustomerName = customerName || description?.match(/Name: (.*?)(\n|$)/)?.[1] || description?.match(/Customer: (.*?)(\n|$)/)?.[1] || 'Valued Customer';
+        const resolvedCustomerPhone = customerPhone || description?.match(/Phone: (.*?)(\n|$)/)?.[1] || null;
 
-          emailService.sendBookingConfirmation(customerEmail, custName, {
+        if (resolvedCustomerEmail) {
+          // Send confirmation to customer
+          emailService.sendBookingConfirmation(resolvedCustomerEmail, resolvedCustomerName, {
             startTime,
             description: summary
           });
@@ -2152,8 +2164,8 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
           // Send notification to owner
           if (connection.provider_email) {
             emailService.sendOwnerNotification(connection.provider_email, 'booking', {
-              customerName: custName,
-              customerEmail: customerEmail,
+              customerName: resolvedCustomerName,
+              customerEmail: resolvedCustomerEmail,
               startTime: startTime,
               description: description
             });
@@ -2163,15 +2175,17 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
         // ANALYTICS: Track booking in database
         const { error: dbError } = await supabaseAdmin.from('bookings').insert({
           user_id: userId,
-          customer_email: customerEmail || null,
-          customer_name: description?.match(/Name: (.*?)(\n|$)/)?.[1] || 'Unknown',
-          customer_phone: description?.match(/Phone: (.*?)(\n|$)/)?.[1] || null,
-          service_type: 'Appointment', // Future: extract from description
+          customer_email: resolvedCustomerEmail,
+          customer_name: resolvedCustomerName,
+          customer_phone: resolvedCustomerPhone,
+          service_type: serviceType || 'Appointment',
           description: summary,
           start_time: startTime,
           end_time: endTime,
           status: 'confirmed',
-          provider: 'google'
+          provider: 'google',
+          location_id: locationId || null,
+          location_name: locationName || null
         });
 
         if (dbError) console.error('[Analytics] Failed to track booking:', dbError);
@@ -2188,6 +2202,75 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
     res.status(500).json({
       error: error.message || 'Failed to create calendar event'
     });
+  }
+});
+
+/**
+ * POST /api/bookings/backfill
+ * Backfill booking customer info by parsing description when missing
+ */
+app.post('/api/bookings/backfill', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    const { userId } = req.body || {};
+    if (!userId || user.id !== userId) {
+      return res.status(403).json({ error: 'Not authorized for this user' });
+    }
+
+    const { data: bookings, error: fetchError } = await supabaseAdmin
+      .from('bookings')
+      .select('*')
+      .eq('user_id', userId)
+      .or('customer_name.is.null,customer_email.is.null,customer_phone.is.null');
+
+    if (fetchError) throw fetchError;
+    if (!bookings || bookings.length === 0) {
+      return res.json({ success: true, updated: 0 });
+    }
+
+    let updated = 0;
+    for (const booking of bookings) {
+      const description = booking.description || '';
+      const name = description.match(/Name: (.*?)(\n|$)/)?.[1]
+        || description.match(/Customer: (.*?)(\n|$)/)?.[1]
+        || null;
+      const email = description.match(/Email: (.*?)(\n|$)/)?.[1] || null;
+      const phone = description.match(/Phone: (.*?)(\n|$)/)?.[1] || null;
+
+      if (!name && !email && !phone) {
+        continue;
+      }
+
+      const { error: updateError } = await supabaseAdmin
+        .from('bookings')
+        .update({
+          customer_name: booking.customer_name || name,
+          customer_email: booking.customer_email || email,
+          customer_phone: booking.customer_phone || phone
+        })
+        .eq('id', booking.id);
+
+      if (updateError) {
+        console.error('[Backfill] Update failed:', updateError);
+        continue;
+      }
+      updated += 1;
+    }
+
+    res.json({ success: true, updated });
+  } catch (error) {
+    console.error('[API] Booking backfill error:', error);
+    res.status(500).json({ error: 'Failed to backfill bookings' });
   }
 });
 

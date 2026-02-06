@@ -8,7 +8,7 @@ import { LeadDetailsPanel } from '../components/LeadDetailsPanel';
 import { PageHeader } from '../components/layout/PageHeader';
 
 export const Leads = () => {
-    const { leads, setLeads, knowledgeData, calendarConnections } = useData();
+    const { leads, setLeads, knowledgeData, calendarConnections, bookings } = useData();
     const [searchParams, setSearchParams] = useSearchParams();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedLocationId, setSelectedLocationId] = useState<string>('all');
@@ -28,6 +28,7 @@ export const Leads = () => {
     }, [viewParam]);
 
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+    const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
 
     // Get unique locations from knowledge base and calendar connections
     const locations = knowledgeData?.locations || [];
@@ -54,8 +55,37 @@ export const Leads = () => {
         setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
     };
 
+    const normalizePhone = (value?: string) => (value || '').replace(/[^\d+]/g, '');
+
+    const findBookingForLead = (lead: Lead) => {
+        const email = (lead.email || '').toLowerCase();
+        const phone = normalizePhone(lead.phone || '');
+        const matches = bookings.filter(b => {
+            const bookingEmail = (b.customerEmail || '').toLowerCase();
+            const bookingPhone = normalizePhone(b.customerPhone || '');
+            return (email && bookingEmail && bookingEmail === email) ||
+                (phone && bookingPhone && bookingPhone === phone);
+        });
+        if (matches.length === 0) return null;
+        return matches[0];
+    };
+
+    const formatAppointmentDate = (lead: Lead) => {
+        const booking = findBookingForLead(lead);
+        if (booking?.startTime) {
+            return booking.startTime.toLocaleString();
+        }
+        if (lead.requestedCallbackDate) {
+            return new Date(lead.requestedCallbackDate).toLocaleString();
+        }
+        if (lead.preferredTime) {
+            return lead.preferredTime;
+        }
+        return '';
+    };
+
     const exportToCSV = () => {
-        const headers = ['Name', 'Email', 'Phone', 'Status', 'Source', 'Date', 'Service', 'Notes'];
+        const headers = ['Name', 'Email', 'Phone', 'Status', 'Source', 'Created Date', 'Appointment Date', 'Service', 'Notes'];
         const csvContent = [
             headers.join(','),
             ...leads.map(lead => [
@@ -65,6 +95,7 @@ export const Leads = () => {
                 `"${lead.status}"`,
                 `"${lead.source}"`,
                 `"${new Date(lead.date).toLocaleDateString()}"`,
+                `"${formatAppointmentDate(lead)}"`,
                 `"${lead.service || ''}"`,
                 `"${(lead.notes || '').replace(/"/g, '""')}"`
             ].join(','))
@@ -95,11 +126,12 @@ export const Leads = () => {
             />
 
             {/* View Tabs */}
-            <div className="grid grid-cols-3 gap-2 bg-slate-100 p-2 rounded-xl md:w-fit">
+            <div className="bg-white border border-slate-200 rounded-xl p-2 md:w-fit">
+                <div className="grid grid-cols-3 gap-2">
                 <button
                     onClick={() => setCurrentView('All')}
                     className={`flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-all
-                        ${currentView === 'All' ? 'bg-white text-chippy-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}
+                        ${currentView === 'All' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}
                     `}
                 >
                     <LayoutList className="w-4 h-4" /> All Customers
@@ -107,7 +139,7 @@ export const Leads = () => {
                 <button
                     onClick={() => setCurrentView('Appointments')}
                     className={`flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-all
-                        ${currentView === 'Appointments' ? 'bg-white text-chippy-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}
+                        ${currentView === 'Appointments' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}
                     `}
                 >
                     <Calendar className="w-4 h-4" /> Appointments
@@ -115,23 +147,24 @@ export const Leads = () => {
                 <button
                     onClick={() => setCurrentView('CallBacks')}
                     className={`flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-all
-                        ${currentView === 'CallBacks' ? 'bg-white text-chippy-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}
+                        ${currentView === 'CallBacks' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}
                     `}
                 >
                     <PhoneIncoming className="w-4 h-4" /> Callbacks
                 </button>
+                </div>
             </div>
 
             {/* Canvas/Table Area */}
             <div className="space-y-4">
                 {/* Search and Filter Header */}
-                <div className="flex items-center gap-4">
-                    <div className="relative flex-1">
+                <div className="flex flex-wrap items-center gap-4">
+                    <div className="relative flex-1 min-w-[240px]">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
                             type="text"
                             placeholder="Search leads..."
-                            className="w-full pl-10 pr-4 py-2 bg-white/50 border border-slate-200/50 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
+                            className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral transition-all"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
@@ -155,18 +188,35 @@ export const Leads = () => {
                             </select>
                         </div>
                     )}
+
+                    <div className="ml-auto flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-1">
+                        <button
+                            onClick={() => setDensity('comfortable')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${density === 'comfortable' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            Comfortable
+                        </button>
+                        <button
+                            onClick={() => setDensity('compact')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${density === 'compact' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            Compact
+                        </button>
+                    </div>
                 </div>
 
                 <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden min-h-[400px]">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
-                            <thead>
-                                <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 font-bold">
-                                    <th className="p-6">Name</th>
-                                    <th className="p-6">Contact</th>
-                                    <th className="p-6">Status</th>
-                                    <th className="p-6">Source</th>
-                                    <th className="p-6">Date</th>
+                            <thead className="sticky top-0 bg-white z-10 shadow-[inset_0_-1px_0_0_#e2e8f0]">
+                                <tr className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                                    <th className="p-4">Customer</th>
+                                    <th className="p-4">Status</th>
+                                    <th className="p-4">Created</th>
+                                    <th className="p-4">Appointment</th>
+                                    <th className="p-4">Contact</th>
+                                    <th className="p-4">Source</th>
+                                    <th className="p-4 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -176,24 +226,24 @@ export const Leads = () => {
                                         onClick={() => setSelectedLead(lead)}
                                         className="hover:bg-slate-50 transition-colors group cursor-pointer"
                                     >
-                                        <td className="p-6">
+                                        <td className={density === 'compact' ? 'p-3' : 'p-4'}>
                                             <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-lg">
+                                                <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-sm">
                                                     {lead.name[0]}
                                                 </div>
                                                 <div>
                                                     <div className="font-bold text-chippy-navy">{lead.name}</div>
                                                     <div className="flex items-center gap-2 flex-wrap mt-1">
                                                         {lead.priority && (
-                                                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-100 text-slate-600 uppercase tracking-wider">
+                                                            <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-100 text-slate-600 uppercase tracking-wider">
                                                                 {lead.priority}
                                                             </span>
                                                         )}
-                                                    {lead.service && (
-                                                        <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
-                                                            {lead.service}
-                                                        </span>
-                                                    )}
+                                                        {lead.service && (
+                                                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                                                                {lead.service}
+                                                            </span>
+                                                        )}
                                                         {lead.locationName && (
                                                             <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
                                                                 <MapPin className="w-3 h-3" />
@@ -201,22 +251,12 @@ export const Leads = () => {
                                                             </span>
                                                         )}
                                                     </div>
-                                                    <div className="text-xs text-slate-400 max-w-[150px] truncate mt-0.5">{lead.notes || lead.purpose}</div>
+                                                    <div className="text-xs text-slate-400 max-w-[180px] truncate mt-0.5">{lead.notes || lead.purpose}</div>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="p-6">
-                                            <div className="space-y-1">
-                                                <div className="flex items-center gap-2 text-sm text-slate-600">
-                                                    <Mail className="w-3 h-3 text-slate-400" /> {lead.email}
-                                                </div>
-                                                <div className="flex items-center gap-2 text-sm text-slate-600">
-                                                    <Phone className="w-3 h-3 text-slate-400" /> {lead.phone}
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="p-6">
-                                            <span className={`px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5
+                                        <td className={density === 'compact' ? 'p-3' : 'p-4'}>
+                                            <span className={`px-3 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1.5
                                                 ${lead.status === 'Booked' ? 'bg-emerald-100 text-emerald-700' :
                                                     lead.status === 'Call Back' ? 'bg-amber-100 text-amber-700' :
                                                         lead.status === 'New' ? 'bg-blue-100 text-blue-700' :
@@ -227,17 +267,34 @@ export const Leads = () => {
                                                 {lead.status}
                                             </span>
                                         </td>
-                                        <td className="p-6">
-                                            <span className="text-sm font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
-                                                {lead.source}
-                                            </span>
+                                        <td className={density === 'compact' ? 'p-3' : 'p-4'}>
+                                            <div className="flex items-center gap-2 text-sm text-slate-500">
+                                                <Calendar className="w-4 h-4 text-slate-400" />
+                                                {new Date(lead.date).toLocaleDateString()}
+                                            </div>
                                         </td>
-                                        <td className="p-6">
+                                        <td className={density === 'compact' ? 'p-3' : 'p-4'}>
                                             <div className="flex flex-col gap-1 text-sm text-slate-500">
-                                                <div className="flex items-center gap-2">
-                                                    <Calendar className="w-4 h-4 text-slate-400" />
-                                                    {new Date(lead.date).toLocaleDateString()}
-                                                </div>
+                                                {(() => {
+                                                    const booking = findBookingForLead(lead);
+                                                    if (booking?.startTime) {
+                                                        return (
+                                                            <div className="flex items-center gap-2">
+                                                                <Calendar className="w-4 h-4 text-slate-400" />
+                                                                {booking.startTime.toLocaleString()}
+                                                            </div>
+                                                        );
+                                                    }
+                                                    if (lead.requestedCallbackDate) {
+                                                        return (
+                                                            <div className="flex items-center gap-2">
+                                                                <Calendar className="w-4 h-4 text-slate-400" />
+                                                                {new Date(lead.requestedCallbackDate).toLocaleString()}
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return <div className="text-slate-400">—</div>;
+                                                })()}
                                                 {lead.preferredTime && (
                                                     <div className="flex items-center gap-2 text-amber-600 font-medium">
                                                         <Clock className="w-4 h-4" />
@@ -245,6 +302,32 @@ export const Leads = () => {
                                                     </div>
                                                 )}
                                             </div>
+                                        </td>
+                                        <td className={density === 'compact' ? 'p-3' : 'p-4'}>
+                                            <div className="space-y-1">
+                                                <div className="flex items-center gap-2 text-sm text-slate-600">
+                                                    <Mail className="w-3 h-3 text-slate-400" /> {lead.email}
+                                                </div>
+                                                <div className="flex items-center gap-2 text-sm text-slate-600">
+                                                    <Phone className="w-3 h-3 text-slate-400" /> {lead.phone}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className={density === 'compact' ? 'p-3' : 'p-4'}>
+                                            <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
+                                                {lead.source}
+                                            </span>
+                                        </td>
+                                        <td className={density === 'compact' ? 'p-3 text-right' : 'p-4 text-right'}>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setSelectedLead(lead);
+                                                }}
+                                                className="text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors"
+                                            >
+                                                View
+                                            </button>
                                         </td>
                                     </tr>
                                 ))}
@@ -264,6 +347,7 @@ export const Leads = () => {
             {selectedLead && (
                 <LeadDetailsPanel
                     lead={selectedLead}
+                    booking={findBookingForLead(selectedLead)}
                     onClose={() => setSelectedLead(null)}
                     onUpdate={handleUpdateLead}
                 />

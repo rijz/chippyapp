@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { KnowledgeBaseData, TenantConfig, WidgetConfig, CalendarSettings, ChatSessionRecord, ReviewItem, ChartDataPoint, Lead } from '../types';
+import { KnowledgeBaseData, TenantConfig, WidgetConfig, CalendarSettings, ChatSessionRecord, ReviewItem, ChartDataPoint, Lead, BookingRecord } from '../types';
 
 /**
  * Uploads a file to the 'knowledge-assets' Supabase Storage bucket.
@@ -386,5 +386,40 @@ export const fetchLeads = async (userId: string): Promise<Lead[] | null> => {
   } catch (error) {
     console.error('Leads Fetch Error:', error);
     return null;
+  }
+};
+
+/**
+ * BOOKINGS FETCH
+ */
+export const fetchBookings = async (userId: string): Promise<BookingRecord[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('user_id', userId)
+      .order('start_time', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map(row => ({
+      id: row.id,
+      userId: row.user_id,
+      customerName: row.customer_name || undefined,
+      customerEmail: row.customer_email || undefined,
+      customerPhone: row.customer_phone || undefined,
+      serviceType: row.service_type || undefined,
+      description: row.description || undefined,
+      startTime: new Date(row.start_time),
+      endTime: new Date(row.end_time),
+      status: row.status || undefined,
+      provider: row.provider || undefined,
+      locationId: row.location_id || undefined,
+      createdAt: row.created_at ? new Date(row.created_at) : undefined,
+      metadata: row.metadata || undefined
+    }));
+  } catch (error) {
+    console.error('Bookings Fetch Error:', error);
+    return [];
   }
 };

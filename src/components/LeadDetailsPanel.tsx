@@ -1,14 +1,15 @@
 import React from 'react';
 import { X, Mail, Phone, Calendar, Clock, Tag, FileText, User } from 'lucide-react';
-import { Lead } from '../types';
+import { Lead, BookingRecord } from '../types';
 
 interface LeadDetailsPanelProps {
     lead: Lead;
+    booking?: BookingRecord | null;
     onClose: () => void;
     onUpdate: (updatedLead: Lead) => void;
 }
 
-export const LeadDetailsPanel: React.FC<LeadDetailsPanelProps> = ({ lead, onClose, onUpdate }) => {
+export const LeadDetailsPanel: React.FC<LeadDetailsPanelProps> = ({ lead, booking, onClose, onUpdate }) => {
     const [isEditing, setIsEditing] = React.useState(false);
     const [editedLead, setEditedLead] = React.useState<Lead>(lead);
 
@@ -116,22 +117,39 @@ export const LeadDetailsPanel: React.FC<LeadDetailsPanelProps> = ({ lead, onClos
                 )}
 
                 {/* Requested Callback Date/Time */}
-                {lead.requestedCallbackDate && (
+                {(booking?.startTime || lead.requestedCallbackDate) && (
                     <div className="space-y-3">
-                        <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Requested Callback Time</h3>
-                        <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg">
-                            <div className="flex items-center gap-2 text-amber-700 font-bold text-sm">
+                        <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">
+                            {booking?.startTime ? 'Appointment' : 'Requested Callback Time'}
+                        </h3>
+                        <div className={`${booking?.startTime ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'} border p-3 rounded-lg`}>
+                            <div className="flex items-center gap-2 font-bold text-sm">
                                 <Calendar className="w-5 h-5" />
-                                {new Date(lead.requestedCallbackDate).toLocaleString('en-US', {
-                                    weekday: 'long',
-                                    month: 'long',
-                                    day: 'numeric',
-                                    year: 'numeric',
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                    hour12: true
-                                })}
+                                {booking?.startTime
+                                    ? booking.startTime.toLocaleString('en-US', {
+                                        weekday: 'long',
+                                        month: 'long',
+                                        day: 'numeric',
+                                        year: 'numeric',
+                                        hour: 'numeric',
+                                        minute: '2-digit',
+                                        hour12: true
+                                    })
+                                    : new Date(lead.requestedCallbackDate as Date).toLocaleString('en-US', {
+                                        weekday: 'long',
+                                        month: 'long',
+                                        day: 'numeric',
+                                        year: 'numeric',
+                                        hour: 'numeric',
+                                        minute: '2-digit',
+                                        hour12: true
+                                    })}
                             </div>
+                            {booking?.serviceType && (
+                                <div className="mt-2 text-xs font-medium text-emerald-700">
+                                    Service: {booking.serviceType}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

@@ -5,7 +5,7 @@ import { ReviewItem } from '../types';
 import { PageHeader } from '../components/layout/PageHeader';
 
 export const ReviewQueue = () => {
-    const { reviewItems, setReviewItems, knowledgeData, setKnowledgeData } = useData();
+    const { reviewItems, setReviewItems, knowledgeData, setKnowledgeData, widgetConfig } = useData();
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [correctionText, setCorrectionText] = useState('');
@@ -89,6 +89,8 @@ export const ReviewQueue = () => {
             item.id === id ? { ...item, status } : item
         ));
     };
+
+    const agentLabel = widgetConfig?.title?.trim() || 'Chippy';
 
     return (
         <div className="w-full space-y-6 animate-in fade-in duration-500">
@@ -210,12 +212,12 @@ export const ReviewQueue = () => {
 
                             {/* AI Response */}
                             <div className="flex gap-4">
-                                <div className="w-10 h-10 rounded-full bg-chippy-coral/10 flex items-center justify-center shrink-0">
-                                    <BrainCircuit className="w-5 h-5 text-chippy-coral" />
+                                <div className="w-10 h-10 rounded-full bg-chippy-navy/10 border border-chippy-navy/20 flex items-center justify-center shrink-0">
+                                    <img src="/logo.png" alt="Chippy" className="w-5 h-5 rounded" />
                                 </div>
                                 <div className="space-y-4 w-full max-w-2xl">
                                     <div className="flex justify-between items-center">
-                                        <p className="text-xs font-bold text-chippy-coral uppercase">Agent X</p>
+                                        <p className="text-xs font-bold text-chippy-coral uppercase">{agentLabel}</p>
                                         <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-mono">
                                             {Math.round(selectedItem.confidence * 100)}% Confidence
                                         </span>
@@ -232,7 +234,7 @@ export const ReviewQueue = () => {
                                             />
                                             <p className="mt-2 text-xs text-slate-400 flex items-center gap-1">
                                                 <Sparkles className="w-3 h-3 text-amber-500" />
-                                                Agent X will learn from this correction for future interactions.
+                                                {agentLabel} will learn from this correction for future interactions.
                                             </p>
                                         </div>
                                     ) : (

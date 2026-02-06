@@ -57,7 +57,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     ];
 
     return (
-        <div className="min-h-screen flex bg-chippy-cream text-chippy-navy font-sans overflow-hidden">
+        <div className="min-h-screen flex bg-white text-chippy-navy font-sans overflow-hidden">
 
             {/* Mobile Overlay */}
             {mobileSidebarOpen && (
@@ -133,7 +133,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 flex flex-col md:ml-64 h-full bg-chippy-gray overflow-y-auto px-6 md:px-10 py-8 md:py-10 relative">
+            <main className="flex-1 flex flex-col md:ml-64 h-full bg-slate-50 overflow-y-auto px-6 md:px-10 py-8 md:py-10 relative">
                 <header className="flex justify-between items-center mb-8 md:hidden shrink-0">
                     <div className="flex items-center gap-2 text-white">
                         <img src="/logo.png" alt="Chippy" className="w-8 h-8 rounded-lg" />

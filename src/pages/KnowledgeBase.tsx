@@ -87,28 +87,30 @@ export const KnowledgeBase = () => {
             />
 
             {/* Navigation Tabs */}
-            <div className="flex p-1 bg-slate-100 rounded-xl w-fit border border-slate-200">
-                {tabs.map((tab) => {
-                    const Icon = tab.icon;
-                    const isActive = activeTab === tab.id;
-                    const isLocked = tab.id === 'sources' && !isSourcesEnabled;
+            <div className="bg-white border border-slate-200 rounded-xl p-2 w-fit">
+                <div className="flex gap-2">
+                    {tabs.map((tab) => {
+                        const Icon = tab.icon;
+                        const isActive = activeTab === tab.id;
+                        const isLocked = tab.id === 'sources' && !isSourcesEnabled;
 
-                    return (
-                        <button
-                            key={tab.id}
-                            disabled={isLocked && false} // Let them click to see the upgrade message
-                            onClick={() => setActiveTab(tab.id as Tab)}
-                            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-semibold transition-all relative ${isActive
-                                ? 'bg-white text-slate-800'
-                                : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
-                                } ${isLocked ? 'opacity-70' : ''}`}
-                        >
-                            <Icon className="w-4 h-4" />
-                            {tab.label}
-                            {isLocked && <Zap className="w-3 h-3 text-slate-400 absolute -top-1 -right-1" />}
-                        </button>
-                    );
-                })}
+                        return (
+                            <button
+                                key={tab.id}
+                                disabled={isLocked && false} // Let them click to see the upgrade message
+                                onClick={() => setActiveTab(tab.id as Tab)}
+                                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-semibold transition-all relative ${isActive
+                                    ? 'bg-slate-900 text-white shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                                    } ${isLocked ? 'opacity-70' : ''}`}
+                            >
+                                <Icon className="w-4 h-4" />
+                                {tab.label}
+                                {isLocked && <Zap className="w-3 h-3 text-slate-400 absolute -top-1 -right-1" />}
+                            </button>
+                        );
+                    })}
+                </div>
             </div>
 
             {/* Main Content */}

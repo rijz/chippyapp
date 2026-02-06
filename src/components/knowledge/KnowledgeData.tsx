@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Tag, DollarSign, ShieldCheck, Edit2, Save, X, CheckSquare, Plus, MapPin, Trash2, Clock, ListChecks } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
 import { KnowledgeBaseData, PricingPlan, BusinessLocation, Service } from '../../types';
-import { formatServicePrice } from '../../utils/serviceUtils';
+import { createEmptyService, formatServicePrice } from '../../utils/serviceUtils';
 
 export const KnowledgeData = () => {
     const { knowledgeData, setKnowledgeData } = useData();
@@ -77,15 +77,15 @@ export const KnowledgeData = () => {
                             <div className="p-2 bg-slate-100 rounded-md text-slate-700">{icon}</div>
                             <h3 className="font-semibold text-slate-800">{title}</h3>
                         </div>
-                        {isEditing ? (
-                            <div className="flex gap-2">
-                                <button onClick={cancelEditing} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors"><X className="w-4 h-4" /></button>
-                                <button onClick={saveEditing} className="p-2 bg-slate-900 text-white rounded-md transition-colors"><Save className="w-4 h-4" /></button>
-                            </div>
-                        ) : (
-                            <button onClick={() => startEditing(field, content)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"><Edit2 className="w-4 h-4" /></button>
-                        )}
-                    </div>
+                    {isEditing ? (
+                        <div className="flex gap-2">
+                            <button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
+                            <button onClick={saveEditing} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">Save</button>
+                        </div>
+                    ) : (
+                        <button onClick={() => startEditing(field, content)} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Edit</button>
+                    )}
+                </div>
 
                     {isEditing ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -138,6 +138,35 @@ export const KnowledgeData = () => {
 
         // Custom Renderer for Services (objects with id, name, pricing, description)
         if (field === 'services' && Array.isArray(content) && content.length > 0 && typeof content[0] === 'object' && 'pricing' in content[0]) {
+            const [isEditing, setIsEditing] = useState(false);
+            const [services, setServices] = useState<Service[]>([]);
+            const [newService, setNewService] = useState('');
+
+            const startEditing = () => {
+                setServices([...(content as Service[])]);
+                setIsEditing(true);
+            };
+
+            const saveServices = () => {
+                setKnowledgeData({ ...knowledgeData!, services });
+                setIsEditing(false);
+            };
+
+            const addService = () => {
+                const trimmed = newService.trim();
+                if (!trimmed) return;
+                const exists = services.some((svc) => svc.name.toLowerCase() === trimmed.toLowerCase());
+                if (exists) return;
+                const newSvc = createEmptyService();
+                newSvc.name = trimmed;
+                setServices([...services, newSvc]);
+                setNewService('');
+            };
+
+            const removeService = (idx: number) => {
+                setServices(services.filter((_, i) => i !== idx));
+            };
+
             return (
             <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all">
                 <div className="flex justify-between items-start mb-6">
@@ -148,28 +177,161 @@ export const KnowledgeData = () => {
                             <span className="text-xs text-slate-500">{content.length} services</span>
                         </div>
                     </div>
+                    {isEditing ? (
+                        <div className="flex gap-2">
+                            <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                                Cancel
+                            </button>
+                            <button onClick={saveServices} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">
+                                Save
+                            </button>
+                        </div>
+                    ) : (
+                        <button onClick={startEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                            Edit
+                        </button>
+                    )}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {(content as Service[]).map((service) => (
-                        <div key={service.id} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
-                            <h4 className="font-semibold text-slate-800 text-sm mb-1">{service.name}</h4>
-                            {service.description && (
-                                <p className="text-xs text-slate-500 mb-2 line-clamp-2">{service.description}</p>
-                            )}
-                            <div className="flex items-center justify-between text-xs">
-                                <span className="font-semibold text-slate-700">{formatServicePrice(service.pricing)}</span>
-                                {service.duration && (
-                                    <span className="text-slate-400 flex items-center gap-1">
-                                        <Clock className="w-3 h-3" /> {service.duration} min
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
+                {isEditing ? (
+                    <div className="space-y-3">
+                        <div className="flex flex-wrap gap-2">
+                            {services.map((svc, idx) => (
+                                <span key={svc.id || idx} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full text-xs font-semibold flex items-center gap-2">
+                                    {svc.name || 'Untitled'}
+                                    <button onClick={() => removeService(idx)} className="hover:text-red-500 transition-colors">
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={newService}
+                                onChange={(e) => setNewService(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && addService()}
+                                placeholder="Add a service..."
+                                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none"
+                            />
+                            <button onClick={addService} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-1">
+                                <Plus className="w-4 h-4" /> Add
+                            </button>
+                        </div>
+                        <p className="text-xs text-slate-400">
+                            This edits service names. Pricing and details stay unchanged for existing services.
+                        </p>
                     </div>
-                    <p className="text-xs text-slate-400 mt-4 italic">
-                        To edit services, use the Re-scan Website feature or complete the onboarding wizard again.
-                    </p>
+                ) : (
+                    <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {(content as Service[]).map((service) => (
+                                <div key={service.id} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
+                                    <h4 className="font-semibold text-slate-800 text-sm mb-1">{service.name}</h4>
+                                    {service.description && (
+                                        <p className="text-xs text-slate-500 mb-2 line-clamp-2">{service.description}</p>
+                                    )}
+                                    <div className="flex items-center justify-between text-xs">
+                                        <span className="font-semibold text-slate-700">{formatServicePrice(service.pricing)}</span>
+                                        {service.duration && (
+                                            <span className="text-slate-400 flex items-center gap-1">
+                                                <Clock className="w-3 h-3" /> {service.duration} min
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
+            </div>
+            );
+        }
+
+        // Custom Renderer for Services (string list) with keyword-like edit
+        if (field === 'services' && Array.isArray(content)) {
+            const services = content as string[];
+            const [newService, setNewService] = useState('');
+            const isEditing = editingSection === field;
+
+            const addService = () => {
+                if (!newService.trim()) return;
+                if (Array.isArray(tempValue)) {
+                    setTempValue([...tempValue, newService.trim()]);
+                } else {
+                    setTempValue([newService.trim()]);
+                }
+                setNewService('');
+            };
+
+            const removeService = (idx: number) => {
+                if (!Array.isArray(tempValue)) return;
+                setTempValue(tempValue.filter((_: string, i: number) => i !== idx));
+            };
+
+            return (
+                <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all">
+                    <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-slate-100 rounded-md text-slate-700">
+                                {icon}
+                            </div>
+                            <h3 className="font-semibold text-slate-800">{title}</h3>
+                        </div>
+                        {isEditing ? (
+                            <div className="flex gap-2">
+                                <button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                                    Cancel
+                                </button>
+                                <button onClick={saveEditing} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">
+                                    Save
+                                </button>
+                            </div>
+                        ) : (
+                            <button onClick={() => startEditing(field, content)} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                                Edit
+                            </button>
+                        )}
+                    </div>
+
+                    {isEditing ? (
+                        <div className="space-y-3">
+                            <div className="flex flex-wrap gap-2">
+                                {(Array.isArray(tempValue) ? tempValue : services).map((svc: string, idx: number) => (
+                                    <span key={idx} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full text-xs font-semibold flex items-center gap-2">
+                                        {svc}
+                                        <button onClick={() => removeService(idx)} className="hover:text-red-500 transition-colors">
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </span>
+                                ))}
+                            </div>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={newService}
+                                    onChange={(e) => setNewService(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && addService()}
+                                    placeholder="Add a service..."
+                                    className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none"
+                                />
+                                <button onClick={addService} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-1">
+                                    <Plus className="w-4 h-4" /> Add
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex flex-wrap gap-2">
+                            {(services || []).length > 0 ? (
+                                services.map((svc, idx) => (
+                                    <span key={idx} className="px-3 py-1.5 bg-white border border-slate-200 rounded-full text-xs font-semibold text-slate-600">
+                                        {svc}
+                                    </span>
+                                ))
+                            ) : (
+                                <span className="text-slate-400 italic text-sm">No services added yet.</span>
+                            )}
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -185,16 +347,16 @@ export const KnowledgeData = () => {
                     </div>
                     {isEditing ? (
                         <div className="flex gap-2">
-                            <button onClick={cancelEditing} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors">
-                                <X className="w-4 h-4" />
+                            <button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                                Cancel
                             </button>
-                            <button onClick={saveEditing} className="p-2 bg-slate-900 text-white rounded-md transition-colors">
-                                <Save className="w-4 h-4" />
+                            <button onClick={saveEditing} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">
+                                Save
                             </button>
                         </div>
                     ) : (
-                        <button onClick={() => startEditing(field, content)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
-                            <Edit2 className="w-4 h-4" />
+                        <button onClick={() => startEditing(field, content)} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                            Edit
                         </button>
                     )}
                 </div>
@@ -228,41 +390,43 @@ export const KnowledgeData = () => {
     };
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
-            {/* Top Rules Section - Priority Instructions */}
-            <TopRulesSection />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            <div className="lg:col-span-2 space-y-6">
+                <TopRulesSection />
 
-            <RenderSection
-                title="Services & Offerings"
-                icon={<Tag className="w-5 h-5" />}
-                field="services"
-                content={knowledgeData.services}
-            />
+                <RenderSection
+                    title="Services & Offerings"
+                    icon={<Tag className="w-5 h-5" />}
+                    field="services"
+                    content={knowledgeData.services}
+                />
 
-            {/* Keywords Section */}
-            <KeywordsSection />
+                <KeywordsSection />
 
-            <RenderSection
-                title="Pricing Information"
-                icon={<DollarSign className="w-5 h-5" />}
-                field="pricing"
-                content={knowledgeData.pricing}
-            />
-            <RenderSection
-                title="Business Policies"
-                icon={<ShieldCheck className="w-5 h-5" />}
-                field="policies"
-                content={knowledgeData.policies}
-            />
-            <RenderSection
-                title="Contact Info"
-                icon={<Tag className="w-5 h-5" />}
-                field="contactInfo"
-                content={knowledgeData.contactInfo}
-            />
+                <RenderSection
+                    title="Pricing Information"
+                    icon={<DollarSign className="w-5 h-5" />}
+                    field="pricing"
+                    content={knowledgeData.pricing}
+                />
+                <RenderSection
+                    title="Business Policies"
+                    icon={<ShieldCheck className="w-5 h-5" />}
+                    field="policies"
+                    content={knowledgeData.policies}
+                />
+            </div>
 
-            {/* Locations Section */}
-            <LocationsSection />
+            <div className="space-y-6">
+                <RenderSection
+                    title="Contact Info"
+                    icon={<Tag className="w-5 h-5" />}
+                    field="contactInfo"
+                    content={knowledgeData.contactInfo}
+                />
+
+                <LocationsSection />
+            </div>
         </div>
     );
 
@@ -297,16 +461,16 @@ export const KnowledgeData = () => {
                     </div>
                     {isEditing ? (
                         <div className="flex gap-2">
-                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors">
-                                <X className="w-4 h-4" />
+                            <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                                Cancel
                             </button>
-                            <button onClick={saveTopRules} className="p-2 bg-slate-900 text-white rounded-md transition-colors">
-                                <Save className="w-4 h-4" />
+                            <button onClick={saveTopRules} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">
+                                Save
                             </button>
                         </div>
                     ) : (
-                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
-                            <Edit2 className="w-4 h-4" />
+                        <button onClick={startEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                            Edit
                         </button>
                     )}
                 </div>
@@ -385,16 +549,16 @@ Always confirm the service before booking"
                     </div>
                     {isEditing ? (
                         <div className="flex gap-2">
-                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors">
-                                <X className="w-4 h-4" />
+                            <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                                Cancel
                             </button>
-                            <button onClick={saveKeywords} className="p-2 bg-slate-900 text-white rounded-md transition-colors">
-                                <Save className="w-4 h-4" />
+                            <button onClick={saveKeywords} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">
+                                Save
                             </button>
                         </div>
                     ) : (
-                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
-                            <Edit2 className="w-4 h-4" />
+                        <button onClick={startEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                            Edit
                         </button>
                     )}
                 </div>
@@ -486,16 +650,16 @@ Always confirm the service before booking"
                     </div>
                     {isEditing ? (
                         <div className="flex gap-2">
-                            <button onClick={() => setIsEditing(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-md transition-colors">
-                                <X className="w-4 h-4" />
+                            <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                                Cancel
                             </button>
-                            <button onClick={saveLocations} className="p-2 bg-slate-900 text-white rounded-md transition-colors">
-                                <Save className="w-4 h-4" />
+                            <button onClick={saveLocations} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">
+                                Save
                             </button>
                         </div>
                     ) : (
-                        <button onClick={startEditing} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
-                            <Edit2 className="w-4 h-4" />
+                        <button onClick={startEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                            Edit
                         </button>
                     )}
                 </div>
@@ -532,7 +696,7 @@ Always confirm the service before booking"
                     </div>
                 ) : (
                     displayLocations.length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4">
                             {displayLocations.map((loc, idx) => (
                                 <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
                                     <h4 className="font-semibold text-slate-800 mb-2 flex items-center gap-2">
