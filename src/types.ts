@@ -205,7 +205,7 @@ export interface KnowledgeBaseData {
   businessHours: string | null;
   businessHoursByDay?: Record<string, string>;
   contactInfo: string | null;
-  pricing?: string | null;    // DEPRECATED: Legacy pricing text (kept for migration)
+  pricing?: string | PricingPlan[] | null;    // Legacy pricing text or structured plans
   policies: string | null;
   locations?: BusinessLocation[];
   sources?: string[];

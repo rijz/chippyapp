@@ -214,20 +214,25 @@ class ProxyChatSession {
 
     try {
       const { memoryService } = await import('./memoryService');
-      // We could call a specialized "Fact Extractor" here
-      // For now, let's just assume explicit instruction for the MVP
-      // OR we can do a quick check
-      // "Extract any permanent facts about the USER from this message. If none, return empty."
+      const facts: string[] = [];
 
-      // ... Implementing a "Learning" call would require another proxy trip.
-      // Let's keep it simple: Memorize the gist if the AI used a tool? 
-      // No, let's rely on the user to IMPLEMENT specific learning triggers or 
-      // just log the conversation. For "Memory", we usually want to extract facts.
+      const emailMatch = userMsg.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+      if (emailMatch) facts.push(`User email: ${emailMatch[0]}`);
 
-      // Let's skip the auto-extraction for this exact tool call to keep it fast, 
-      // or add a TODO. The user asked for "Learning", so we should probably add it.
+      const phoneMatch = userMsg.match(/(\+?\d[\d\s().-]{7,}\d)/);
+      if (phoneMatch) facts.push(`User phone: ${phoneMatch[0]}`);
 
-      // Let's add a "Memorize" tool? No, the AI should do it automatically.
+      const nameMatch = userMsg.match(/\bmy name is\s+([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){0,2})/i);
+      if (nameMatch) facts.push(`User name: ${nameMatch[1]}`);
+
+      const companyMatch = userMsg.match(/\bmy (company|business) is\s+([A-Z][\w&' -]{1,60})/i);
+      if (companyMatch) facts.push(`User company: ${companyMatch[2].trim()}`);
+
+      if (facts.length === 0) return;
+
+      for (const fact of facts) {
+        await memoryService.memorize(this.context.userId, fact, this.context.sessionId, 'session');
+      }
     } catch (e) {
       // ignore
     }

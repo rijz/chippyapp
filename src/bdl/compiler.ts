@@ -1,4 +1,4 @@
-import { KnowledgeBaseData, Service } from '../types';
+import { KnowledgeBaseData, Service, PricingPlan } from '../types';
 import { BusinessMemorySnapshot } from './types';
 
 type CompileOptions = {
@@ -61,6 +61,27 @@ const formatServiceLine = (service: Service): string => {
   return `${parts.join(' ')} — ${formatPricing(service)}${description}`;
 };
 
+const formatPricingPlans = (plans: PricingPlan[]): string[] => {
+  if (!plans || plans.length === 0) return ['- Not provided'];
+  return plans.map(plan => {
+    const name = plan.name || 'Plan';
+    const price = plan.price || 'Price not specified';
+    const features = plan.features && plan.features.length > 0
+      ? ` — ${plan.features.join(', ')}`
+      : '';
+    return `- ${name}: ${price}${features}`;
+  });
+};
+
+const formatPricingNotes = (pricingText: string): string[] => {
+  const lines = pricingText
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return ['- Not provided'];
+  return lines.map(line => `- ${line}`);
+};
+
 const simpleHash = (input: string): string => {
   let hash = 5381;
   for (let i = 0; i < input.length; i += 1) {
@@ -75,6 +96,7 @@ export const compileBusinessMemory = (
 ): BusinessMemorySnapshot => {
   const compiledAt = options.compiledAt || new Date().toISOString();
   const version = options.version ?? 1;
+  const kbLastUpdated = knowledge.lastUpdated ? new Date(knowledge.lastUpdated as any).toISOString() : 'Unknown';
 
   const locations = (knowledge.locations || []).map(loc => {
     const pieces = toLineList([
@@ -88,6 +110,13 @@ export const compileBusinessMemory = (
   });
 
   const services = (knowledge.services || []).map(formatServiceLine);
+
+  const pricingPlans = Array.isArray(knowledge.pricing)
+    ? formatPricingPlans(knowledge.pricing)
+    : ['- Not provided'];
+  const pricingNotes = typeof knowledge.pricing === 'string' && knowledge.pricing.trim()
+    ? formatPricingNotes(knowledge.pricing)
+    : ['- Not provided'];
   const topRules = (knowledge.topRules || '')
     .split('\n')
     .map(rule => rule.trim())
@@ -110,12 +139,20 @@ export const compileBusinessMemory = (
     `Phone: ${knowledge.phoneNumber || knowledge.contactInfo || 'Not provided'}`,
     `Hours: ${knowledge.businessHours || 'Not provided'}`,
     `Summary: ${knowledge.summary || 'Not provided'}`,
+    `KB Last Updated: ${kbLastUpdated}`,
+    `KB Sync: ${compiledAt}`,
     '',
     'Locations:',
     locations.length > 0 ? locations.join('\n') : '- Not provided',
     '',
     'Services:',
     services.length > 0 ? services.map(s => `- ${s}`).join('\n') : '- Not provided',
+    '',
+    'Pricing Plans:',
+    pricingPlans.join('\n'),
+    '',
+    'Pricing Notes:',
+    pricingNotes.join('\n'),
     '',
     'Policies:',
     policies.length > 0 ? policies.join('\n') : '- Not provided',

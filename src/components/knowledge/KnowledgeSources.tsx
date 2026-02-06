@@ -30,7 +30,8 @@ export const KnowledgeSources = () => {
 
         setKnowledgeData({
             ...knowledgeData!,
-            sources: [...(knowledgeData?.sources || []), newSource]
+            sources: [...(knowledgeData?.sources || []), newSource],
+            lastUpdated: new Date()
         });
 
         setIsProcessing(false);

@@ -64,7 +64,8 @@ export const KnowledgeOverview = () => {
             businessCategory: category,
             phoneNumber: phone,
             businessHours: hoursSummary || null,
-            businessHoursByDay: normalizedHours
+            businessHoursByDay: normalizedHours,
+            lastUpdated: new Date()
         });
         setTenantConfig({
             ...tenantConfig,

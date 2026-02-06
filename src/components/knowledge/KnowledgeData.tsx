@@ -47,7 +47,8 @@ export const KnowledgeData = () => {
 
         setKnowledgeData({
             ...knowledgeData,
-            [editingSection]: finalValue
+            [editingSection]: finalValue,
+            lastUpdated: new Date()
         });
 
         setEditingSection(null);
@@ -148,7 +149,7 @@ export const KnowledgeData = () => {
             };
 
             const saveServices = () => {
-                setKnowledgeData({ ...knowledgeData!, services });
+                setKnowledgeData({ ...knowledgeData!, services, lastUpdated: new Date() });
                 setIsEditing(false);
             };
 
@@ -441,7 +442,7 @@ export const KnowledgeData = () => {
         };
 
         const saveTopRules = () => {
-            setKnowledgeData({ ...knowledgeData!, topRules });
+            setKnowledgeData({ ...knowledgeData!, topRules, lastUpdated: new Date() });
             setIsEditing(false);
         };
 
@@ -523,7 +524,7 @@ Always confirm the service before booking"
         };
 
         const saveKeywords = () => {
-            setKnowledgeData({ ...knowledgeData!, keywords });
+            setKnowledgeData({ ...knowledgeData!, keywords, lastUpdated: new Date() });
             setIsEditing(false);
         };
 
@@ -619,7 +620,7 @@ Always confirm the service before booking"
         };
 
         const saveLocations = () => {
-            setKnowledgeData({ ...knowledgeData!, locations });
+            setKnowledgeData({ ...knowledgeData!, locations, lastUpdated: new Date() });
             setIsEditing(false);
         };
 

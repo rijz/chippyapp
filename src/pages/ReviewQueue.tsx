@@ -66,7 +66,8 @@ export const ReviewQueue = () => {
             };
             setKnowledgeData({
                 ...knowledgeData,
-                corrections: [...(knowledgeData.corrections || []), newCorrection]
+                corrections: [...(knowledgeData.corrections || []), newCorrection],
+                lastUpdated: new Date()
             });
         }
 

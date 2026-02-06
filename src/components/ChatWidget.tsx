@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Send, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
-import { Message, TenantConfig, WidgetConfig, BusinessLocation, CalendarConnection } from '../types';
+import { Message, TenantConfig, WidgetConfig, BusinessLocation, CalendarConnection, Service, PricingPlan } from '../types';
+import { formatServicePrice } from '../utils/serviceUtils';
 import { createAgentSession, createBdlAgentSession, analyzeInteraction } from '../services/geminiService';
 import { CALENDAR_TOOLS, executeCalendarTool, ToolContext, CallbackRequestData } from '../services/calendarTools';
 import { LOCATION_TOOL, executeFindClosestLocation, getLocationSelectionPrompt } from '../services/locationTools';
@@ -156,7 +157,6 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
-  const [availableSlots, setAvailableSlots] = useState<string>('');
   const [statusMessage, setStatusMessage] = useState<string>(''); // For showing "Checking calendar..." etc.
   const [clickableSlots, setClickableSlots] = useState<string[]>([]); // Slots user can click to book
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
@@ -324,7 +324,58 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     }
   }, [widgetConfig.leadCaptureMode, hasLeadFields]);
 
-  const initChat = async (userData?: typeof leadData, overrideSlots?: string): Promise<any> => {
+  const formatServicesForPrompt = (services: any): string => {
+    if (!Array.isArray(services) || services.length === 0) return 'Not provided';
+
+    if (typeof services[0] === 'string') {
+      return services.map((s: string) => s.trim()).filter(Boolean).join(', ') || 'Not provided';
+    }
+
+    if (typeof services[0] === 'object') {
+      return (services as Service[]).map((svc) => {
+        const name = svc.name || 'Service';
+        const price = svc.pricing ? formatServicePrice(svc.pricing) : 'Pricing not specified';
+        const duration = svc.duration ? `${svc.duration} min` : '';
+        const details = [price, duration].filter(Boolean).join(', ');
+        const description = svc.description ? ` — ${svc.description}` : '';
+        return `${name}${details ? ` (${details})` : ''}${description}`;
+      }).join(' | ');
+    }
+
+    return String(services);
+  };
+
+  const formatPricingForPrompt = (pricing: any): string => {
+    if (!pricing) return 'Not provided';
+    if (Array.isArray(pricing)) {
+      const plans = (pricing as PricingPlan[]).filter(p => p && (p.name || p.price));
+      if (plans.length === 0) return 'Not provided';
+      return plans.map(plan => {
+        const name = plan.name || 'Plan';
+        const price = plan.price || 'Price not specified';
+        const features = plan.features && plan.features.length > 0
+          ? ` — ${plan.features.join(', ')}`
+          : '';
+        return `${name}: ${price}${features}`;
+      }).join(' | ');
+    }
+    return String(pricing);
+  };
+
+  const formatTimestampForPrompt = (value: any): string => {
+    if (!value) return 'Unknown';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Unknown';
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  };
+
+  const initChat = async (userData?: typeof leadData): Promise<any> => {
     let structuredInfo = "Standard business hours apply.";
     let correctionsInfo = "";
     let topRulesInfo = "";
@@ -335,11 +386,12 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
         structuredInfo = `
           Business Category: ${parsed.businessCategory}
           Summary: ${parsed.summary}
-          Services: ${parsed.services?.join(', ')}
+          Services: ${formatServicesForPrompt(parsed.services)}
           Hours: ${parsed.businessHours}
           Contact: ${parsed.contactInfo}
-          Pricing: ${parsed.pricing}
+          Pricing: ${formatPricingForPrompt(parsed.pricing)}
           Policies: ${parsed.policies}
+          KB Last Updated: ${formatTimestampForPrompt(parsed.lastUpdated)}
         `;
 
         if (parsed.corrections && parsed.corrections.length > 0) {
@@ -486,6 +538,12 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       SLOT SELECTION:
       When get_available_slots returns, present the slots clearly. Users will see clickable buttons.
       When user picks a time, call book_appointment with that datetime.
+
+      💵 PRICING RULES (CRITICAL):
+      - Only share pricing or plan names that appear in the KNOWLEDGE BASE or BDL CONTEXT.
+      - Do NOT invent plan names, tiers, or prices.
+      - If pricing is missing or unclear, say you don't have it and offer to connect them or ask which plan they saw.
+      - If the user says the website shows a different price, acknowledge it and defer to the website as most current.
 
       Keep responses concise. Use Markdown formatting.
       Do not make up services not in the knowledge base.
@@ -783,78 +841,8 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     setInputText('');
     setIsLoading(true);
 
-    // Check if booking intent - fetch calendar availability
-    const bookingKeywords = ['book', 'appointment', 'schedule', 'availab', 'time', 'when can'];
-    const hasBookingIntent = bookingKeywords.some(keyword => currentText.toLowerCase().includes(keyword));
-
     // Track which session to use for this message
     let sessionToUse = chatSession;
-
-    if (hasBookingIntent && !availableSlots) {
-      // Show status message
-      setStatusMessage('🔍 Let me check my calendar...');
-
-      // Generate next 7 days of available time slots
-      const slots: string[] = [];
-      const now = new Date();
-
-      for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
-        const checkDate = new Date(now);
-        checkDate.setDate(now.getDate() + dayOffset);
-
-        // Check business hours (9 AM - 5 PM)
-        for (let hour = 9; hour < 17; hour++) {
-          const slotStart = new Date(checkDate);
-          slotStart.setHours(hour, 0, 0, 0);
-          const slotEnd = new Date(slotStart);
-          slotEnd.setHours(hour + 1, 0, 0, 0);
-
-          try {
-            // Call backend API to check owner's calendar
-            const response = await fetch('/api/calendar/availability', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userId: tenantConfig.userId, // Owner's user ID
-                startTime: slotStart.toISOString(),
-                endTime: slotEnd.toISOString(),
-                provider: 'google'
-              })
-            });
-            const { available } = await response.json();
-
-            if (available) {
-              const dayName = slotStart.toLocaleDateString('en-US', { weekday: 'short' });
-              const dateStr = slotStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-              const timeStr = slotStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-              slots.push(`${dayName}, ${dateStr} at ${timeStr} `);
-
-              if (slots.length >= 10) break; // Limit to 10 slots
-            }
-          } catch (e) {
-            console.error('Error checking availability:', e);
-          }
-        }
-        if (slots.length >= 10) break;
-      }
-
-      if (slots.length > 0) {
-        setStatusMessage(`✅ Found ${slots.length} available slots!`);
-        await new Promise(resolve => setTimeout(resolve, 800)); // Show success for 800ms
-        setStatusMessage('');
-        setAvailableSlots(slots.join('\n'));
-
-        // Reinitialize chat with updated slots and USE the returned session
-        const newSession = await initChat(undefined, slots.join('\n'));
-        if (newSession) {
-          sessionToUse = newSession;
-        }
-      } else {
-        setStatusMessage('❌ No availability found in the next 7 days');
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        setStatusMessage('');
-      }
-    }
 
     try {
       if (!sessionToUse) {
