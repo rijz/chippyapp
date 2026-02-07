@@ -53,6 +53,17 @@ export interface WidgetConfig {
   welcomeMessage: string;
   position: 'right' | 'left';
   leadCaptureMode: LeadCaptureMode;
+  capabilities?: {
+    canAnswerPricing: boolean;
+    canBookAppointments: boolean;
+    canRequestCallback: boolean;
+    canCollectLeads: boolean;
+    custom?: Array<{
+      key: string;
+      label: string;
+      enabled: boolean;
+    }>;
+  };
   contactFields: {
     name: ContactFieldRequirement;
     email: ContactFieldRequirement;
@@ -177,10 +188,11 @@ export interface BusinessLocation {
 
 // Service pricing configuration
 export interface ServicePricing {
-  type: 'fixed' | 'starting_from' | 'hourly' | 'custom' | 'contact';
+  type: 'fixed' | 'starting_from' | 'hourly' | 'per_session' | 'per_project' | 'per_day' | 'per_week' | 'per_month' | 'subscription' | 'per_unit' | 'custom' | 'contact';
   amount?: number;        // e.g., 50 (in cents or dollars based on currency)
   currency?: string;      // e.g., 'USD'
   customText?: string;    // For 'custom' type: "Varies by project"
+  unitLabel?: string;     // For 'per_unit' or subscription (e.g., 'project', 'month')
 }
 
 // Structured service with linked pricing

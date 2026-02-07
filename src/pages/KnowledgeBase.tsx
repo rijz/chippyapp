@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Zap, LayoutDashboard, Database, Link as LinkIcon, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Zap, LayoutDashboard, Database, Link as LinkIcon, AlertTriangle, DollarSign } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { OnboardingWizard } from '../components/OnboardingWizard';
@@ -9,8 +9,9 @@ import { KnowledgeData } from '../components/knowledge/KnowledgeData';
 import { KnowledgeSources } from '../components/knowledge/KnowledgeSources';
 import { PricingModal } from '../components/ui/Shared';
 import { KnowledgeBaseData } from '../types';
+import { useSearchParams, useLocation } from 'react-router-dom';
 
-type Tab = 'overview' | 'data' | 'sources';
+    type Tab = 'overview' | 'data' | 'pricing' | 'sources';
 
 export const KnowledgeBase = () => {
     const { session } = useAuth();
@@ -19,6 +20,8 @@ export const KnowledgeBase = () => {
     const [showWizard, setShowWizard] = useState(false);
     const [showRescanWarning, setShowRescanWarning] = useState(false);
     const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const location = useLocation();
 
     const handleWizardComplete = (data: KnowledgeBaseData) => {
         setKnowledgeData(data);
@@ -38,8 +41,25 @@ export const KnowledgeBase = () => {
     const tabs = [
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
         { id: 'data', label: 'Knowledge Data', icon: Database },
+        { id: 'pricing', label: 'Pricing Models', icon: DollarSign },
         { id: 'sources', label: 'Sources', icon: LinkIcon },
     ];
+
+    useEffect(() => {
+        const tab = searchParams.get('tab') as Tab | null;
+        if (tab && tabs.some(t => t.id === tab)) {
+            setActiveTab(tab);
+        }
+    }, [searchParams]);
+
+    useEffect(() => {
+        if (location.hash && (activeTab === 'data' || activeTab === 'pricing')) {
+            const target = document.querySelector(location.hash);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+    }, [location.hash, activeTab]);
 
     if (!knowledgeData && !showWizard) {
         return (
@@ -98,7 +118,10 @@ export const KnowledgeBase = () => {
                             <button
                                 key={tab.id}
                                 disabled={isLocked && false} // Let them click to see the upgrade message
-                                onClick={() => setActiveTab(tab.id as Tab)}
+                                onClick={() => {
+                                    setActiveTab(tab.id as Tab);
+                                    setSearchParams({ tab: tab.id });
+                                }}
                                 className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-semibold transition-all relative ${isActive
                                     ? 'bg-slate-900 text-white shadow-sm'
                                     : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
@@ -116,6 +139,7 @@ export const KnowledgeBase = () => {
             {/* Main Content */}
             {activeTab === 'overview' && <KnowledgeOverview />}
             {activeTab === 'data' && <KnowledgeData />}
+            {activeTab === 'pricing' && <KnowledgeData />}
             {activeTab === 'sources' && (
                 isSourcesEnabled ? (
                     <KnowledgeSources />

@@ -51,6 +51,13 @@ const DEFAULT_WIDGET_CONFIG: WidgetConfig = {
     welcomeMessage: "Hi! How can I help you today?",
     position: 'right',
     leadCaptureMode: 'ai-driven',
+    capabilities: {
+        canAnswerPricing: true,
+        canBookAppointments: true,
+        canRequestCallback: true,
+        canCollectLeads: true,
+        custom: []
+    },
     contactFields: {
         name: 'required',
         email: 'required',
@@ -157,6 +164,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         return {
             ...DEFAULT_WIDGET_CONFIG,
             ...saved,
+            capabilities: {
+                ...DEFAULT_WIDGET_CONFIG.capabilities,
+                ...(saved?.capabilities || {}),
+                custom: saved?.capabilities?.custom || DEFAULT_WIDGET_CONFIG.capabilities?.custom || []
+            },
             contactFields: {
                 ...DEFAULT_WIDGET_CONFIG.contactFields,
                 ...(saved?.contactFields || {})

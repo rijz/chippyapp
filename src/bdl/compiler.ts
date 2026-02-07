@@ -24,6 +24,24 @@ const formatPricing = (service: Service): string => {
       return `Starting at ${formatAmount(pricing.amount, pricing.currency)}`;
     case 'hourly':
       return `${formatAmount(pricing.amount, pricing.currency)} per hour`;
+    case 'per_session':
+      return `${formatAmount(pricing.amount, pricing.currency)} per session`;
+    case 'per_project':
+      return `${formatAmount(pricing.amount, pricing.currency)} per project`;
+    case 'per_day':
+      return `${formatAmount(pricing.amount, pricing.currency)} per day`;
+    case 'per_week':
+      return `${formatAmount(pricing.amount, pricing.currency)} per week`;
+    case 'per_month':
+      return `${formatAmount(pricing.amount, pricing.currency)} per month`;
+    case 'subscription': {
+      const unit = pricing.unitLabel ? pricing.unitLabel.trim() : 'month';
+      return `${formatAmount(pricing.amount, pricing.currency)} per ${unit}`;
+    }
+    case 'per_unit': {
+      const unit = pricing.unitLabel ? pricing.unitLabel.trim() : 'unit';
+      return `${formatAmount(pricing.amount, pricing.currency)} per ${unit}`;
+    }
     case 'custom':
       return pricing.customText || 'Custom pricing';
     case 'contact':

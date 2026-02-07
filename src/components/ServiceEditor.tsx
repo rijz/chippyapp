@@ -269,6 +269,13 @@ const ServiceEditModal: React.FC<ServiceEditModalProps> = ({ service, isNew, onS
                                     { value: 'fixed', label: 'Fixed Price' },
                                     { value: 'starting_from', label: 'Starting From' },
                                     { value: 'hourly', label: 'Hourly Rate' },
+                                    { value: 'per_session', label: 'Per Session' },
+                                    { value: 'per_project', label: 'Per Project' },
+                                    { value: 'per_day', label: 'Per Day' },
+                                    { value: 'per_week', label: 'Per Week' },
+                                    { value: 'per_month', label: 'Per Month' },
+                                    { value: 'subscription', label: 'Subscription' },
+                                    { value: 'per_unit', label: 'Per Unit (Custom)' },
                                     { value: 'contact', label: 'Contact for Quote' },
                                     { value: 'custom', label: 'Custom Text' }
                                 ].map(opt => (
@@ -288,7 +295,7 @@ const ServiceEditModal: React.FC<ServiceEditModalProps> = ({ service, isNew, onS
                         </div>
 
                         {/* Price Amount */}
-                        {['fixed', 'starting_from', 'hourly'].includes(form.pricing.type) && (
+                        {['fixed', 'starting_from', 'hourly', 'per_session', 'per_project', 'per_day', 'per_week', 'per_month', 'subscription', 'per_unit'].includes(form.pricing.type) && (
                             <div>
                                 <label className="text-sm font-medium text-slate-700">Price</label>
                                 <div className="mt-1 flex items-center gap-2">
@@ -303,6 +310,22 @@ const ServiceEditModal: React.FC<ServiceEditModalProps> = ({ service, isNew, onS
                                         step={0.01}
                                     />
                                 </div>
+                            </div>
+                        )}
+
+                        {['per_unit', 'subscription'].includes(form.pricing.type) && (
+                            <div>
+                                <label className="text-sm font-medium text-slate-700">Unit Label</label>
+                                <input
+                                    type="text"
+                                    value={form.pricing.unitLabel || ''}
+                                    onChange={(e) => updatePricing({ unitLabel: e.target.value })}
+                                    className="w-full mt-1 px-3 py-2 border rounded-lg"
+                                    placeholder={form.pricing.type === 'subscription' ? 'month, year, quarter' : 'project, seat, unit'}
+                                />
+                                <p className="text-xs text-slate-500 mt-1">
+                                    Used to display pricing as &quot;per unit&quot; or &quot;per month&quot;.
+                                </p>
                             </div>
                         )}
 

@@ -1345,12 +1345,185 @@ app.post('/api/create-checkout-session', async (req, res) => {
 // =====================
 // This proxies chat requests through the backend to keep the API key secure
 // CRITICAL: This endpoint costs money per request! Strict rate limiting applied.
+const PRICING_INTENT_TOKENS = [
+  'price',
+  'pricing',
+  'plan',
+  'plans',
+  'cost',
+  'rate',
+  'fees',
+  'how much',
+  'cheapest',
+  'lowest',
+  'compare',
+  'difference',
+  '$'
+];
+
+const isPricingIntent = (text = '') => {
+  const normalized = String(text || '').toLowerCase();
+  return PRICING_INTENT_TOKENS.some(token => normalized.includes(token));
+};
+
+const extractLastUserText = (contents = []) => {
+  if (!Array.isArray(contents)) return '';
+  for (let i = contents.length - 1; i >= 0; i -= 1) {
+    const item = contents[i];
+    if (item?.role === 'user' && Array.isArray(item.parts)) {
+      const textPart = item.parts.find(p => typeof p?.text === 'string');
+      if (textPart?.text) return textPart.text;
+    }
+  }
+  return '';
+};
+
+const extractNumericPrice = (price = '') => {
+  const match = String(price).replace(/,/g, '').match(/(\d+(\.\d+)?)/);
+  if (!match) return null;
+  return parseFloat(match[1]);
+};
+
+const formatPricingPlans = (plans = []) => {
+  return plans
+    .filter(plan => plan && (plan.name || plan.price))
+    .map(plan => {
+      const features = Array.isArray(plan.features) && plan.features.length > 0
+        ? ` — ${plan.features.join(', ')}`
+        : '';
+      return `${plan.name || 'Plan'}: ${plan.price || 'Price not specified'}${features}`;
+    });
+};
+
+const buildPricingResponse = (knowledge, queryText) => {
+  if (!knowledge) return null;
+  if (typeof knowledge.pricing === 'string' && knowledge.pricing.trim()) {
+    return `Here is our pricing:\n\n${knowledge.pricing.trim()}`;
+  }
+  if (!Array.isArray(knowledge.pricing)) return null;
+  const plans = knowledge.pricing.filter(plan => plan && (plan.name || plan.price));
+  if (plans.length === 0) return null;
+
+  const normalized = String(queryText || '').toLowerCase();
+  const formatted = formatPricingPlans(plans);
+
+  if (normalized.includes('cheapest') || normalized.includes('lowest')) {
+    let cheapest = null;
+    for (const plan of plans) {
+      const value = extractNumericPrice(plan.price);
+      if (value === null) continue;
+      if (!cheapest || value < cheapest.value) {
+        cheapest = { value, plan };
+      }
+    }
+    if (cheapest) {
+      return `${cheapest.plan.name} is the cheapest at ${cheapest.plan.price}.`;
+    }
+  }
+
+  if (normalized.includes('difference') || normalized.includes('compare')) {
+    return `Here’s how the plans compare:\n\n${formatted.join('\n')}`;
+  }
+
+  return `Here are our pricing plans:\n\n${formatted.join('\n')}`;
+};
+
+const fetchKnowledgeBase = async (tenantId) => {
+  const { data, error } = await supabaseAdmin
+    .from('knowledge_bases')
+    .select('content')
+    .eq('user_id', tenantId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[KB] Fetch error:', error);
+    return null;
+  }
+  return data?.content || null;
+};
+
+const fetchWidgetConfig = async (tenantId) => {
+  const { data, error } = await supabaseAdmin
+    .from('settings')
+    .select('widget_config')
+    .eq('user_id', tenantId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[Settings] Fetch error:', error);
+    return null;
+  }
+  return data?.widget_config || null;
+};
+
+const matchDisabledCustomCapability = (widgetConfig, text = '') => {
+  const custom = widgetConfig?.capabilities?.custom;
+  if (!Array.isArray(custom) || custom.length === 0) return null;
+  const normalized = String(text || '').toLowerCase();
+  return custom.find(cap => cap && cap.enabled === false && (
+    (cap.key && normalized.includes(String(cap.key).toLowerCase())) ||
+    (cap.label && normalized.includes(String(cap.label).toLowerCase()))
+  ));
+};
+
 app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
   try {
     const geminiPath = req.params[0]; // e.g., "v1beta/models/gemini-2.0-flash:generateContent"
     const geminiUrl = `https://generativelanguage.googleapis.com/${geminiPath}?key=${process.env.VITE_GEMINI_API_KEY}`;
 
     console.log(`[API Proxy] Forwarding to: ${geminiPath}`);
+
+    const tenantId = req.headers['x-tenant-id'];
+    if (req.body?.system_instruction && !tenantId) {
+      return res.status(400).json({ error: 'Missing tenant id for chat request' });
+    }
+
+    if (tenantId && req.body?.contents) {
+      const lastUserText = extractLastUserText(req.body.contents);
+      const widgetConfig = await fetchWidgetConfig(String(tenantId));
+
+      if (lastUserText) {
+        const blockedCustom = matchDisabledCustomCapability(widgetConfig, lastUserText);
+        if (blockedCustom) {
+          return res.json({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: `I’m not able to help with ${blockedCustom.label || 'that'} right now. Is there something else I can assist with?` }]
+                }
+              }
+            ]
+          });
+        }
+      }
+
+      if (lastUserText && isPricingIntent(lastUserText)) {
+        const canAnswerPricing = widgetConfig?.capabilities?.canAnswerPricing !== false;
+        if (!canAnswerPricing) {
+          return res.json({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: "I’m not able to share pricing right now. Would you like me to connect you with someone?" }]
+                }
+              }
+            ]
+          });
+        }
+        const knowledge = await fetchKnowledgeBase(String(tenantId));
+        const pricingResponse = buildPricingResponse(knowledge, lastUserText);
+        const fallback = "I don't have pricing details available right now. Would you like me to connect you with someone?";
+        return res.json({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: pricingResponse || fallback }]
+              }
+            }
+          ]
+        });
+      }
+    }
 
     const response = await fetch(geminiUrl, {
       method: req.method,
@@ -1367,6 +1540,63 @@ app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+const DAY_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const getBusinessHoursForDate = (date, hoursByDay) => {
+  const key = DAY_KEYS[date.getDay()];
+  const value = hoursByDay?.[key] || hoursByDay?.[key.toLowerCase()] || hoursByDay?.[key.toUpperCase()];
+  if (!value) return null;
+  if (String(value).toLowerCase().includes('closed')) return null;
+  return value;
+};
+
+const parseHoursRange = (input) => {
+  if (!input) return null;
+  const normalized = String(input)
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[–—]/g, '-')
+    .replace(' to ', ' - ')
+    .trim();
+
+  const match = normalized.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*-\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!match) return null;
+
+  const startHour = parseInt(match[1], 10);
+  const startMin = match[2] ? parseInt(match[2], 10) : 0;
+  const startMeridiem = match[3] || '';
+
+  const endHour = parseInt(match[4], 10);
+  const endMin = match[5] ? parseInt(match[5], 10) : 0;
+  const endMeridiem = match[6] || startMeridiem;
+
+  const toMinutes = (hour, minute, meridiem) => {
+    if (!meridiem) {
+      if (hour > 23) return null;
+      return hour * 60 + minute;
+    }
+    const isPm = meridiem.toLowerCase() === 'pm';
+    let h = hour % 12;
+    if (isPm) h += 12;
+    return h * 60 + minute;
+  };
+
+  const start = toMinutes(startHour, startMin, startMeridiem);
+  const end = toMinutes(endHour, endMin, endMeridiem);
+  if (start === null || end === null) return null;
+  return { start, end };
+};
+
+const isWithinBusinessHours = (date, hoursText) => {
+  const range = parseHoursRange(hoursText);
+  if (!range) return true;
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  if (range.start <= range.end) {
+    return minutes >= range.start && minutes <= range.end;
+  }
+  return minutes >= range.start || minutes <= range.end;
+};
 
 // =====================
 // Web Scraper + Gemini Analysis Endpoint
@@ -2003,6 +2233,12 @@ app.post('/api/calendar/availability', calendarLimiter, async (req, res) => {
       });
     }
 
+    const widgetConfig = await fetchWidgetConfig(String(userId));
+    const canBookAppointments = widgetConfig?.capabilities?.canBookAppointments !== false;
+    if (!canBookAppointments) {
+      return res.status(403).json({ error: 'Booking is not enabled for this widget.' });
+    }
+
     console.log(`[API] Checking availability for user ${userId} from ${startTime} to ${endTime}`);
 
     // Get calendar connection
@@ -2059,6 +2295,12 @@ app.post('/api/calendar/slots', calendarLimiter, async (req, res) => {
       });
     }
 
+    const widgetConfig = await fetchWidgetConfig(String(userId));
+    const canBookAppointments = widgetConfig?.capabilities?.canBookAppointments !== false;
+    if (!canBookAppointments) {
+      return res.status(403).json({ error: 'Booking is not enabled for this widget.' });
+    }
+
     const connection = await getCalendarConnection(userId, provider);
 
     if (!connection) {
@@ -2091,6 +2333,82 @@ app.post('/api/calendar/slots', calendarLimiter, async (req, res) => {
 });
 
 /**
+ * POST /api/callback/request
+ * Validates and records a callback request (server-enforced business hours)
+ */
+app.post('/api/callback/request', calendarLimiter, async (req, res) => {
+  try {
+    const {
+      tenantId,
+      customer_name,
+      customer_phone,
+      customer_email,
+      service,
+      purpose,
+      preferred_time,
+      requested_datetime
+    } = req.body || {};
+
+    if (!tenantId || !customer_name || !customer_phone) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const widgetConfig = await fetchWidgetConfig(String(tenantId));
+    const canRequestCallback = widgetConfig?.capabilities?.canRequestCallback !== false;
+    if (!canRequestCallback) {
+      return res.status(403).json({ error: 'Callback requests are not enabled.' });
+    }
+
+    if (requested_datetime) {
+      const knowledge = await fetchKnowledgeBase(String(tenantId));
+      const hoursByDay = knowledge?.businessHoursByDay || null;
+      if (hoursByDay) {
+        const requestedAt = new Date(requested_datetime);
+        const hoursForDay = getBusinessHoursForDate(requestedAt, hoursByDay);
+        if (!hoursForDay || !isWithinBusinessHours(requestedAt, hoursForDay)) {
+          return res.status(400).json({
+            error: `Requested time is outside business hours${hoursForDay ? ` (${hoursForDay})` : ''}.`
+          });
+        }
+      }
+    }
+
+    const payload = {
+      request_id: `cb_${Date.now()}`,
+      customer: {
+        name: customer_name,
+        email: customer_email,
+        phone: customer_phone
+      },
+      service,
+      purpose,
+      preferred_time,
+      requested_datetime
+    };
+
+    const { error } = await supabaseAdmin
+      .from('bdl_events')
+      .insert({
+        tenant_id: tenantId,
+        type: 'callback.requested',
+        occurred_at: new Date().toISOString(),
+        payload,
+        source: 'chat'
+      });
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      payload
+    });
+  } catch (error) {
+    console.error('[API] Callback request error:', error);
+    res.status(500).json({ error: error.message || 'Failed to request callback' });
+  }
+});
+
+/**
  * POST /api/calendar/create-event
  * Create a calendar event using owner's calendar
  */
@@ -2117,6 +2435,12 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
       return res.status(400).json({
         error: 'Missing required fields: userId, summary, startTime, endTime'
       });
+    }
+
+    const widgetConfig = await fetchWidgetConfig(String(userId));
+    const canBookAppointments = widgetConfig?.capabilities?.canBookAppointments !== false;
+    if (!canBookAppointments) {
+      return res.status(403).json({ error: 'Booking is not enabled for this widget.' });
     }
 
     const connection = await getCalendarConnection(userId, provider);
@@ -2412,6 +2736,12 @@ app.post('/api/calendar/cancel-event', calendarLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Missing required field: userId' });
     }
 
+    const widgetConfig = await fetchWidgetConfig(String(userId));
+    const canBookAppointments = widgetConfig?.capabilities?.canBookAppointments !== false;
+    if (!canBookAppointments) {
+      return res.status(403).json({ error: 'Booking is not enabled for this widget.' });
+    }
+
     const connection = await getCalendarConnection(userId, provider);
 
     if (!connection) {
@@ -2485,6 +2815,12 @@ app.post('/api/calendar/reschedule-event', calendarLimiter, async (req, res) => 
 
     if (!userId || !newStartTime) {
       return res.status(400).json({ error: 'Missing required fields: userId, newStartTime' });
+    }
+
+    const widgetConfig = await fetchWidgetConfig(String(userId));
+    const canBookAppointments = widgetConfig?.capabilities?.canBookAppointments !== false;
+    if (!canBookAppointments) {
+      return res.status(403).json({ error: 'Booking is not enabled for this widget.' });
     }
 
     const connection = await getCalendarConnection(userId, provider);

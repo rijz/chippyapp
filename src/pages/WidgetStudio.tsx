@@ -1,22 +1,100 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, Zap, User, Mail, Phone, BrainCircuit, X, Eye, MessageSquare, Layout, FormInput, MessageCircle } from 'lucide-react';
+import { Palette, Zap, User, Mail, Phone, BrainCircuit, X, Eye, MessageSquare, Layout, FormInput, MessageCircle, Plus, Trash2 } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { PageHeader } from '../components/layout/PageHeader';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { ContactFieldSelector } from '../components/ui/Shared';
 import { ContactFieldRequirement, LeadCaptureMode } from '../types';
 
 export const WidgetStudio = () => {
-    const { widgetConfig, setWidgetConfig, tenantConfig } = useData();
+    const { widgetConfig, setWidgetConfig, tenantConfig, calendarConnections } = useData();
     const { session } = useAuth();
     const { showToast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
+    const navigate = useNavigate();
+    const location = useLocation();
     const [activeTab, setActiveTab] = useState<'appearance' | 'behavior' | 'followup'>('appearance');
     const [isSendingTest, setIsSendingTest] = useState(false);
     const [previewRecipient, setPreviewRecipient] = useState<'customer' | 'owner'>('customer');
     const [testEmail, setTestEmail] = useState('');
+    const [newCapabilityLabel, setNewCapabilityLabel] = useState('');
+
+    const hasActiveCalendar = calendarConnections.some(c => c.isActive);
+
+    const capabilities = widgetConfig.capabilities || {
+        canAnswerPricing: true,
+        canBookAppointments: true,
+        canRequestCallback: true,
+        canCollectLeads: true,
+        custom: []
+    };
+
+    const updateCapability = (key: keyof typeof capabilities, value: boolean) => {
+        setWidgetConfig(prev => ({
+            ...prev,
+            capabilities: {
+                ...capabilities,
+                [key]: value
+            }
+        }));
+    };
+
+    const updateCustomCapability = (index: number, enabled: boolean) => {
+        const nextCustom = [...(capabilities.custom || [])];
+        if (!nextCustom[index]) return;
+        nextCustom[index] = { ...nextCustom[index], enabled };
+        setWidgetConfig(prev => ({
+            ...prev,
+            capabilities: {
+                ...capabilities,
+                custom: nextCustom
+            }
+        }));
+    };
+
+    const removeCustomCapability = (index: number) => {
+        const nextCustom = [...(capabilities.custom || [])].filter((_, idx) => idx !== index);
+        setWidgetConfig(prev => ({
+            ...prev,
+            capabilities: {
+                ...capabilities,
+                custom: nextCustom
+            }
+        }));
+    };
+
+    const addCustomCapability = () => {
+        const label = newCapabilityLabel.trim();
+        if (!label) return;
+        const baseKey = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+        if (!baseKey) return;
+
+        const reservedKeys = new Set([
+            'canAnswerPricing',
+            'canBookAppointments',
+            'canRequestCallback',
+            'canCollectLeads'
+        ]);
+        const existingKeys = new Set((capabilities.custom || []).map(c => c.key));
+        let key = baseKey;
+        let suffix = 1;
+        while (reservedKeys.has(key) || existingKeys.has(key)) {
+            key = `${baseKey}_${suffix}`;
+            suffix += 1;
+        }
+
+        const nextCustom = [...(capabilities.custom || []), { key, label, enabled: true }];
+        setWidgetConfig(prev => ({
+            ...prev,
+            capabilities: {
+                ...capabilities,
+                custom: nextCustom
+            }
+        }));
+        setNewCapabilityLabel('');
+    };
 
     useEffect(() => {
         const tab = searchParams.get('tab');
@@ -24,6 +102,14 @@ export const WidgetStudio = () => {
             setActiveTab(tab);
         }
     }, [searchParams]);
+
+    useEffect(() => {
+        if (activeTab !== 'behavior' || !location.hash) return;
+        const target = document.querySelector(location.hash);
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, [activeTab, location.hash]);
 
     useEffect(() => {
         if (!testEmail && session?.user?.email) {
@@ -203,7 +289,7 @@ export const WidgetStudio = () => {
                         </div>
                     ) : activeTab === 'behavior' ? (
                         <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-                            <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-6">
+                            <div id="behavior-lead-capture" className="bg-white p-6 rounded-xl border border-slate-200 space-y-6">
                                 <h3 className="font-bold text-lg text-chippy-navy">Lead Capture Strategy</h3>
                                 <p className="text-sm text-slate-500">Decide when to collect visitor information.</p>
 
@@ -233,6 +319,172 @@ export const WidgetStudio = () => {
                                         </div>
                                         <p className="text-xs text-slate-500 pl-[3.25rem]">Agent X collects info naturally when a user wants to book or connect.</p>
                                     </button>
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-6">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="font-bold text-lg text-chippy-navy">Capabilities</h3>
+                                        <p className="text-sm text-slate-500">Control what this widget is allowed to do.</p>
+                                    </div>
+                                    <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
+                                        <BrainCircuit className="w-4 h-4" />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <label className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                                        <div className="space-y-1">
+                                            <p className="text-sm font-semibold text-slate-800">Answer pricing questions</p>
+                                            <p className="text-xs text-slate-500">Share pricing plans and rates.</p>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    navigate('/knowledge?tab=pricing#kb-pricing');
+                                                }}
+                                                className="text-xs font-semibold text-chippy-coral hover:text-chippy-coral/80"
+                                            >
+                                                Edit pricing
+                                            </button>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={capabilities.canAnswerPricing}
+                                            onChange={(e) => updateCapability('canAnswerPricing', e.target.checked)}
+                                            className="h-5 w-5"
+                                        />
+                                    </label>
+
+                                    <label className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                                        <div className="space-y-1">
+                                            <p className="text-sm font-semibold text-slate-800">Book appointments</p>
+                                            <p className="text-xs text-slate-500">Allow scheduling directly in chat.</p>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    navigate('/integrations');
+                                                }}
+                                                className="text-xs font-semibold text-chippy-coral hover:text-chippy-coral/80"
+                                            >
+                                                {hasActiveCalendar ? 'Manage calendars' : 'Connect calendar'}
+                                            </button>
+                                            <p className={`text-xs ${hasActiveCalendar ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                                {hasActiveCalendar ? 'Calendar connected' : 'No calendar connected yet'}
+                                            </p>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={capabilities.canBookAppointments}
+                                            onChange={(e) => updateCapability('canBookAppointments', e.target.checked)}
+                                            className="h-5 w-5"
+                                            disabled={!hasActiveCalendar}
+                                        />
+                                    </label>
+
+                                    <label className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                                        <div className="space-y-1">
+                                            <p className="text-sm font-semibold text-slate-800">Request callbacks</p>
+                                            <p className="text-xs text-slate-500">Let visitors ask for a phone callback.</p>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    setActiveTab('behavior');
+                                                    setSearchParams({ tab: 'behavior' });
+                                                    window.location.hash = '#behavior-lead-capture';
+                                                }}
+                                                className="text-xs font-semibold text-chippy-coral hover:text-chippy-coral/80"
+                                            >
+                                                Edit behavior
+                                            </button>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={capabilities.canRequestCallback}
+                                            onChange={(e) => updateCapability('canRequestCallback', e.target.checked)}
+                                            className="h-5 w-5"
+                                        />
+                                    </label>
+
+                                    <label className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                                        <div className="space-y-1">
+                                            <p className="text-sm font-semibold text-slate-800">Collect lead info</p>
+                                            <p className="text-xs text-slate-500">Allow pre-chat forms and lead capture.</p>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    setActiveTab('behavior');
+                                                    setSearchParams({ tab: 'behavior' });
+                                                    window.location.hash = '#behavior-lead-capture';
+                                                }}
+                                                className="text-xs font-semibold text-chippy-coral hover:text-chippy-coral/80"
+                                            >
+                                                Edit behavior
+                                            </button>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={capabilities.canCollectLeads}
+                                            onChange={(e) => updateCapability('canCollectLeads', e.target.checked)}
+                                            className="h-5 w-5"
+                                        />
+                                    </label>
+                                </div>
+
+                                <div className="pt-4 border-t border-slate-100 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <h4 className="text-sm font-semibold text-slate-700">Custom capabilities</h4>
+                                        <span className="text-xs text-slate-400">Optional</span>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        {(capabilities.custom || []).map((cap, idx) => (
+                                            <div key={cap.key} className="flex items-center gap-2">
+                                                <label className="flex-1 flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg">
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-slate-800">{cap.label}</p>
+                                                        <p className="text-xs text-slate-500">{cap.key}</p>
+                                                    </div>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={cap.enabled}
+                                                        onChange={(e) => updateCustomCapability(idx, e.target.checked)}
+                                                        className="h-5 w-5"
+                                                    />
+                                                </label>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeCustomCapability(idx)}
+                                                    className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-red-500 hover:border-red-200"
+                                                    aria-label={`Remove ${cap.label}`}
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={newCapabilityLabel}
+                                            onChange={(e) => setNewCapabilityLabel(e.target.value)}
+                                            placeholder="Add a custom capability..."
+                                            className="flex-1 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={addCustomCapability}
+                                            className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold flex items-center gap-2"
+                                        >
+                                            <Plus className="w-4 h-4" />
+                                            Add
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -736,6 +988,12 @@ export const WidgetStudio = () => {
                             <div className="absolute top-8 left-8 text-white/30 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
                                 <Eye className="w-4 h-4" /> Live Preview
                             </div>
+
+                            {capabilities.canBookAppointments && !hasActiveCalendar && (
+                                <div className="absolute top-8 right-8 bg-amber-500/90 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-sm">
+                                    Connect a calendar to enable booking
+                                </div>
+                            )}
 
                             {/* Widget Mockup */}
                             <div className={`w-full max-w-[340px] bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col h-[600px] transition-all duration-500 ${widgetConfig.position === 'left' ? '-translate-x-8' : 'translate-x-0'}`}>

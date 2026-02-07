@@ -54,6 +54,24 @@ export const formatServicePrice = (pricing: ServicePricing): string => {
             return `Starting from ${price}`;
         case 'hourly':
             return `${price}/hr`;
+        case 'per_session':
+            return `${price} per session`;
+        case 'per_project':
+            return `${price} per project`;
+        case 'per_day':
+            return `${price} per day`;
+        case 'per_week':
+            return `${price} per week`;
+        case 'per_month':
+            return `${price} per month`;
+        case 'subscription': {
+            const unit = pricing.unitLabel ? pricing.unitLabel.trim() : 'month';
+            return `${price} per ${unit}`;
+        }
+        case 'per_unit': {
+            const unit = pricing.unitLabel ? pricing.unitLabel.trim() : 'unit';
+            return `${price} per ${unit}`;
+        }
         default:
             return price;
     }

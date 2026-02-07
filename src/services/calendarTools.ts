@@ -173,6 +173,8 @@ export interface ToolContext {
     timezone: string;
     companyName: string;
     onCallbackRequest?: (data: CallbackRequestData) => void;
+    businessHours?: string | null;
+    businessHoursByDay?: Record<string, string> | null;
     calendarConnections?: Array<{
         id: string;
         locationId?: string;
@@ -542,6 +544,45 @@ async function requestCallback(
     context: ToolContext
 ): Promise<ToolResult> {
     try {
+        if (args.requested_datetime && context.businessHoursByDay) {
+            const requestedAt = new Date(args.requested_datetime);
+            const hoursForDay = getBusinessHoursForDate(requestedAt, context.businessHoursByDay);
+            if (!hoursForDay) {
+                return {
+                    success: false,
+                    error: `Requested time is outside business hours. Please ask the user to choose a time during business hours.`
+                };
+            }
+            if (!isWithinBusinessHours(requestedAt, hoursForDay)) {
+                return {
+                    success: false,
+                    error: `Requested time is outside business hours (${hoursForDay}). Please ask the user to choose a time within business hours.`
+                };
+            }
+        }
+
+        const response = await fetch('/api/callback/request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tenantId: context.userId,
+                customer_name: args.customer_name,
+                customer_phone: args.customer_phone,
+                customer_email: args.customer_email,
+                service: args.service,
+                purpose: args.purpose,
+                preferred_time: args.preferred_time,
+                requested_datetime: args.requested_datetime
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            return { success: false, error: error?.error || 'Callback request failed' };
+        }
+
+        await response.json();
+
         const callbackData: CallbackRequestData = {
             customerName: args.customer_name,
             customerPhone: args.customer_phone,
@@ -593,4 +634,63 @@ async function requestCallback(
     } catch (error: any) {
         return { success: false, error: error.message || 'Callback request failed' };
     }
+}
+
+const DAY_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function getBusinessHoursForDate(date: Date, hoursByDay: Record<string, string>): string | null {
+    const key = DAY_KEYS[date.getDay()];
+    const value = hoursByDay[key] || hoursByDay[key.toLowerCase()] || hoursByDay[key.toUpperCase()];
+    if (!value) return null;
+    if (value.toLowerCase().includes('closed')) return null;
+    return value;
+}
+
+function isWithinBusinessHours(date: Date, hoursText: string): boolean {
+    const range = parseHoursRange(hoursText);
+    if (!range) return true; // If we can't parse, don't block.
+
+    const minutes = date.getHours() * 60 + date.getMinutes();
+    if (range.start <= range.end) {
+        return minutes >= range.start && minutes <= range.end;
+    }
+    // Overnight ranges (e.g., 10pm-2am)
+    return minutes >= range.start || minutes <= range.end;
+}
+
+function parseHoursRange(input: string): { start: number; end: number } | null {
+    const normalized = input
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[–—]/g, '-')
+        .replace(' to ', ' - ')
+        .trim();
+
+    const match = normalized.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*-\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+    if (!match) return null;
+
+    const startHour = parseInt(match[1], 10);
+    const startMin = match[2] ? parseInt(match[2], 10) : 0;
+    const startMeridiem = match[3] || '';
+
+    const endHour = parseInt(match[4], 10);
+    const endMin = match[5] ? parseInt(match[5], 10) : 0;
+    const endMeridiem = match[6] || startMeridiem;
+
+    const start = toMinutes(startHour, startMin, startMeridiem);
+    const end = toMinutes(endHour, endMin, endMeridiem);
+
+    if (start === null || end === null) return null;
+    return { start, end };
+}
+
+function toMinutes(hour: number, minute: number, meridiem: string): number | null {
+    if (!meridiem) {
+        if (hour > 23) return null;
+        return hour * 60 + minute;
+    }
+    const isPm = meridiem.toLowerCase() === 'pm';
+    let h = hour % 12;
+    if (isPm) h += 12;
+    return h * 60 + minute;
 }

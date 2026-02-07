@@ -990,14 +990,39 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                            </div>
                         </ReviewCard>
                      </div>
-                     <div id="card-pricing">
+                    <div id="card-pricing">
                         <ReviewCard title="Pricing & Rates" icon={<DollarSign className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'pricing'} isApproved={sectionStatus.pricing} onToggle={() => setExpandedSection(expandedSection === 'pricing' ? null : 'pricing')} onApprove={() => toggleApproval('pricing')} isEmpty={!scannedData.pricing}>
                            <div>
                               {!scannedData.pricing && <div className="bg-slate-50 text-slate-600 p-3 rounded-lg text-sm mb-3 flex items-start gap-2 border border-slate-200"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><div><p className="font-semibold">Missing Pricing Data</p><p className="text-xs">We couldn't find pricing on the site.</p></div></div>}
                               <textarea rows={6} placeholder="e.g. \nBasic Plan: $50/mo" className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400 font-mono" value={scannedData.pricing || ''} onChange={(e) => setScannedData({ ...scannedData, pricing: e.target.value })} />
+                              <div className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
+                                 <p className="font-semibold text-slate-700 mb-2">Pricing models supported</p>
+                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {[
+                                       'Fixed price',
+                                       'Starting from',
+                                       'Hourly rate',
+                                       'Per session',
+                                       'Per project',
+                                       'Per day / week / month',
+                                       'Subscription (per unit)',
+                                       'Per unit (custom label)',
+                                       'Custom text',
+                                       'Contact for quote'
+                                    ].map(item => (
+                                       <div key={item} className="flex items-center gap-2">
+                                          <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                                          <span>{item}</span>
+                                       </div>
+                                    ))}
+                                 </div>
+                                 <p className="text-xs text-slate-500 mt-3">
+                                    Tip: Use the Services section to set per-service pricing.
+                                 </p>
+                              </div>
                            </div>
                         </ReviewCard>
-                     </div>
+                    </div>
                      <div id="card-policies">
                         <ReviewCard title="Policies & Cancellation" icon={<ShieldCheck className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'policies'} isApproved={sectionStatus.policies} onToggle={() => setExpandedSection(expandedSection === 'policies' ? null : 'policies')} onApprove={() => toggleApproval('policies')} isEmpty={!scannedData.policies}>
                            <div>

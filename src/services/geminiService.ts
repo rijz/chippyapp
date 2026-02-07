@@ -129,6 +129,7 @@ class ProxyChatSession {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(this.context?.userId ? { 'x-tenant-id': this.context.userId } : {})
         },
         body: JSON.stringify(requestBody)
       });

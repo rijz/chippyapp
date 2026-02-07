@@ -166,6 +166,24 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [feedbackComment, setFeedbackComment] = useState('');
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
+  const capabilities = widgetConfig.capabilities || {
+    canAnswerPricing: true,
+    canBookAppointments: true,
+    canRequestCallback: true,
+    canCollectLeads: true,
+    custom: []
+  };
+
+  const knowledgeSnapshot = useMemo(() => {
+    if (!knowledgeSummary) return null;
+    try {
+      return JSON.parse(knowledgeSummary);
+    } catch {
+      return null;
+    }
+  }, [knowledgeSummary]);
+  const [feedbackEligible, setFeedbackEligible] = useState(false);
+
   // Rotating placeholder messages
   const placeholderMessages = [
     "Ask about availability...",
@@ -188,11 +206,13 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const hasModelMessage = useMemo(() => messages.some(m => m.role === 'model'), [messages]);
   const feedbackStorageKey = useMemo(() => `chatFeedback_${sessionId}`, [sessionId]);
 
+  const canCollectLeads = capabilities.canCollectLeads !== false;
+
   // Determine if we should show lead form based on config
-  const isPreChatMode = widgetConfig.leadCaptureMode === 'pre-chat';
-  const hasLeadFields = widgetConfig.contactFields.name !== 'hidden' ||
+  const isPreChatMode = widgetConfig.leadCaptureMode === 'pre-chat' && canCollectLeads;
+  const hasLeadFields = canCollectLeads && (widgetConfig.contactFields.name !== 'hidden' ||
     widgetConfig.contactFields.email !== 'hidden' ||
-    widgetConfig.contactFields.phone !== 'hidden';
+    widgetConfig.contactFields.phone !== 'hidden');
 
   // Rotate placeholder messages every 3 seconds
   useEffect(() => {
@@ -375,14 +395,87 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     });
   };
 
+  const isPricingIntent = (text: string): boolean => {
+    const normalized = text.toLowerCase();
+    return [
+      'price',
+      'pricing',
+      'plan',
+      'plans',
+      'cost',
+      'rate',
+      'fees',
+      'how much',
+      'cheapest',
+      'expensive',
+      'compare',
+      'difference',
+      '$'
+    ].some(token => normalized.includes(token));
+  };
+
+  const matchCustomCapability = (text: string) => {
+    if (!capabilities.custom || capabilities.custom.length === 0) return null;
+    const normalized = text.toLowerCase();
+    return capabilities.custom.find(cap => !cap.enabled && (
+      (cap.key && normalized.includes(cap.key.toLowerCase())) ||
+      (cap.label && normalized.includes(cap.label.toLowerCase()))
+    ));
+  };
+
+  const extractPricingPlans = (data: any): PricingPlan[] => {
+    if (!data?.pricing || !Array.isArray(data.pricing)) return [];
+    return (data.pricing as PricingPlan[]).filter(plan => plan && (plan.name || plan.price));
+  };
+
+  const buildPricingResponse = (data: any, text: string): string | null => {
+    const plans = extractPricingPlans(data);
+    if (plans.length === 0) return null;
+
+    const normalized = text.toLowerCase();
+    const cheapest = plans.reduce((min, plan) => {
+      const price = extractNumericPrice(plan.price);
+      if (price === null) return min;
+      if (!min || price < min.value) {
+        return { value: price, plan };
+      }
+      return min;
+    }, null as null | { value: number; plan: PricingPlan });
+
+    if (normalized.includes('cheapest') && cheapest) {
+      return `${cheapest.plan.name} is the cheapest at ${cheapest.plan.price}.`;
+    }
+
+    if (normalized.includes('difference') || normalized.includes('compare')) {
+      const lines = plans.map(plan => {
+        const features = plan.features && plan.features.length > 0 ? ` — ${plan.features.join(', ')}` : '';
+        return `${plan.name}: ${plan.price}${features}`;
+      });
+      return `Here’s how the plans compare:\n\n${lines.join('\n')}`;
+    }
+
+    const lines = plans.map(plan => {
+      const features = plan.features && plan.features.length > 0 ? ` — ${plan.features.join(', ')}` : '';
+      return `${plan.name}: ${plan.price}${features}`;
+    });
+    return `Here are our pricing plans:\n\n${lines.join('\n')}`;
+  };
+
+  const extractNumericPrice = (price?: string): number | null => {
+    if (!price) return null;
+    const match = price.replace(/,/g, '').match(/(\d+(\.\d+)?)/);
+    if (!match) return null;
+    return parseFloat(match[1]);
+  };
+
   const initChat = async (userData?: typeof leadData): Promise<any> => {
     let structuredInfo = "Standard business hours apply.";
     let correctionsInfo = "";
     let topRulesInfo = "";
 
     try {
-      if (knowledgeSummary) {
-        const parsed = JSON.parse(knowledgeSummary);
+      if (knowledgeSnapshot) {
+        const parsed = knowledgeSnapshot;
         structuredInfo = `
           Business Category: ${parsed.businessCategory}
           Summary: ${parsed.summary}
@@ -448,6 +541,13 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       KNOWLEDGE BASE:
       ${structuredInfo}
 
+      CAPABILITIES (DO NOT VIOLATE):
+      - Pricing answers: ${capabilities.canAnswerPricing ? 'ENABLED' : 'DISABLED'}
+      - Booking appointments: ${capabilities.canBookAppointments ? 'ENABLED' : 'DISABLED'}
+      - Callback requests: ${capabilities.canRequestCallback ? 'ENABLED' : 'DISABLED'}
+      - Lead capture: ${capabilities.canCollectLeads ? 'ENABLED' : 'DISABLED'}
+      ${capabilities.custom && capabilities.custom.length > 0 ? `- Custom: ${capabilities.custom.map(c => `${c.label} (${c.enabled ? 'ENABLED' : 'DISABLED'})`).join(', ')}` : ''}
+
       ${correctionsInfo}
       
       ${topRulesInfo}
@@ -512,7 +612,8 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       4. Email is optional but helpful
       5. Ask: "When would you like us to call you back?" - Try to get a SPECIFIC date and time (e.g., "Tomorrow at 2pm", "Friday morning at 10am")
       6. If they give a specific date/time, use requested_datetime. If they give a general time (e.g., "morning", "afternoon"), use preferred_time
-      7. Then call request_callback with the collected information
+      7. If the requested time is outside business hours, offer the next available business-hour options instead of confirming
+      8. Then call request_callback with the collected information
 
       📅 BOOKING FLOW:
       1. First, match their need to a SERVICE
@@ -544,6 +645,8 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       - Do NOT invent plan names, tiers, or prices.
       - If pricing is missing or unclear, say you don't have it and offer to connect them or ask which plan they saw.
       - If the user says the website shows a different price, acknowledge it and defer to the website as most current.
+      - If user asks about "plans", interpret this as pricing plans unless they explicitly refer to personal plans.
+      - If challenged on pricing and the KB is clear, confirm politely but cite that it's based on the KB and offer to verify against the website if they saw a different price.
 
       Keep responses concise. Use Markdown formatting.
       Do not make up services not in the knowledge base.
@@ -554,6 +657,8 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       userId: tenantConfig.userId,
       timezone: 'America/New_York',
       companyName: tenantConfig.companyName,
+      businessHours: knowledgeSnapshot?.businessHours || null,
+      businessHoursByDay: knowledgeSnapshot?.businessHoursByDay || null,
       onCallbackRequest: onCallbackRequest,
       calendarConnections: calendarConnections.map(c => ({
         id: c.id,
@@ -583,6 +688,22 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         'find_closest_location': '📍 Finding closest location...',
       };
       setStatusMessage(statusMessages[name] || '🔄 Processing...');
+
+      if (name === 'request_callback' && !capabilities.canRequestCallback) {
+        setStatusMessage('');
+        return { success: false, error: 'Callback requests are not enabled.' };
+      }
+
+      if (
+        (name === 'get_available_slots' ||
+          name === 'book_appointment' ||
+          name === 'cancel_appointment' ||
+          name === 'reschedule_appointment') &&
+        !capabilities.canBookAppointments
+      ) {
+        setStatusMessage('');
+        return { success: false, error: 'Booking is not enabled.' };
+      }
 
       // Handle location tool
       if (name === 'find_closest_location') {
@@ -652,23 +773,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
           }
 
           if (name === 'request_callback') {
-            await bdlService.emitEvent(createEvent({
-              tenantId: tenantConfig.userId,
-              type: 'callback.requested',
-              source: 'chat',
-              payload: {
-                request_id: `cb_${Date.now()}`,
-                customer: {
-                  name: args.customer_name,
-                  email: args.customer_email,
-                  phone: args.customer_phone
-                },
-                service: args.service,
-                purpose: args.purpose,
-                preferred_time: args.preferred_time,
-                requested_datetime: args.requested_datetime
-              }
-            }));
+            // Server handles persistence/validation for callback requests
           }
         } catch (error) {
           console.warn('[BDL] Failed to emit event', error);
@@ -683,6 +788,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       // Clear slots when booking is made
       if (name === 'book_appointment' && result.success) {
         setClickableSlots([]);
+        setFeedbackEligible(true);
         // Create/update lead with booking status
         if (onBookingComplete && args.customer_email) {
           onBookingComplete(
@@ -701,6 +807,10 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         if (onCancellation && args.customer_email) {
           onCancellation(args.customer_email);
         }
+      }
+
+      if (name === 'request_callback' && result.success) {
+        setFeedbackEligible(true);
       }
 
       return result;
@@ -845,6 +955,106 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     let sessionToUse = chatSession;
 
     try {
+      const blockedCustom = matchCustomCapability(currentText);
+      if (blockedCustom) {
+        const responseText = `I’m not able to help with ${blockedCustom.label || 'that'} right now. Is there something else I can assist with?`;
+        const botMsgId = (Date.now() + 1).toString();
+        const botMsg: Message = {
+          id: botMsgId,
+          role: 'model',
+          text: '',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, botMsg]);
+        setIsLoading(false);
+        playNotificationSound();
+        const chars = responseText.split('');
+        for (let i = 0; i < chars.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          setMessages(prev => prev.map(msg =>
+            msg.id === botMsgId
+              ? { ...msg, text: responseText.substring(0, i + 1) }
+              : msg
+          ));
+        }
+
+        analyzeInteraction(currentText, responseText).then(analysis => {
+          if (onInteraction) {
+            onInteraction(currentText, responseText, analysis);
+          }
+        });
+
+        return;
+      }
+
+      if (isPricingIntent(currentText)) {
+        if (!capabilities.canAnswerPricing) {
+          const pricingResponse = "I’m not able to share pricing right now. Would you like me to connect you with someone?";
+          const botMsgId = (Date.now() + 1).toString();
+          const botMsg: Message = {
+            id: botMsgId,
+            role: 'model',
+            text: '',
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, botMsg]);
+          setIsLoading(false);
+          playNotificationSound();
+          const chars = pricingResponse.split('');
+          for (let i = 0; i < chars.length; i++) {
+            await new Promise(resolve => setTimeout(resolve, 20));
+            setMessages(prev => prev.map(msg =>
+              msg.id === botMsgId
+                ? { ...msg, text: pricingResponse.substring(0, i + 1) }
+                : msg
+            ));
+          }
+
+          analyzeInteraction(currentText, pricingResponse).then(analysis => {
+            if (onInteraction) {
+              onInteraction(currentText, pricingResponse, analysis);
+            }
+          });
+
+          return;
+        }
+
+        if (!knowledgeSnapshot) {
+          // No KB available, let the model handle the request.
+        } else {
+          const pricingResponse = buildPricingResponse(knowledgeSnapshot, currentText);
+        if (pricingResponse) {
+          const botMsgId = (Date.now() + 1).toString();
+          const botMsg: Message = {
+            id: botMsgId,
+            role: 'model',
+            text: '',
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, botMsg]);
+          setIsLoading(false);
+          playNotificationSound();
+          const chars = pricingResponse.split('');
+          for (let i = 0; i < chars.length; i++) {
+            await new Promise(resolve => setTimeout(resolve, 20));
+            setMessages(prev => prev.map(msg =>
+              msg.id === botMsgId
+                ? { ...msg, text: pricingResponse.substring(0, i + 1) }
+                : msg
+            ));
+          }
+
+          analyzeInteraction(currentText, pricingResponse).then(analysis => {
+            if (onInteraction) {
+              onInteraction(currentText, pricingResponse, analysis);
+            }
+          });
+
+          return;
+        }
+        }
+      }
+
       if (!sessionToUse) {
         console.error('[ChatWidget] No session available');
         setIsLoading(false);
@@ -1087,7 +1297,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                 </div>
 
                 <div className="p-4 bg-white border-t border-slate-100 sticky bottom-0 z-10">
-                  {hasModelMessage && hasUserMessage && !feedbackSubmitted && (
+                  {hasModelMessage && feedbackEligible && !feedbackSubmitted && (
                     <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3">
                       <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Rate this chat</p>
                       <div className="flex items-center gap-2 mb-2">
