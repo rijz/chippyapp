@@ -484,18 +484,72 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     return false;
   };
 
+  const isBookingOrCallbackIntent = (text: string): boolean => {
+    const normalized = text.toLowerCase();
+    const tokens = ['book', 'appointment', 'schedule', 'availability', 'available', 'slot', 'reschedule', 'cancel', 'callback', 'call back'];
+    return tokens.some(token => normalized.includes(token));
+  };
+
+  const isPlatformIntent = (text: string): boolean => {
+    const normalized = text.toLowerCase();
+    const platformTokens = [
+      'chippy',
+      'your app',
+      'your platform',
+      'your product',
+      'this app',
+      'this platform',
+      'use this',
+      'how can i use',
+      'for my business',
+      'use the widget',
+      'widget',
+      'embed',
+      'integration',
+      'setup',
+      'set up',
+      'install',
+      'demo'
+    ];
+    const directBrand = normalized.includes('chippy');
+    const hasPlatformToken = platformTokens.some(token => normalized.includes(token));
+    return directBrand || hasPlatformToken;
+  };
+
+  const isSmallTalkOrOffTopic = (text: string): boolean => {
+    const normalized = text.toLowerCase();
+    const offTopicTokens = [
+      'how old',
+      'your age',
+      'who are you',
+      'what are you',
+      'tell me about yourself',
+      'joke',
+      '1+1',
+      '2+2',
+      'math',
+      'are you real'
+    ];
+    return offTopicTokens.some(token => normalized.includes(token));
+  };
+
   const buildBusinessRedirect = (): string => {
-    const items: string[] = [];
-    const serviceNames = knowledgeSnapshot ? extractServiceNames(knowledgeSnapshot) : [];
-    if (serviceNames.length > 0) {
-      items.push(`services like ${serviceNames.slice(0, 4).join(', ')}`);
-    }
-    if (capabilities.canAnswerPricing) items.push('pricing');
-    items.push('hours', 'location');
-    if (capabilities.canBookAppointments) items.push('booking');
+    const items: string[] = ['hours', 'location'];
+    if (capabilities.canBookAppointments) items.push('appointments');
     if (capabilities.canRequestCallback) items.push('callbacks');
-    const summary = items.length > 0 ? items.join(', ') : 'our services, pricing, hours, and booking';
+    if (capabilities.canAnswerPricing) items.push('pricing');
+    const summary = items.join(', ');
     return `I can help with ${summary}. What would you like to know?`;
+  };
+
+  const buildPlatformResponse = (): string => {
+    const steps = [
+      'Add your services, pricing, and hours to the Knowledge Base',
+      'Connect your calendar for live availability',
+      'Customize the widget and embed it on your site',
+      'Test booking + callback flows before going live'
+    ];
+    return `Chippy helps businesses answer questions, capture leads, and book appointments automatically.\n\nFor your business, the fastest setup is:\n- ${steps.join('\n- ')}\n\nIf you want, tell me your business type and I can recommend the best setup and next steps.`;
   };
 
   const extractContactFields = (text: string): { name?: string; email?: string; phone?: string } => {
@@ -622,6 +676,16 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     let correctionsInfo = "";
     let topRulesInfo = "";
 
+    const knowledgeMissing = !(knowledgeSnapshot && (
+      knowledgeSnapshot.summary ||
+      knowledgeSnapshot.businessCategory ||
+      (knowledgeSnapshot.services && knowledgeSnapshot.services.length > 0) ||
+      knowledgeSnapshot.businessHours ||
+      knowledgeSnapshot.pricing ||
+      knowledgeSnapshot.policies ||
+      (knowledgeSnapshot.locations && knowledgeSnapshot.locations.length > 0)
+    ));
+
     try {
       if (knowledgeSnapshot) {
         const parsed = knowledgeSnapshot;
@@ -696,6 +760,13 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       KNOWLEDGE BASE:
       ${structuredInfo}
 
+      ${knowledgeMissing ? `
+      ⚠️ KNOWLEDGE BASE INCOMPLETE:
+      - Do NOT list services, pricing, or plans unless the user explicitly provides them.
+      - Ask one clarifying question to learn their service need.
+      - Offer a callback if you cannot answer accurately.
+      ` : ''}
+
       CAPABILITIES (DO NOT VIOLATE):
       - Pricing answers: ${capabilities.canAnswerPricing ? 'ENABLED' : 'DISABLED'}
       - Booking appointments: ${capabilities.canBookAppointments ? 'ENABLED' : 'DISABLED'}
@@ -730,6 +801,11 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       - "I cannot share location data"
       
       YOU REPRESENT ${tenantConfig.companyName}. When asked about location, always share the business location information from your knowledge base.
+
+      🔒 ROLE BOUNDARIES:
+      - You are the business assistant, not the Chippy platform.
+      - Do NOT list platform capabilities or generic feature lists unless the user explicitly asks about Chippy.
+      - For unrelated personal questions (e.g., age), politely redirect to business help without listing capabilities.
       
       CONTACT COLLECTION RULES:
       ${userInfoContext ? `✅ You ALREADY HAVE the customer's contact information (see CUSTOMER INFO section above). DO NOT ask for their name, email, or phone again.` : `Collect contact info when booking:
@@ -945,6 +1021,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       if (name === 'book_appointment' && result.success) {
         setClickableSlots([]);
         setFeedbackEligible(true);
+        setConversationEnded(true);
         // Create/update lead with booking status
         if (onBookingComplete && args.customer_email) {
           onBookingComplete(
@@ -967,6 +1044,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
 
       if (name === 'request_callback' && result.success) {
         setFeedbackEligible(true);
+        setConversationEnded(true);
       }
 
       return result;
@@ -1113,8 +1191,8 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     let sessionToUse = chatSession;
 
     try {
-      if (isGreeting(currentText) && !isBusinessIntent(currentText)) {
-        const responseText = buildBusinessRedirect();
+      if (isPlatformIntent(currentText) && !isBookingOrCallbackIntent(currentText)) {
+        const responseText = buildPlatformResponse();
         const botMsgId = (Date.now() + 1).toString();
         const botMsg: Message = {
           id: botMsgId,
@@ -1144,7 +1222,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         return;
       }
 
-      if (!isBusinessIntent(currentText)) {
+      if (isSmallTalkOrOffTopic(currentText) && !isBusinessIntent(currentText)) {
         const responseText = buildBusinessRedirect();
         const botMsgId = (Date.now() + 1).toString();
         const botMsg: Message = {
