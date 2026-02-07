@@ -1756,6 +1756,39 @@ const buildPricingResponse = (knowledge, queryText) => {
   return `Here are our pricing plans:\n\n${formatted.join('\n')}`;
 };
 
+// Semantic validator: compare LLM response prices against KB pricing
+const validatePricingResponse = (responseText, knowledge) => {
+  // Extract any prices mentioned in the response ($49, $79.99, etc.)
+  const mentionedPrices = (responseText.match(/\$\d+(?:[.,]\d{2})?/g) || [])
+    .map(p => parseFloat(p.replace(/[$,]/g, '')));
+
+  if (mentionedPrices.length === 0) {
+    // No prices mentioned, nothing to validate
+    return { valid: true };
+  }
+
+  if (!knowledge?.pricing || !Array.isArray(knowledge.pricing) || knowledge.pricing.length === 0) {
+    // No pricing in KB but response mentions prices - likely hallucinated
+    return { valid: false, reason: 'No pricing in KB but response includes prices' };
+  }
+
+  // Extract known prices from KB
+  const knownPrices = knowledge.pricing
+    .map(p => parseFloat(String(p.price || '').replace(/[^0-9.]/g, '')))
+    .filter(p => !isNaN(p));
+
+  // Check all mentioned prices are known (within $1 tolerance for rounding)
+  const invalidPrices = mentionedPrices.filter(
+    mentioned => !knownPrices.some(known => Math.abs(known - mentioned) < 1)
+  );
+
+  if (invalidPrices.length > 0) {
+    return { valid: false, reason: `Unknown prices: $${invalidPrices.join(', $')}` };
+  }
+
+  return { valid: true };
+};
+
 const fetchKnowledgeBase = async (tenantId) => {
   const { data, error } = await supabaseAdmin
     .from('knowledge_bases')
@@ -1914,6 +1947,25 @@ app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
     });
 
     const data = await response.json();
+
+    // Post-LLM semantic validation for high-risk intents
+    if (tenantId && knowledge && data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      const llmResponse = data.candidates[0].content.parts[0].text;
+
+      // Validate pricing responses against KB
+      if (inferredIntent === 'pricing' || isPricingIntent(lastUserText)) {
+        const validation = validatePricingResponse(llmResponse, knowledge);
+        if (!validation.valid) {
+          console.warn('[BDL] Pricing validation failed:', validation.reason);
+          const override = buildPricingResponse(knowledge, lastUserText)
+            || "I don't have pricing details available right now. Would you like me to connect you with someone?";
+          return res.json({
+            candidates: [{ content: { parts: [{ text: override }] } }]
+          });
+        }
+      }
+    }
+
     res.status(response.status).json(data);
   } catch (error) {
     console.error('[API Proxy] Error:', error);
@@ -2779,7 +2831,7 @@ app.post('/api/callback/request', calendarLimiter, async (req, res) => {
       return res.status(403).json({ error: 'Callback requests are not enabled.' });
     }
 
-  if (requested_datetime) {
+    if (requested_datetime) {
       const knowledge = await fetchKnowledgeBase(String(tenantId));
       const hoursByDay = knowledge?.businessHoursByDay || null;
       if (hoursByDay) {
@@ -2796,7 +2848,7 @@ app.post('/api/callback/request', calendarLimiter, async (req, res) => {
           });
         }
       }
-  }
+    }
 
     const payload = {
       request_id: `cb_${Date.now()}`,
@@ -2887,8 +2939,8 @@ app.post('/api/calendar/create-event', calendarLimiter, async (req, res) => {
           endTime: new Date(endTime),
           attendees: Array.isArray(attendees)
             ? attendees
-                .filter(Boolean)
-                .map(a => (typeof a === 'string' ? { email: a } : a))
+              .filter(Boolean)
+              .map(a => (typeof a === 'string' ? { email: a } : a))
             : [],
           timezone
         }
