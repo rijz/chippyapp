@@ -984,13 +984,56 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                      </div>
                      <div id="card-operations">
                         <ReviewCard title="Operations" icon={<Clock className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'operations'} isApproved={sectionStatus.operations} onToggle={() => setExpandedSection(expandedSection === 'operations' ? null : 'operations')} onApprove={() => toggleApproval('operations')}>
-                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div><label className="text-xs font-bold text-slate-500 uppercase">Business Hours</label><input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.businessHours} onChange={(e) => setScannedData({ ...scannedData, businessHours: e.target.value })} /></div>
-                              <div><label className="text-xs font-bold text-slate-500 uppercase">Contact Info</label><input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.contactInfo} onChange={(e) => setScannedData({ ...scannedData, contactInfo: e.target.value })} /></div>
+                           <div className="space-y-4">
+                              {/* Structured Hours by Day */}
+                              <div>
+                                 <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Business Hours by Day</label>
+                                 <div className="space-y-2">
+                                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => {
+                                       const hoursByDay = scannedData.businessHoursByDay || {};
+                                       const dayValue = hoursByDay[day] || '';
+                                       const isClosed = dayValue.toLowerCase() === 'closed' || dayValue === '';
+                                       return (
+                                          <div key={day} className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                             <span className="w-10 text-xs font-bold text-slate-600">{day}</span>
+                                             <div className="flex-1 flex items-center gap-2">
+                                                <input
+                                                   type="text"
+                                                   placeholder="9:00 AM - 5:00 PM"
+                                                   className={`flex-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400 ${isClosed && dayValue === 'Closed' ? 'opacity-50' : ''}`}
+                                                   value={dayValue === 'Closed' ? '' : dayValue}
+                                                   disabled={dayValue === 'Closed'}
+                                                   onChange={(e) => {
+                                                      const newHours = { ...hoursByDay, [day]: e.target.value };
+                                                      setScannedData({ ...scannedData, businessHoursByDay: newHours, businessHours: Object.entries(newHours).map(([d, h]) => `${d}: ${h || 'Closed'}`).join(', ') });
+                                                   }}
+                                                />
+                                                <button
+                                                   type="button"
+                                                   onClick={() => {
+                                                      const newHours = { ...hoursByDay, [day]: dayValue === 'Closed' ? '' : 'Closed' };
+                                                      setScannedData({ ...scannedData, businessHoursByDay: newHours, businessHours: Object.entries(newHours).map(([d, h]) => `${d}: ${h || 'Closed'}`).join(', ') });
+                                                   }}
+                                                   className={`px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${dayValue === 'Closed' ? 'bg-slate-200 text-slate-600' : 'bg-white border border-slate-200 text-slate-400 hover:bg-slate-100'}`}
+                                                >
+                                                   {dayValue === 'Closed' ? 'Closed' : 'Close'}
+                                                </button>
+                                             </div>
+                                          </div>
+                                       );
+                                    })}
+                                 </div>
+                                 <p className="text-xs text-slate-400 mt-2">Tip: Use format like "9:00 AM - 5:00 PM" or "10AM-6PM"</p>
+                              </div>
+                              {/* Contact Info */}
+                              <div>
+                                 <label className="text-xs font-bold text-slate-500 uppercase">Contact Info</label>
+                                 <input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.contactInfo} onChange={(e) => setScannedData({ ...scannedData, contactInfo: e.target.value })} />
+                              </div>
                            </div>
                         </ReviewCard>
                      </div>
-                    <div id="card-pricing">
+                     <div id="card-pricing">
                         <ReviewCard title="Pricing & Rates" icon={<DollarSign className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'pricing'} isApproved={sectionStatus.pricing} onToggle={() => setExpandedSection(expandedSection === 'pricing' ? null : 'pricing')} onApprove={() => toggleApproval('pricing')} isEmpty={!scannedData.pricing}>
                            <div>
                               {!scannedData.pricing && <div className="bg-slate-50 text-slate-600 p-3 rounded-lg text-sm mb-3 flex items-start gap-2 border border-slate-200"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><div><p className="font-semibold">Missing Pricing Data</p><p className="text-xs">We couldn't find pricing on the site.</p></div></div>}
@@ -1022,12 +1065,32 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                               </div>
                            </div>
                         </ReviewCard>
-                    </div>
+                     </div>
                      <div id="card-policies">
                         <ReviewCard title="Policies & Cancellation" icon={<ShieldCheck className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'policies'} isApproved={sectionStatus.policies} onToggle={() => setExpandedSection(expandedSection === 'policies' ? null : 'policies')} onApprove={() => toggleApproval('policies')} isEmpty={!scannedData.policies}>
-                           <div>
+                           <div className="space-y-4">
                               {!scannedData.policies && <div className="bg-slate-50 text-slate-600 p-3 rounded-lg text-sm mb-3 flex items-start gap-2 border border-slate-200"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><div><p className="font-semibold">Missing Policy Data</p><p className="text-xs">Please add cancellation terms.</p></div></div>}
-                              <textarea rows={4} placeholder="e.g. 24-hour notice required." className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.policies || ''} onChange={(e) => setScannedData({ ...scannedData, policies: e.target.value })} />
+                              <div>
+                                 <label className="text-xs font-bold text-slate-500 uppercase">Cancellation & Policies</label>
+                                 <textarea rows={4} placeholder="e.g. 24-hour notice required." className="w-full mt-1 p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.policies || ''} onChange={(e) => setScannedData({ ...scannedData, policies: e.target.value })} />
+                              </div>
+                              {/* Top Rules / Priority Instructions */}
+                              <div>
+                                 <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+                                    Priority Instructions <span className="text-slate-400 font-normal">(optional)</span>
+                                 </label>
+                                 <p className="text-xs text-slate-400 mt-1 mb-2">Rules the AI will always follow. One rule per line.</p>
+                                 <textarea
+                                    rows={5}
+                                    placeholder="e.g.
+Always recommend our signature service to first-time customers
+Never discuss competitor pricing
+If budget under $100, recommend Basic package"
+                                    className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400 font-mono"
+                                    value={scannedData.topRules || ''}
+                                    onChange={(e) => setScannedData({ ...scannedData, topRules: e.target.value })}
+                                 />
+                              </div>
                            </div>
                         </ReviewCard>
                      </div>

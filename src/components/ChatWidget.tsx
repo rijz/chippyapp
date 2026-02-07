@@ -747,8 +747,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
         structuredInfo = `
           Business Category: ${parsed.businessCategory}
           Summary: ${parsed.summary}
+          Phone: ${parsed.phoneNumber || parsed.contactInfo || 'Not provided'}
           Services: ${formatServicesForPrompt(parsed.services)}
           Hours: ${parsed.businessHours}
+          ${parsed.businessHoursByDay ? `Hours by Day: ${Object.entries(parsed.businessHoursByDay).map(([day, hours]) => `${day}: ${hours || 'Closed'}`).join(', ')}` : ''}
           Contact: ${parsed.contactInfo}
           Pricing: ${formatPricingForPrompt(parsed.pricing)}
           Policies: ${parsed.policies}
