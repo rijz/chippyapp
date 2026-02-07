@@ -36,6 +36,7 @@ import { uploadKnowledgeAsset } from '../services/supabaseStorage';
 import { ServiceEditor } from './ServiceEditor';
 import { normalizeKnowledgeData, generateServiceId, defaultPricing } from '../utils/serviceUtils';
 import { AddressAutocomplete } from './AddressAutocomplete';
+import { AIKnowledgePreview } from './knowledge/AIKnowledgePreview';
 
 interface OnboardingWizardProps {
    tenantConfig: TenantConfig;
@@ -1121,9 +1122,14 @@ If budget under $100, recommend Basic package"
                         </div>
 
                         {trainingPhase >= 4 && (
-                           <button onClick={() => onComplete(scannedData!)} className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl shadow-sm hover:shadow transition-all flex items-center justify-center gap-3 animate-in slide-in-from-bottom-4 fade-in duration-500">
-                              <Sparkles className="w-5 h-5" /> Customize Widget <ArrowRight className="w-5 h-5" />
-                           </button>
+                           <div className="space-y-4 animate-in slide-in-from-bottom-4 fade-in duration-500">
+                              <AIKnowledgePreview
+                                 knowledgeData={scannedData!}
+                                 onEdit={() => setStep(4)}
+                                 onConfirm={() => onComplete(scannedData!)}
+                                 showActions={true}
+                              />
+                           </div>
                         )}
                      </div>
                   </div>

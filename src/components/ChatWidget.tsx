@@ -1551,7 +1551,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
   return (
     <div className={`fixed bottom-6 z-50 flex flex-col ${positionClass} pointer-events-none`}>
       {isOpen && (
-        <div className="bg-white/95 w-[calc(100vw-24px)] sm:w-[380px] h-[600px] max-h-[calc(100vh-120px)] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur pointer-events-auto">
+        <div className="bg-white/95 w-[calc(100vw-48px)] sm:w-[380px] h-[calc(100vh-100px)] sm:h-[600px] max-h-[80vh] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur pointer-events-auto">
           {/* Header */}
           <div className="px-5 py-4 flex items-center justify-between text-white border-b border-white/20" style={{ backgroundColor: widgetConfig.color }}>
             <div className="flex items-center gap-2">
