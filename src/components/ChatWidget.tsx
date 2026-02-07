@@ -467,15 +467,66 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     return [];
   };
 
+  const filterServiceNames = (names: string[]): string[] => {
+    return names.filter(name => {
+      const wordCount = name.trim().split(/\s+/).length;
+      return name.length <= 40 && wordCount <= 6;
+    });
+  };
+
   const isBusinessIntent = (text: string): boolean => {
     const normalized = text.toLowerCase();
     if (isPricingIntent(normalized) || isPlanSelectionIntent(normalized)) return true;
-    const bookingTokens = ['book', 'appointment', 'schedule', 'availability', 'available', 'slot', 'reschedule', 'cancel', 'callback', 'call back'];
+    if (isPlatformIntent(normalized)) return true;
+    const bookingTokens = [
+      'book',
+      'appointment',
+      'schedule',
+      'availability',
+      'available',
+      'slot',
+      'reschedule',
+      'cancel',
+      'callback',
+      'call back',
+      'call me',
+      'call',
+      'talk to',
+      'speak to',
+      'representative',
+      'sales',
+      'demo'
+    ];
     if (bookingTokens.some(token => normalized.includes(token))) return true;
-    const infoTokens = ['hours', 'open', 'close', 'location', 'address', 'phone', 'email', 'contact', 'pricing', 'price', 'plan', 'services', 'service'];
+    const infoTokens = [
+      'hours',
+      'open',
+      'close',
+      'location',
+      'address',
+      'phone',
+      'email',
+      'contact',
+      'pricing',
+      'price',
+      'plan',
+      'services',
+      'service',
+      'use',
+      'implement',
+      'implementation',
+      'integrate',
+      'setup',
+      'set up',
+      'for my business',
+      'for my company',
+      'for my clinic',
+      'for my practice',
+      'for my office'
+    ];
     if (infoTokens.some(token => normalized.includes(token))) return true;
     if (knowledgeSnapshot) {
-      const serviceNames = extractServiceNames(knowledgeSnapshot);
+      const serviceNames = filterServiceNames(extractServiceNames(knowledgeSnapshot));
       if (serviceNames.some(name => normalized.includes(name.toLowerCase()))) return true;
       const keywords = Array.isArray(knowledgeSnapshot.keywords) ? knowledgeSnapshot.keywords : [];
       if (keywords.some((kw: string) => normalized.includes(String(kw).toLowerCase()))) return true;
@@ -534,11 +585,16 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   };
 
   const buildBusinessRedirect = (): string => {
-    const items: string[] = ['hours', 'location'];
-    if (capabilities.canBookAppointments) items.push('appointments');
-    if (capabilities.canRequestCallback) items.push('callbacks');
+    const items: string[] = [];
+    const serviceNames = knowledgeSnapshot ? filterServiceNames(extractServiceNames(knowledgeSnapshot)) : [];
+    if (serviceNames.length > 0) {
+      items.push(`services like ${serviceNames.slice(0, 2).join(', ')}`);
+    }
     if (capabilities.canAnswerPricing) items.push('pricing');
-    const summary = items.join(', ');
+    items.push('hours', 'location');
+    if (capabilities.canBookAppointments) items.push('booking');
+    if (capabilities.canRequestCallback) items.push('callbacks');
+    const summary = items.length > 0 ? items.join(', ') : 'our services, pricing, hours, and booking';
     return `I can help with ${summary}. What would you like to know?`;
   };
 
@@ -636,6 +692,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     if (plans.length === 0) return null;
 
     const normalized = text.toLowerCase();
+    const budgetMatch = normalized.replace(/,/g, '').match(/(\d+(\.\d+)?)/);
+    const budget = budgetMatch ? parseFloat(budgetMatch[1]) : null;
     const cheapest = plans.reduce((min, plan) => {
       const price = extractNumericPrice(plan.price);
       if (price === null) return min;
@@ -644,6 +702,12 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       }
       return min;
     }, null as null | { value: number; plan: PricingPlan });
+
+    if (budget !== null && cheapest) {
+      if (budget < cheapest.value) {
+        return `Thanks for sharing your budget. Our lowest plan is ${cheapest.plan.name} at ${cheapest.plan.price}. Would you like details on that plan?`;
+      }
+    }
 
     if (normalized.includes('cheapest') && cheapest) {
       return `${cheapest.plan.name} is the cheapest at ${cheapest.plan.price}.`;
@@ -1222,7 +1286,38 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         return;
       }
 
-      if (isSmallTalkOrOffTopic(currentText) && !isBusinessIntent(currentText)) {
+      if (isPlatformIntent(currentText)) {
+        const responseText = buildPlatformResponse();
+        const botMsgId = (Date.now() + 1).toString();
+        const botMsg: Message = {
+          id: botMsgId,
+          role: 'model',
+          text: '',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, botMsg]);
+        setIsLoading(false);
+        playNotificationSound();
+        const chars = responseText.split('');
+        for (let i = 0; i < chars.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          setMessages(prev => prev.map(msg =>
+            msg.id === botMsgId
+              ? { ...msg, text: responseText.substring(0, i + 1) }
+              : msg
+          ));
+        }
+
+        analyzeInteraction(currentText, responseText).then(analysis => {
+          if (onInteraction) {
+            onInteraction(currentText, responseText, analysis);
+          }
+        });
+
+        return;
+      }
+
+      if (!isBusinessIntent(currentText)) {
         const responseText = buildBusinessRedirect();
         const botMsgId = (Date.now() + 1).toString();
         const botMsg: Message = {
@@ -1353,7 +1448,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         }
       }
 
-      if (knowledgeSnapshot && isPlanSelectionIntent(currentText)) {
+      if (isPlanSelectionIntent(currentText)) {
         const pricingResponse = "I can help you choose the best plan. What matters most—budget, advanced analytics, custom branding, or multiple user seats?";
         const botMsgId = (Date.now() + 1).toString();
         const botMsg: Message = {

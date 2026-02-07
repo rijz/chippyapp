@@ -33,11 +33,13 @@ A compact, curated, canonical memory for each tenant.
 - Hours: business hours, holiday rules
 - Locations: name, address, service area
 - Services: name, description, duration, category, pricing
+- Pricing models: plans/services with model type (per hour, per project, per visit, per unit, etc.)
 - Policies: cancellation, deposits, refunds, late policy
 - Top rules: critical business instructions
 - Keywords: services, niche terms, synonyms
 - Risk rules: “Do not guess pricing”, “Do not promise walk-ins”, etc.
 - Example Q&A: 3–5 canonical responses
+- KB metadata: last sync/update timestamp
 
 **Example format**
 ```
@@ -48,10 +50,13 @@ Locations:
 - {name} — {address}
 Services:
 - {name} ({duration} min) — {pricing}
+Pricing:
+- {plan_or_service} — {model} — {price}
 Policies:
 - {policy lines}
 Top Rules:
 - {rule lines}
+KB Last Updated: {timestamp}
 Examples:
 - Q: {question}
   A: {answer}
@@ -72,12 +77,25 @@ Learned FAQs from corrections and admin-approved answers.
 ### 3) Conversation Memory (CM)
 Last N messages for immediate context only.
 
+### 4) Capability Configuration (CC)
+Tenant-controlled feature toggles and custom capabilities.
+
+**Purpose**
+- Explicitly gate what the AI is allowed to do or answer
+- Keep behavior consistent across UI + server + model providers
+
+**Examples**
+- `pricing_enabled`, `booking_enabled`, `callback_enabled`, `lead_capture_enabled`
+- Custom capabilities, e.g., "Offer maintenance plan details"
+
 ---
 
 ## Architecture Overview
 
 ```
 User Input
+  ↓
+Business Scope Gate → Capability Gate
   ↓
 Intent Parser → Required-Info Checker → Evidence Assembler
   ↓                          ↓
@@ -89,6 +107,18 @@ Answer Validator (evidence check)
   ↓
 Output / Action / Clarification
 ```
+
+---
+
+## Scope + Capability Gates
+
+**Business Scope Gate**
+- Redirects off-topic requests to business-related help
+- Prevents general chat or trivia from leaking into the widget
+
+**Capability Gate**
+- Checks tenant-enabled capabilities before answering or acting
+- Blocks pricing/booking/callback if disabled
 
 ---
 
@@ -194,6 +224,7 @@ Deterministic checks before calling tools.
 - booking: require service, location, date, contact
 - callback: require name + phone + preferred time
 - cancellation: require email + confirmation
+- enforce business hours on server for callbacks and bookings
 
 ### 4) Output Generator
 - Template-first for high-risk intents (pricing, policies)
@@ -222,6 +253,7 @@ A provider abstraction layer:
 ## Booking & Callback Flows
 
 ### Booking Flow
+0. Capability enabled + calendar connected (server enforced)
 1. Identify service
 2. Confirm service
 3. Resolve location
@@ -231,6 +263,7 @@ A provider abstraction layer:
 7. Call `book_appointment`
 
 ### Callback Flow
+0. Capability enabled + business hours valid (server enforced)
 1. Identify service
 2. Confirm service
 3. Collect name + phone
@@ -238,6 +271,12 @@ A provider abstraction layer:
 5. Call `request_callback`
 
 ---
+
+## Pricing Response Policy
+
+- Pricing answers must be sourced from BMS (plans/services) only.
+- If pricing is not present or capability disabled, respond with a clarification or escalation path.
+- Budget questions should map to the closest matching plan or ask for service scope.
 
 ## Reminder Skill Flow
 
@@ -326,6 +365,7 @@ A provider abstraction layer:
 ## Guardrails
 - Evidence required for pricing, policies, refunds
 - Do not answer outside business scope
+- Respect capability toggles and custom capability whitelist
 - If uncertain, clarify or escalate
 - Compliance for marketing consent
 - Quiet hours enforcement
@@ -361,9 +401,10 @@ A provider abstraction layer:
 ## v0.2 Integration Steps (Next)
 1. Compile BMS when knowledge base updates and upsert via `POST /api/bdl/memory`.
 2. Load BMS + top Tenant FAQ into the chat runtime (alongside existing prompt).
-3. Emit core events (`booking.created`, `callback.requested`, `feedback.received`) from the current flows.
-4. Add a lightweight worker to pull `bdl_events` and enqueue `bdl_jobs` for skills.
-5. Implement the first two skills: Appointment Reminders + Daily Admin Report.
+3. Enforce business-only scope + capability gating before tool calls.
+4. Emit core events (`booking.created`, `callback.requested`, `feedback.received`) from the current flows.
+5. Add a lightweight worker to pull `bdl_events` and enqueue `bdl_jobs` for skills.
+6. Implement the first two skills: Appointment Reminders + Daily Admin Report.
 
 ---
 

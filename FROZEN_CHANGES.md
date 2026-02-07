@@ -1,6 +1,6 @@
 # 🔒 FROZEN CHANGES - DO NOT MODIFY WITHOUT APPROVAL
 
-> **Last Updated:** January 17, 2026
+> **Last Updated:** February 7, 2026
 > **Status:** FROZEN - Changes require explicit user approval
 
 ---
@@ -118,6 +118,175 @@ If changes are needed:
   - Validation message when address is missing
   - Helper text when no business type selected
 - Added `disabled:cursor-not-allowed` for better UX
+
+---
+
+## Fix 4: Business Decision Layer (BDL) + Widget Reliability
+
+> **Added:** February 7, 2026
+
+### Problems Solved
+1. Lack of a model‑agnostic “business memory” layer for consistent answers
+2. No skill orchestration for reminders/reports
+3. Direct client calls to Gemini causing 403s in production
+4. Embed widget blocking page interaction on mobile
+5. Chat UX issues: poor formatting, sticky input, duplicate greetings, rating prompt timing
+
+### Root Causes
+- Chat context relied on raw KB injection without a compiled memory snapshot
+- No event/job queue for skills or BDL storage
+- Client SDK usage for Gemini non‑chat calls bypassed proxy
+- Embed iframe always full‑screen on mobile, intercepting clicks
+- UI logic showed redundant greetings and oversized rating prompt
+
+### Changes Made
+
+#### BDL Architecture (Storage + Compiler + Skills)
+- **migrations/009_business_decision_layer.sql**: Added `business_memory`, `tenant_faq`, `bdl_events`, `bdl_jobs`, `skill_subscriptions`
+- **src/bdl/compiler.ts**: Compiles a compact Business Memory Snapshot (BMS)
+- **src/bdl/types.ts**, **src/bdl/events.ts**, **src/bdl/skills.ts**: BDL types + core skills registry
+- **src/services/bdlService.ts**: Client API for BDL memory/FAQ/events/skills
+- **server.js**: BDL endpoints + event/job processors + daily report scheduler
+- **src/contexts/DataContext.tsx**: Auto‑compile BMS on KB updates
+- **src/services/geminiService.ts**: `createBdlAgentSession` injects BMS + tenant FAQ
+
+#### Embed & Mobile Clickability
+- **public/widget.js**: Embed iframe now starts closed (bubble) and expands only when open; listens for postMessage state
+- **src/components/ChatWidget.tsx**: Posts open/close state to parent for embed resizing
+
+#### Gemini Proxy Guard (Production 403 Fix)
+- **src/services/geminiService.ts**: All non‑chat calls use `/api-proxy` + runtime guard against direct SDK use
+
+#### Chat Widget UX + Formatting
+- **src/components/ChatWidget.tsx**:
+  - Markdown‑style formatting for headings, lists, code, links
+  - Shopify‑style welcome layout + sticky input
+  - Removed redundant header icons
+  - Improved auto‑scroll and mount gating to prevent flash
+  - Rating prompt now compact, dismissible, and only after booking/callback completion
+  - Platform intent detection for “How can I use Chippy” questions
+  - Safer fallback messaging to avoid looping capability lists
+
+#### Follow‑Up UX + Behavior Fixes (Post‑embed Testing)
+- **Problems Solved**
+  - Widget overlay blocked page clicks on mobile when embedded
+  - Initial flash/jump on page load
+  - Input bar and typing indicator not staying pinned to bottom
+  - Redundant welcome + quick‑reply prompts cluttered the top of chat
+  - Rating prompt appeared immediately after first message and was oversized
+  - Repetitive “I can help with services...” fallback responses for common questions
+
+- **Root Causes**
+  - Iframe started expanded on mobile, covering the page
+  - No mount guard before rendering the widget container
+  - Scroll container not explicitly bounded to the message area
+  - Welcome + suggested prompts rendered unconditionally
+  - Rating UI gated only by message count, not outcomes
+  - Fallback logic triggered even on legitimate product‑use questions
+
+- **Changes Made**
+  - **public/widget.js**: Default to closed bubble on mobile; expand only when user opens; listen for `postMessage` state to resize
+  - **src/components/ChatWidget.tsx**:
+    - Pointer‑events guard so only the panel/button are interactive, not the entire overlay
+    - Explicit message‑area scroll container; input pinned to bottom
+    - Hide welcome block and remove quick‑reply buttons after first user message
+    - Rating card compact with close option; only after booking/callback **and** conversation end
+    - Improved platform‑intent routing so “How can I use Chippy for my business?” is answered directly
+
+### Logic Behind the Solution (Addendum)
+- **Mobile safety first:** keep the embed closed until user opts in; avoid full‑screen overlay intercepting clicks
+- **Outcome‑gated feedback:** only request ratings after a concrete success event (booking/callback) or clear conversation end
+- **Intent clarity:** route platform/product questions to a dedicated response to avoid generic capability loops
+
+---
+
+## Fix 5: Capability Layer + Pricing Models + Server Enforcement
+
+> **Added:** February 7, 2026
+
+### Problems Solved
+1. Pricing hallucinations and plan name drift from Knowledge Base (KB)
+2. Widget answering off‑topic questions instead of business‑only scope
+3. Capability toggles not enforced on the server (pricing, booking, callbacks)
+4. Booking/callback validation only on client, causing invalid scheduling
+5. No KB sync metadata or pricing model structure exposed to the AI
+6. No direct path from capability toggles to editing the relevant settings
+
+### Root Causes
+- Pricing data was injected as plain text without canonical structure
+- Capability toggles existed in UI but were not enforced in API proxy
+- Callback booking relied on client‑side time checks and local events
+- Business scope guardrails were heuristic and easy to bypass
+- KB sync metadata was not surfaced in compiled memory or prompts
+
+### Changes Made
+
+#### Layered Runtime (Capability → Knowledge → Decision)
+- **Capability Layer:** Feature toggles + custom capabilities wired to the runtime
+- **Knowledge Layer:** KB pricing models + last sync time included in prompts/BMS
+- **Decision Layer:** Server‑side enforcement for pricing and actions
+
+#### Pricing Models + KB Sync
+- **src/types/knowledgeBase.ts**: Added `pricing` type support in KB
+- **src/bdl/compiler.ts**: Includes pricing plans + `KB Last Updated` in BMS
+- **src/components/ChatWidget.tsx**: Formats pricing, blocks invented plans, responds to budget questions
+- **src/components/knowledge/KnowledgeData.tsx**: Added pricing models UI
+- **src/components/OnboardingWizard.tsx**: Added pricing model collection
+
+#### Capability Gating + Custom Capabilities
+- **src/components/WidgetStudio.tsx**: Pricing, Booking, Callback, Lead Capture toggles
+- **src/components/WidgetStudio.tsx**: “Edit pricing” deep link to KB
+- **src/components/WidgetStudio.tsx**: “Edit behavior” deep link for lead capture
+- **src/components/WidgetStudio.tsx**: Custom capability list with enable/disable
+
+#### Booking & Callback Enforcement
+- **server.js**: `/api/callback/request` validates hours + capability, emits event
+- **server.js**: Booking endpoints enforce capability enablement
+- **src/components/ChatWidget.tsx**: Callback requests use server validation
+- **src/components/WidgetStudio.tsx**:
+  - Disable booking toggle unless calendar connected
+  - “Connect calendar” banner in widget preview when missing
+
+#### Business‑Only Scope Guardrails
+- **server.js**: `/api-proxy` blocks non‑business queries
+- **src/components/ChatWidget.tsx**: Client guard to redirect off‑topic questions
+
+### Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `server.js` | Capability enforcement, pricing guardrails, callback validation |
+| `src/components/ChatWidget.tsx` | Business‑only guardrails, pricing correctness, callback routing |
+| `src/components/WidgetStudio.tsx` | Capabilities UI, edit links, calendar gating |
+| `src/components/knowledge/KnowledgeData.tsx` | Pricing models UI |
+| `src/components/OnboardingWizard.tsx` | Pricing model onboarding |
+| `src/bdl/compiler.ts` | BMS includes pricing + KB sync metadata |
+| `src/types/knowledgeBase.ts` | Pricing types |
+| `src/services/geminiService.ts` | Tenant header for proxy |
+| `src/pages/KnowledgeBase.tsx` | Tab+hash routing for pricing |
+
+---
+
+#### Skills UI
+- **src/components/account/SkillsSection.tsx** + **src/pages/Account.tsx**: Skills tab with toggles
+
+### Logic Behind the Solution
+- **BDL**: separate business truth from LLM prompts to make responses consistent and model‑agnostic
+- **Event/Job flow**: enables reminders/reports without coupling to chat runtime
+- **Proxy‑only LLM**: prevents client API failures and centralizes key usage
+- **Embed closed‑by‑default**: avoids blocking the host site on mobile
+- **UX refinements**: reduce noise, improve readability, and prevent premature rating prompts
+
+---
+
+## ⚠️ IMPORTANT
+
+**DO NOT modify any of the above files without explicit user approval.**
+
+If changes are needed:
+1. Explain the proposed change
+2. Wait for user confirmation
+3. Only then proceed
 - Added safe URL parsing to prevent crashes from malformed URLs
 
 #### src/pages/KnowledgeBase.tsx

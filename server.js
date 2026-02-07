@@ -1396,14 +1396,84 @@ const extractServiceNames = (knowledge) => {
   return [];
 };
 
+const filterServiceNames = (names = []) => {
+  return names.filter(name => {
+    const wordCount = String(name).trim().split(/\s+/).length;
+    return String(name).length <= 40 && wordCount <= 6;
+  });
+};
+
 const isBusinessIntent = (text = '', knowledge) => {
   const normalized = String(text || '').toLowerCase();
   if (isPricingIntent(normalized) || isPlanSelectionIntent(normalized)) return true;
-  const bookingTokens = ['book', 'appointment', 'schedule', 'availability', 'available', 'slot', 'reschedule', 'cancel', 'callback', 'call back'];
+  const platformTokens = [
+    'chippy',
+    'your app',
+    'your platform',
+    'your product',
+    'this app',
+    'this platform',
+    'use this',
+    'how can i use',
+    'for my business',
+    'use the widget',
+    'widget',
+    'embed',
+    'integration',
+    'setup',
+    'set up',
+    'install',
+    'demo'
+  ];
+  if (platformTokens.some(token => normalized.includes(token))) return true;
+  const bookingTokens = [
+    'book',
+    'appointment',
+    'schedule',
+    'availability',
+    'available',
+    'slot',
+    'reschedule',
+    'cancel',
+    'callback',
+    'call back',
+    'call me',
+    'call',
+    'talk to',
+    'speak to',
+    'representative',
+    'sales',
+    'demo'
+  ];
   if (bookingTokens.some(token => normalized.includes(token))) return true;
-  const infoTokens = ['hours', 'open', 'close', 'location', 'address', 'phone', 'email', 'contact', 'pricing', 'price', 'plan', 'services', 'service'];
+  const infoTokens = [
+    'hours',
+    'open',
+    'close',
+    'location',
+    'address',
+    'phone',
+    'email',
+    'contact',
+    'pricing',
+    'price',
+    'plan',
+    'services',
+    'service',
+    'use',
+    'implement',
+    'implementation',
+    'integrate',
+    'setup',
+    'set up',
+    'for my business',
+    'for my company',
+    'for my clinic',
+    'for my practice',
+    'for my office'
+  ];
   if (infoTokens.some(token => normalized.includes(token))) return true;
-  const serviceNames = extractServiceNames(knowledge);
+  const serviceNames = filterServiceNames(extractServiceNames(knowledge));
   if (serviceNames.some(name => normalized.includes(String(name).toLowerCase()))) return true;
   const keywords = Array.isArray(knowledge?.keywords) ? knowledge.keywords : [];
   if (keywords.some(kw => normalized.includes(String(kw).toLowerCase()))) return true;
@@ -1413,9 +1483,9 @@ const isBusinessIntent = (text = '', knowledge) => {
 
 const buildBusinessRedirect = (knowledge, widgetConfig) => {
   const items = [];
-  const serviceNames = extractServiceNames(knowledge);
+  const serviceNames = filterServiceNames(extractServiceNames(knowledge));
   if (serviceNames.length > 0) {
-    items.push(`services like ${serviceNames.slice(0, 4).join(', ')}`);
+    items.push(`services like ${serviceNames.slice(0, 2).join(', ')}`);
   }
   if (widgetConfig?.capabilities?.canAnswerPricing !== false) items.push('pricing');
   items.push('hours', 'location');
@@ -1464,16 +1534,24 @@ const buildPricingResponse = (knowledge, queryText) => {
 
   const normalized = String(queryText || '').toLowerCase();
   const formatted = formatPricingPlans(plans);
+  const budgetMatch = normalized.replace(/,/g, '').match(/(\d+(\.\d+)?)/);
+  const budget = budgetMatch ? parseFloat(budgetMatch[1]) : null;
+  const cheapest = plans.reduce((min, plan) => {
+    const price = extractNumericPrice(plan.price);
+    if (price === null) return min;
+    if (!min || price < min.value) {
+      return { value: price, plan };
+    }
+    return min;
+  }, null);
+
+  if (budget !== null && cheapest) {
+    if (budget < cheapest.value) {
+      return `Thanks for sharing your budget. Our lowest plan is ${cheapest.plan.name} at ${cheapest.plan.price}. Would you like details on that plan?`;
+    }
+  }
 
   if (normalized.includes('cheapest') || normalized.includes('lowest')) {
-    let cheapest = null;
-    for (const plan of plans) {
-      const value = extractNumericPrice(plan.price);
-      if (value === null) continue;
-      if (!cheapest || value < cheapest.value) {
-        cheapest = { value, plan };
-      }
-    }
     if (cheapest) {
       return `${cheapest.plan.name} is the cheapest at ${cheapest.plan.price}.`;
     }
