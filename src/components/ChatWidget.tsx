@@ -241,6 +241,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     }
   }, [feedbackStorageKey]);
 
+
   // Sound notification function
   const playNotificationSound = () => {
     if (!soundEnabled) return;

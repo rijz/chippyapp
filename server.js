@@ -1557,6 +1557,7 @@ const parseHoursRange = (input) => {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .replace(/[–—]/g, '-')
+    .replace(/(\d)\.(\d{2})/g, '$1:$2')
     .replace(' to ', ' - ')
     .trim();
 
@@ -2359,19 +2360,24 @@ app.post('/api/callback/request', calendarLimiter, async (req, res) => {
       return res.status(403).json({ error: 'Callback requests are not enabled.' });
     }
 
-    if (requested_datetime) {
+  if (requested_datetime) {
       const knowledge = await fetchKnowledgeBase(String(tenantId));
       const hoursByDay = knowledge?.businessHoursByDay || null;
       if (hoursByDay) {
         const requestedAt = new Date(requested_datetime);
         const hoursForDay = getBusinessHoursForDate(requestedAt, hoursByDay);
-        if (!hoursForDay || !isWithinBusinessHours(requestedAt, hoursForDay)) {
+        if (!hoursForDay) {
           return res.status(400).json({
-            error: `Requested time is outside business hours${hoursForDay ? ` (${hoursForDay})` : ''}.`
+            error: `We’re closed on ${requestedAt.toLocaleDateString('en-US', { weekday: 'long' })}.`
+          });
+        }
+        if (!isWithinBusinessHours(requestedAt, hoursForDay)) {
+          return res.status(400).json({
+            error: `Requested time is outside business hours (${hoursForDay}).`
           });
         }
       }
-    }
+  }
 
     const payload = {
       request_id: `cb_${Date.now()}`,

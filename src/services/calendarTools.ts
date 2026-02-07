@@ -550,7 +550,7 @@ async function requestCallback(
             if (!hoursForDay) {
                 return {
                     success: false,
-                    error: `Requested time is outside business hours. Please ask the user to choose a time during business hours.`
+                    error: `We’re closed on ${requestedAt.toLocaleDateString('en-US', { weekday: 'long' })}. Please ask the user for a business-day time.`
                 };
             }
             if (!isWithinBusinessHours(requestedAt, hoursForDay)) {
@@ -663,6 +663,7 @@ function parseHoursRange(input: string): { start: number; end: number } | null {
         .toLowerCase()
         .replace(/\s+/g, ' ')
         .replace(/[–—]/g, '-')
+        .replace(/(\d)\.(\d{2})/g, '$1:$2')
         .replace(' to ', ' - ')
         .trim();
 
