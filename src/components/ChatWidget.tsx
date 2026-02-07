@@ -165,6 +165,9 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [feedbackRating, setFeedbackRating] = useState<number | null>(null);
   const [feedbackComment, setFeedbackComment] = useState('');
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [feedbackDismissed, setFeedbackDismissed] = useState(false);
+  const [conversationEnded, setConversationEnded] = useState(false);
+  const [capturedContact, setCapturedContact] = useState<{ name?: string; email?: string; phone?: string }>({});
 
   const capabilities = widgetConfig.capabilities || {
     canAnswerPricing: true,
@@ -204,7 +207,9 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasUserMessage = useMemo(() => messages.some(m => m.role === 'user'), [messages]);
   const hasModelMessage = useMemo(() => messages.some(m => m.role === 'model'), [messages]);
+  const shouldShowFeedback = feedbackEligible && conversationEnded && !feedbackSubmitted && !feedbackDismissed;
   const feedbackStorageKey = useMemo(() => `chatFeedback_${sessionId}`, [sessionId]);
+  const contactStorageKey = useMemo(() => `chatContact_${sessionId}`, [sessionId]);
 
   const canCollectLeads = capabilities.canCollectLeads !== false;
 
@@ -240,6 +245,19 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       // Ignore invalid storage
     }
   }, [feedbackStorageKey]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(contactStorageKey);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored);
+      if (parsed && typeof parsed === 'object') {
+        setCapturedContact(parsed);
+      }
+    } catch {
+      // Ignore invalid storage
+    }
+  }, [contactStorageKey]);
 
 
   // Sound notification function
@@ -415,6 +433,71 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     ].some(token => normalized.includes(token));
   };
 
+  const extractContactFields = (text: string): { name?: string; email?: string; phone?: string } => {
+    const result: { name?: string; email?: string; phone?: string } = {};
+    const parts: string[] = [];
+    const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    if (emailMatch) {
+      result.email = emailMatch[0];
+      parts.push(`Email: ${emailMatch[0]}`);
+    }
+
+    const phoneMatch = text.match(/(\+?\d[\d\s().-]{7,}\d)/);
+    let normalizedPhone = '';
+    if (phoneMatch) {
+      const digits = phoneMatch[0].replace(/\D/g, '');
+      if (digits.length >= 10) {
+        normalizedPhone = digits;
+        result.phone = digits;
+        parts.push(`Phone: ${digits}`);
+      }
+    }
+
+    const nameMatch = text.match(/\bmy name is\s+([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){0,2})/i);
+    if (nameMatch) {
+      result.name = nameMatch[1];
+      parts.push(`Name: ${nameMatch[1]}`);
+    } else if (normalizedPhone) {
+      const beforePhone = text.split(phoneMatch![0])[0] || '';
+      const candidate = beforePhone.split(',')[0]?.trim();
+      if (candidate && /[a-zA-Z]/.test(candidate) && candidate.length <= 60) {
+        result.name = candidate;
+        parts.push(`Name: ${candidate}`);
+      }
+    }
+
+    return result;
+  };
+
+  const buildContactContext = (text: string): string | null => {
+    const fields = extractContactFields(text);
+    const parts: string[] = [];
+    if (fields.email) parts.push(`Email: ${fields.email}`);
+    if (fields.phone) parts.push(`Phone: ${fields.phone}`);
+    if (fields.name) parts.push(`Name: ${fields.name}`);
+    if (parts.length === 0) return null;
+    return parts.join('\n');
+  };
+
+  const buildModelInput = (text: string): string => {
+    const contactContext = buildContactContext(text);
+    if (!contactContext) return text;
+    return `${text}\n\nCONTACT INFO PROVIDED (do not ask again if present):\n${contactContext}`;
+  };
+
+  const mergeContact = (incoming: { name?: string; email?: string; phone?: string }) => {
+    if (!incoming.name && !incoming.email && !incoming.phone) return;
+    setCapturedContact(prev => {
+      const next = {
+        name: incoming.name || prev.name,
+        email: incoming.email || prev.email,
+        phone: incoming.phone || prev.phone
+      };
+      localStorage.setItem(contactStorageKey, JSON.stringify(next));
+      return next;
+    });
+  };
+
   const matchCustomCapability = (text: string) => {
     if (!capabilities.custom || capabilities.custom.length === 0) return null;
     const normalized = text.toLowerCase();
@@ -512,11 +595,17 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       structuredInfo = knowledgeSummary || "Standard business hours apply.";
     }
 
-    const userInfoContext = userData && (userData.name || userData.email || userData.phone) ? `
+    const resolvedContact = {
+      name: userData?.name || capturedContact.name,
+      email: userData?.email || capturedContact.email,
+      phone: userData?.phone || capturedContact.phone
+    };
+
+    const userInfoContext = (resolvedContact.name || resolvedContact.email || resolvedContact.phone) ? `
       CUSTOMER INFO:
-      Name: ${userData.name || 'Not provided'}
-      Email: ${userData.email || 'Not provided'}
-      Phone: ${userData.phone || 'Not provided'}
+      Name: ${resolvedContact.name || 'Not provided'}
+      Email: ${resolvedContact.email || 'Not provided'}
+      Phone: ${resolvedContact.phone || 'Not provided'}
       Use this information to personalize your responses. You already have these details.
     ` : "";
 
@@ -604,6 +693,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       4. Only proceed after they confirm the service
       
       If their need doesn't match any service, say: "I'm not sure that's something we offer. Our services include: [list services]. Which of these best fits what you're looking for?"
+      Only apply this service-matching fallback for booking or callback requests.
 
       📞 CALLBACK REQUESTS:
       If a user prefers to receive a callback instead of booking directly:
@@ -863,6 +953,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     if (onLeadCapture && (leadData.name || leadData.email || leadData.phone)) {
       onLeadCapture(leadData);
     }
+    mergeContact({ name: leadData.name, email: leadData.email, phone: leadData.phone });
     initChat(leadData);
   };
 
@@ -938,6 +1029,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     if (!sanitizedText || !chatSession) return;
 
     const currentText = sanitizedText;
+    mergeContact(extractContactFields(currentText));
 
 
 
@@ -1062,8 +1154,21 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         return;
       }
 
-      const result = await sessionToUse.sendMessage(userMsg.text);
+      const result = await sessionToUse.sendMessage(buildModelInput(userMsg.text));
       const responseText = result.response.text() || "I'm sorry, I'm having trouble connecting to the schedule right now.";
+
+      const endSignals = [
+        'appointment confirmed',
+        'booking confirmed',
+        'callback request submitted',
+        'we will call you',
+        'thank you for reaching out',
+        'you are all set',
+        'we have you scheduled'
+      ];
+      if (endSignals.some(signal => responseText.toLowerCase().includes(signal))) {
+        setConversationEnded(true);
+      }
 
       // Add empty message that will be filled with typewriter effect
       const botMsgId = (Date.now() + 1).toString();
@@ -1298,35 +1403,43 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                 </div>
 
                 <div className="p-4 bg-white border-t border-slate-100 sticky bottom-0 z-10">
-                  {hasModelMessage && feedbackEligible && !feedbackSubmitted && (
-                    <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3">
-                      <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Rate this chat</p>
-                      <div className="flex items-center gap-2 mb-2">
+                  {shouldShowFeedback && (
+                    <div className="mb-3 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">Rate this chat</p>
+                        <button
+                          type="button"
+                          onClick={() => setFeedbackDismissed(true)}
+                          className="text-[11px] font-semibold text-slate-400 hover:text-slate-600"
+                        >
+                          Close
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
                         {[1, 2, 3, 4, 5].map(value => (
                           <button
                             key={value}
                             type="button"
                             onClick={() => setFeedbackRating(value)}
-                            className={`w-8 h-8 rounded-full text-xs font-semibold border transition-colors ${feedbackRating === value ? 'text-white' : 'bg-white text-slate-600 border-slate-200'}`}
+                            className={`w-7 h-7 rounded-full text-[11px] font-semibold border transition-colors ${feedbackRating === value ? 'text-white' : 'bg-white text-slate-600 border-slate-200'}`}
                             style={feedbackRating === value ? { backgroundColor: widgetConfig.color, borderColor: widgetConfig.color } : {}}
                           >
                             {value}
                           </button>
                         ))}
                       </div>
-                      <textarea
-                        value={feedbackComment}
-                        onChange={(e) => setFeedbackComment(e.target.value)}
-                        placeholder="Optional feedback..."
-                        className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-chippy-coral"
-                        rows={2}
-                      />
-                      <div className="flex justify-end mt-2">
+                      <div className="flex items-center gap-2 mt-2">
+                        <input
+                          value={feedbackComment}
+                          onChange={(e) => setFeedbackComment(e.target.value)}
+                          placeholder="Optional feedback..."
+                          className="flex-1 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-chippy-coral"
+                        />
                         <button
                           type="button"
                           onClick={submitFeedback}
                           disabled={!feedbackRating}
-                          className="text-xs font-semibold px-3 py-1 rounded-full text-white disabled:opacity-50"
+                          className="text-xs font-semibold px-3 py-1.5 rounded-full text-white disabled:opacity-50"
                           style={{ backgroundColor: widgetConfig.color }}
                         >
                           Submit
