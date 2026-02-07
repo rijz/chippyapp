@@ -267,6 +267,94 @@ If changes are needed:
 
 ---
 
+## Fix 6: BDL Runtime Completeness + Guardrails
+
+> **Added:** February 7, 2026
+
+### Problems Solved
+1. FAQ retrieval capped too low for BDL context
+2. Intent parsing relied only on heuristics
+3. High‑risk answers could be generated without an evidence check
+4. Skill definitions existed without a runtime execution engine
+5. Weekly admin reports weren’t tied to the BDL event pipeline
+6. Quiet hours guardrail was specified but not enforced
+7. LLM routing was hardcoded to a single model
+
+### Root Causes
+- FAQ limit was hardcoded to 25 in the BDL context
+- No LLM classification step for ambiguous intents
+- No non‑LLM fallback for high‑risk intents (pricing, hours, policies, location)
+- Event processor didn’t enforce guardrails or required data
+- Weekly report ran outside BDL events/jobs
+- No model selection strategy or configuration
+
+### Changes Made
+
+#### Intent + Answer Validation (Server)
+- **server.js**: Added LLM‑backed intent classification for ambiguous cases
+- **server.js**: For pricing/hours/location/policies, respond directly from KB (no LLM)
+
+#### FAQ Limits (BDL Context)
+- **src/services/bdlService.ts**: Clamp FAQ to 50–200 (default 100)
+- **server.js**: Clamp FAQ endpoint to 50–200
+- **src/services/geminiService.ts**: Increased BDL FAQ fetch to 100
+
+#### Skill Execution Engine + Guardrails
+- **server.js**: BDL job definitions with required data checks
+- **server.js**: Quiet‑hours deferral for reminder jobs (uses KB business hours)
+- **server.js**: Weekly report flow moved into BDL events + jobs
+
+#### LLM Router
+- **src/services/geminiService.ts**: Model selection via risk level (configurable with env vars)
+
+#### Skills Catalog
+- **src/bdl/skills.ts**: Added weekly admin report skill definition
+
+### Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `server.js` | LLM intent classification, KB‑only answers, skill engine, quiet hours, weekly reports |
+| `src/services/bdlService.ts` | FAQ clamp 50–200 |
+| `src/services/geminiService.ts` | Model routing + higher FAQ retrieval |
+| `src/bdl/skills.ts` | Weekly report skill |
+
+---
+
+## Fix 7: Memory Stability + Remove Business-Only Gate
+
+> **Added:** February 7, 2026
+
+### Problems Solved
+1. Persistent memory recall returning 500 errors
+2. “Business‑only” gate blocking normal user messages and causing repetitive fallback replies
+3. Memory capture not occurring because messages were intercepted before reaching the model
+
+### Root Causes
+- Embedding calls could fail and bubble 500s in `/api/memory/recall`
+- Widget and proxy gates blocked non‑business messages entirely
+- Memory learning happens only after the model responds
+
+### Changes Made
+
+#### Memory Reliability
+- **server.js**: Added embedding fallback path and safe recall when embeddings/RPC fail
+- **server.js**: Fallback text search for recall when vector search fails
+- **server.js**: Memorize stores even if embedding fails (embedding nullable)
+
+#### Remove Business‑Only Gate
+- **src/components/ChatWidget.tsx**: Removed hard gate that intercepted non‑business user messages
+- **server.js**: Removed business‑only block in `/api-proxy` while preserving KB‑only answers for pricing/hours/location/policies
+
+### Files Modified (FROZEN)
+
+| File | Changes |
+|------|---------|
+| `server.js` | Memory fallback + remove business‑only gate |
+| `src/components/ChatWidget.tsx` | Remove business‑only gate |
+
+---
+
 #### Skills UI
 - **src/components/account/SkillsSection.tsx** + **src/pages/Account.tsx**: Skills tab with toggles
 

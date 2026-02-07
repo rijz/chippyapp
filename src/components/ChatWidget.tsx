@@ -870,6 +870,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       - You are the business assistant, not the Chippy platform.
       - Do NOT list platform capabilities or generic feature lists unless the user explicitly asks about Chippy.
       - For unrelated personal questions (e.g., age), politely redirect to business help without listing capabilities.
+      - If the user asks about their provided contact info (name, email, phone) and it is in CUSTOMER INFO, answer directly.
       
       CONTACT COLLECTION RULES:
       ${userInfoContext ? `✅ You ALREADY HAVE the customer's contact information (see CUSTOMER INFO section above). DO NOT ask for their name, email, or phone again.` : `Collect contact info when booking:
@@ -1288,37 +1289,6 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
 
       if (isPlatformIntent(currentText)) {
         const responseText = buildPlatformResponse();
-        const botMsgId = (Date.now() + 1).toString();
-        const botMsg: Message = {
-          id: botMsgId,
-          role: 'model',
-          text: '',
-          timestamp: new Date()
-        };
-        setMessages(prev => [...prev, botMsg]);
-        setIsLoading(false);
-        playNotificationSound();
-        const chars = responseText.split('');
-        for (let i = 0; i < chars.length; i++) {
-          await new Promise(resolve => setTimeout(resolve, 20));
-          setMessages(prev => prev.map(msg =>
-            msg.id === botMsgId
-              ? { ...msg, text: responseText.substring(0, i + 1) }
-              : msg
-          ));
-        }
-
-        analyzeInteraction(currentText, responseText).then(analysis => {
-          if (onInteraction) {
-            onInteraction(currentText, responseText, analysis);
-          }
-        });
-
-        return;
-      }
-
-      if (!isBusinessIntent(currentText)) {
-        const responseText = buildBusinessRedirect();
         const botMsgId = (Date.now() + 1).toString();
         const botMsg: Message = {
           id: botMsgId,

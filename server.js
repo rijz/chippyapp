@@ -1811,31 +1811,17 @@ app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
       const widgetConfig = await fetchWidgetConfig(String(tenantId));
       const knowledge = await fetchKnowledgeBase(String(tenantId));
       let inferredIntent = lastUserText ? detectIntentHeuristic(lastUserText) : null;
-      let businessIntent = lastUserText ? isBusinessIntent(lastUserText, knowledge) : true;
 
-      if (lastUserText && (!businessIntent || !inferredIntent) && shouldUseLlmIntent(lastUserText)) {
+      if (lastUserText && !inferredIntent && shouldUseLlmIntent(lastUserText)) {
         const llmIntent = await classifyIntentWithLlm(lastUserText, knowledge);
         if (llmIntent && llmIntent.confidence >= 0.6) {
-          if (!inferredIntent || llmIntent.intent !== 'general') {
+          if (llmIntent.intent && !['general', 'offtopic'].includes(llmIntent.intent)) {
             inferredIntent = llmIntent.intent;
           }
-          businessIntent = llmIntent.isBusinessRelated;
         }
       }
 
       if (lastUserText) {
-        if (!businessIntent) {
-          return res.json({
-            candidates: [
-              {
-                content: {
-                  parts: [{ text: buildBusinessRedirect(knowledge, widgetConfig) }]
-                }
-              }
-            ]
-          });
-        }
-
         const blockedCustom = matchDisabledCustomCapability(widgetConfig, lastUserText);
         if (blockedCustom) {
           return res.json({
@@ -2000,6 +1986,45 @@ import { scrapeWebsite } from './scraper.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.VITE_GEMINI_API_KEY || '');
+
+const createEmbedding = async (text) => {
+  if (!text) return null;
+  const apiKey = process.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
+    const result = await model.embedContent(text);
+    return result?.embedding?.values || null;
+  } catch (error) {
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: { role: 'user', parts: [{ text }] }
+        })
+      });
+
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data?.embedding?.values || null;
+    } catch (innerError) {
+      console.warn('[Memory] Embedding fallback failed:', innerError?.message || innerError);
+      return null;
+    }
+  }
+};
+
+const filterMemoriesByScope = (memories = [], sessionId) => {
+  return memories.filter(m => {
+    const scope = m?.metadata?.scope || 'global';
+    const mSessionId = m?.metadata?.session_id;
+    if (scope === 'global') return true;
+    if (mSessionId === sessionId) return true;
+    return false;
+  });
+};
 
 // =====================
 // AI Triage + Follow-Up Helpers
@@ -3318,38 +3343,51 @@ app.post('/api/memory/recall', async (req, res) => {
       return res.status(400).json({ error: 'Missing userId or query' });
     }
 
-    // 1. Generate Embedding for the query
-    const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-    const result = await model.embedContent(query);
-    const embedding = result.embedding.values;
+    const safeLimit = Math.max(1, Math.min(20, Number(limit) || 4));
+    let memories = [];
 
-    // 2. Search matches via RPC
-    const { data: globalMemories, error: error1 } = await supabaseAdmin.rpc('match_memories', {
-      query_embedding: embedding,
-      match_threshold: 0.65,
-      match_count: limit,
-      p_user_id: userId
-    });
+    const embedding = await createEmbedding(query);
 
-    if (error1) throw error1;
+    if (embedding) {
+      const { data: globalMemories, error: error1 } = await supabaseAdmin.rpc('match_memories', {
+        query_embedding: embedding,
+        match_threshold: 0.65,
+        match_count: safeLimit,
+        p_user_id: userId
+      });
 
-    // Filter logic:
-    // If it's a global memory (no session_id), include it.
-    // If it's a session memory, only include if session_id matches.
-    const relevantMemories = (globalMemories || []).filter(m => {
-      const scope = m.metadata?.scope || 'global';
-      const mSessionId = m.metadata?.session_id;
+      if (!error1 && globalMemories) {
+        memories = globalMemories;
+      } else if (error1) {
+        console.warn('[Memory] match_memories RPC failed:', error1?.message || error1);
+      }
+    }
 
-      if (scope === 'global') return true;
-      if (mSessionId === sessionId) return true;
-      return false;
-    });
+    if (!memories.length) {
+      const trimmedQuery = String(query).trim();
+      if (trimmedQuery.length >= 3) {
+        const { data: fallbackMemories, error: fallbackError } = await supabaseAdmin
+          .from('memories')
+          .select('id, content, metadata, created_at')
+          .eq('user_id', userId)
+          .ilike('content', `%${trimmedQuery.replace(/%/g, '\\%').replace(/_/g, '\\_')}%`)
+          .order('created_at', { ascending: false })
+          .limit(safeLimit);
 
+        if (!fallbackError && fallbackMemories) {
+          memories = fallbackMemories.map(m => ({ ...m, similarity: 0 }));
+        } else if (fallbackError) {
+          console.warn('[Memory] Fallback recall failed:', fallbackError?.message || fallbackError);
+        }
+      }
+    }
+
+    const relevantMemories = filterMemoriesByScope(memories, sessionId);
     res.json({ memories: relevantMemories });
 
   } catch (error) {
     console.error('[Memory] Recall Error:', error);
-    res.status(500).json({ error: 'Failed to recall memories' });
+    res.json({ memories: [] });
   }
 });
 
@@ -3365,16 +3403,13 @@ app.post('/api/memory/memorize', async (req, res) => {
       return res.status(400).json({ error: 'Missing userId or text' });
     }
 
-    // 1. Generate Embedding
-    const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-    const result = await model.embedContent(text);
-    const embedding = result.embedding.values;
+    const embedding = await createEmbedding(text);
 
     // 2. Insert Memory
     const { error } = await supabaseAdmin.from('memories').insert({
       user_id: userId,
       content: text,
-      embedding: embedding,
+      embedding: embedding || null,
       metadata: {
         scope: scope, // 'session' or 'global'
         session_id: sessionId,
@@ -3388,7 +3423,7 @@ app.post('/api/memory/memorize', async (req, res) => {
 
   } catch (error) {
     console.error('[Memory] Memorize Error:', JSON.stringify(error, null, 2));
-    res.status(500).json({ error: 'Failed to memorize', details: error.message });
+    res.json({ success: false, error: 'Failed to memorize' });
   }
 });
 
