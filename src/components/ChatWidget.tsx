@@ -543,45 +543,90 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
 
   const isPlatformIntent = (text: string): boolean => {
     const normalized = text.toLowerCase();
-    const platformTokens = [
-      'chippy',
-      'your app',
-      'your platform',
-      'your product',
-      'this app',
-      'this platform',
-      'use this',
-      'how can i use',
-      'for my business',
-      'use the widget',
-      'widget',
-      'embed',
-      'integration',
-      'setup',
-      'set up',
-      'install',
-      'demo'
+    // Only trigger on explicit "What is Chippy" or "How does Chippy work" style questions
+    // Avoid triggering on follow-up questions like "for my business" or "setup"
+    const explicitPlatformPatterns = [
+      /what is chippy/,
+      /how does chippy work/,
+      /how can i use chippy/,
+      /tell me about chippy/,
+      /what can chippy do/,
+      /how do i use chippy/,
+      /how do i get started with chippy/,
+      /how do i set up chippy/,
+      /can chippy help/,
+      /will chippy work for/,
+      /does chippy support/,
+      /is chippy right for/
     ];
-    const directBrand = normalized.includes('chippy');
-    const hasPlatformToken = platformTokens.some(token => normalized.includes(token));
-    return directBrand || hasPlatformToken;
+    return explicitPlatformPatterns.some(pattern => pattern.test(normalized));
   };
 
   const isSmallTalkOrOffTopic = (text: string): boolean => {
-    const normalized = text.toLowerCase();
+    const normalized = text.toLowerCase().trim();
+
+    // Math expressions (1+1, 2*3, what is 5+5, etc.)
+    if (/^\d+\s*[\+\-\*\/\^]\s*\d+/.test(normalized)) return true;
+    if (/what\s+(is|equals?)\s+\d+\s*[\+\-\*\/]/.test(normalized)) return true;
+    if (/calculate|compute|solve/.test(normalized)) return true;
+
+    // Trivia and general knowledge
+    const triviaPatterns = [
+      /why is the sky/,
+      /why is the grass/,
+      /why do birds/,
+      /how many.*in the world/,
+      /what is the capital of/,
+      /who is the president/,
+      /who invented/,
+      /when was.*born/,
+      /when did.*die/,
+      /how old is the/,
+      /what year did/,
+      /who won the/,
+      /what is the meaning of life/,
+      /tell me a (joke|story|riddle)/,
+      /sing (me )?a song/,
+      /write (me )?(a )?poem/,
+      /what'?s? the weather/,
+      /what time is it/,
+      /what day is (it|today)/,
+      /what is today'?s? date/,
+      /who are you/,
+      /what are you/,
+      /are you (a )?(human|robot|ai|real)/,
+      /how old are you/,
+      /what'?s? your (name|age)/,
+      /where (are|do) you (live|come from)/,
+      /tell me about yourself/,
+      /do you have feelings/,
+      /can you (think|feel|dream)/,
+      /what do you (think|feel) about/,
+      /what'?s? your (opinion|favorite)/,
+      /play (a game|rock paper|tic tac)/,
+      /let'?s? play/,
+      /random (number|fact)/,
+      /flip a coin/,
+      /roll (a )?dice/
+    ];
+    if (triviaPatterns.some(pattern => pattern.test(normalized))) return true;
+
+    // Simple off-topic tokens
     const offTopicTokens = [
       'how old',
       'your age',
-      'who are you',
-      'what are you',
       'tell me about yourself',
       'joke',
       '1+1',
       '2+2',
-      'math',
-      'are you real'
+      'are you real',
+      'meaning of life',
+      'weather today',
+      'current time'
     ];
-    return offTopicTokens.some(token => normalized.includes(token));
+    if (offTopicTokens.some(token => normalized.includes(token))) return true;
+
+    return false;
   };
 
   const buildBusinessRedirect = (): string => {
@@ -1287,8 +1332,11 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         return;
       }
 
-      if (isPlatformIntent(currentText)) {
-        const responseText = buildPlatformResponse();
+      // Removed duplicate platform intent handler - already handled above
+
+      // Off-topic question guard - redirect to business topics
+      if (isSmallTalkOrOffTopic(currentText) || !isBusinessIntent(currentText)) {
+        const responseText = buildBusinessRedirect();
         const botMsgId = (Date.now() + 1).toString();
         const botMsg: Message = {
           id: botMsgId,
@@ -1387,31 +1435,31 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
         } else {
           const pricingResponse = buildPricingResponse(knowledgeSnapshot, currentText);
           if (pricingResponse) {
-          const botMsgId = (Date.now() + 1).toString();
-          const botMsg: Message = {
-            id: botMsgId,
-            role: 'model',
-            text: '',
-            timestamp: new Date()
-          };
-          setMessages(prev => [...prev, botMsg]);
-          setIsLoading(false);
-          playNotificationSound();
-          const chars = pricingResponse.split('');
-          for (let i = 0; i < chars.length; i++) {
-            await new Promise(resolve => setTimeout(resolve, 20));
-            setMessages(prev => prev.map(msg =>
-              msg.id === botMsgId
-                ? { ...msg, text: pricingResponse.substring(0, i + 1) }
-                : msg
-            ));
-          }
-
-          analyzeInteraction(currentText, pricingResponse).then(analysis => {
-            if (onInteraction) {
-              onInteraction(currentText, pricingResponse, analysis);
+            const botMsgId = (Date.now() + 1).toString();
+            const botMsg: Message = {
+              id: botMsgId,
+              role: 'model',
+              text: '',
+              timestamp: new Date()
+            };
+            setMessages(prev => [...prev, botMsg]);
+            setIsLoading(false);
+            playNotificationSound();
+            const chars = pricingResponse.split('');
+            for (let i = 0; i < chars.length; i++) {
+              await new Promise(resolve => setTimeout(resolve, 20));
+              setMessages(prev => prev.map(msg =>
+                msg.id === botMsgId
+                  ? { ...msg, text: pricingResponse.substring(0, i + 1) }
+                  : msg
+              ));
             }
-          });
+
+            analyzeInteraction(currentText, pricingResponse).then(analysis => {
+              if (onInteraction) {
+                onInteraction(currentText, pricingResponse, analysis);
+              }
+            });
 
             return;
           }
