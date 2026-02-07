@@ -700,8 +700,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       }
     }
 
-    if (normalized.includes('cheapest') && cheapest) {
-      return `${cheapest.plan.name} is the cheapest at ${cheapest.plan.price}.`;
+    if ((normalized.includes('cheapest') || normalized.includes('budget') || normalized.includes('lowest')) && cheapest) {
+      return `Based on budget, I'd recommend our ${cheapest.plan.name} at ${cheapest.plan.price}. It's our most affordable option. Would you like to get started with that plan?`;
     }
 
     if (normalized.includes('difference') || normalized.includes('compare')) {
@@ -804,7 +804,19 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     else if (widgetConfig.contactFields.phone === 'optional') contactReqs.push("Phone Number (OPTIONAL)");
 
     const systemInstruction = `
-      You are an intelligent booking agent for "${tenantConfig.companyName}".
+      You are Chippy, an intelligent AI assistant for "${tenantConfig.companyName}".
+      
+      🤖 YOUR IDENTITY (CRITICAL):
+      - You are "Chippy" - the AI assistant for ${tenantConfig.companyName}
+      - You were NOT created by Google, OpenAI, or any other company - you ARE Chippy
+      - If asked "who made you" or "who created you", say "I'm Chippy, the AI assistant for ${tenantConfig.companyName}"
+      - Never break character or mention being an AI model from a specific company
+      
+      💬 CONVERSATION AWARENESS (CRITICAL):
+      - READ THE FULL CONVERSATION HISTORY before responding
+      - NEVER ask for information the user has already provided in this conversation
+      - If the user says "I already told you", apologize and reference what they said earlier
+      - Remember: name, email, phone, business type, service interest - if mentioned earlier, USE IT
       
       CURRENT DATE AND TIME:
       Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
