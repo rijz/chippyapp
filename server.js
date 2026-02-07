@@ -1839,11 +1839,16 @@ app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Missing tenant id for chat request' });
     }
 
+    let lastUserText = '';
+    let widgetConfig = null;
+    let knowledge = null;
+    let inferredIntent = null;
+
     if (tenantId && req.body?.contents) {
-      const lastUserText = extractLastUserText(req.body.contents);
-      const widgetConfig = await fetchWidgetConfig(String(tenantId));
-      const knowledge = await fetchKnowledgeBase(String(tenantId));
-      let inferredIntent = lastUserText ? detectIntentHeuristic(lastUserText) : null;
+      lastUserText = extractLastUserText(req.body.contents);
+      widgetConfig = await fetchWidgetConfig(String(tenantId));
+      knowledge = await fetchKnowledgeBase(String(tenantId));
+      inferredIntent = lastUserText ? detectIntentHeuristic(lastUserText) : null;
 
       if (lastUserText && !inferredIntent && shouldUseLlmIntent(lastUserText)) {
         const llmIntent = await classifyIntentWithLlm(lastUserText, knowledge);
