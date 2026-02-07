@@ -16,6 +16,16 @@ const USE_PROXY = true;
 const apiKey = getEnv('VITE_GEMINI_API_KEY');
 const genAI = USE_PROXY ? null : new GoogleGenerativeAI(apiKey || '');
 
+type RiskLevel = 'low' | 'high';
+
+const DEFAULT_LOW_RISK_MODEL = getEnv('VITE_GEMINI_MODEL_LOW_RISK') || 'gemini-2.0-flash';
+const DEFAULT_HIGH_RISK_MODEL = getEnv('VITE_GEMINI_MODEL_HIGH_RISK') || DEFAULT_LOW_RISK_MODEL;
+
+const selectChatModel = (riskLevel: RiskLevel = 'low') => {
+  if (riskLevel === 'high') return DEFAULT_HIGH_RISK_MODEL;
+  return DEFAULT_LOW_RISK_MODEL;
+};
+
 const getClientModel = () => {
   if (USE_PROXY) {
     throw new Error('[Gemini] Direct SDK usage is disabled when USE_PROXY=true.');
@@ -26,8 +36,8 @@ const getClientModel = () => {
   return genAI;
 };
 
-const proxyGenerateContent = async (prompt: string, temperature = 0.2): Promise<string> => {
-  const response = await fetch('/api-proxy/v1beta/models/gemini-2.0-flash:generateContent', {
+const proxyGenerateContent = async (prompt: string, temperature = 0.2, model = DEFAULT_LOW_RISK_MODEL): Promise<string> => {
+  const response = await fetch(`/api-proxy/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -54,17 +64,20 @@ class ProxyChatSession {
   private tools: any[] = [];
   private toolExecutor?: (name: string, args: any) => Promise<any>;
   private context?: { userId: string; sessionId: string };
+  private model: string;
 
   constructor(
     systemInstruction: string,
     tools?: any[],
     toolExecutor?: (name: string, args: any) => Promise<any>,
-    context?: { userId: string; sessionId: string }
+    context?: { userId: string; sessionId: string },
+    model?: string
   ) {
     this.systemInstruction = systemInstruction;
     this.tools = tools || [];
     this.toolExecutor = toolExecutor;
     this.context = context;
+    this.model = model || DEFAULT_LOW_RISK_MODEL;
   }
 
   /**
@@ -125,7 +138,7 @@ class ProxyChatSession {
     while (maxIterations > 0) {
       maxIterations--;
 
-      const response = await fetch('/api-proxy/v1beta/models/gemini-2.0-flash:generateContent', {
+      const response = await fetch(`/api-proxy/v1beta/models/${this.model}:generateContent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -248,15 +261,17 @@ export const createAgentSession = async (
   systemInstruction: string,
   tools?: any[],
   toolExecutor?: (name: string, args: any) => Promise<any>,
-  context?: { userId: string; sessionId: string }
+  context?: { userId: string; sessionId: string },
+  options?: { riskLevel?: RiskLevel }
 ): Promise<any> => {
+  const modelName = selectChatModel(options?.riskLevel);
   // Use proxy in production, direct SDK in development
   if (USE_PROXY) {
-    return new ProxyChatSession(systemInstruction, tools, toolExecutor, context);
+    return new ProxyChatSession(systemInstruction, tools, toolExecutor, context, modelName);
   }
 
   const model = getClientModel().getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: modelName,
     systemInstruction: systemInstruction,
   });
 
@@ -275,7 +290,8 @@ export const createBdlAgentSession = async (
   systemInstruction: string,
   tools?: any[],
   toolExecutor?: (name: string, args: any) => Promise<any>,
-  context?: { userId: string; sessionId: string }
+  context?: { userId: string; sessionId: string },
+  options?: { riskLevel?: RiskLevel }
 ): Promise<any> => {
   let bdlContext = '';
 
@@ -283,7 +299,7 @@ export const createBdlAgentSession = async (
     try {
       const [memory, faq] = await Promise.all([
         bdlService.getBusinessMemory(context.userId),
-        bdlService.getTenantFaq(context.userId, 25)
+        bdlService.getTenantFaq(context.userId, 100)
       ]);
 
       const memoryBlock = memory?.bmsText
@@ -301,7 +317,7 @@ export const createBdlAgentSession = async (
     }
   }
 
-  return createAgentSession(`${systemInstruction}${bdlContext}`, tools, toolExecutor, context);
+  return createAgentSession(`${systemInstruction}${bdlContext}`, tools, toolExecutor, context, options);
 };
 
 /**

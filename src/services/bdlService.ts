@@ -17,8 +17,9 @@ export const bdlService = {
     return response.ok;
   },
 
-  async getTenantFaq(userId: string, limit = 50): Promise<TenantFaqEntry[]> {
-    const response = await fetch(`/api/bdl/faq/${userId}?limit=${limit}`);
+  async getTenantFaq(userId: string, limit = 100): Promise<TenantFaqEntry[]> {
+    const clampedLimit = Math.max(50, Math.min(200, Math.floor(limit || 0))) || 100;
+    const response = await fetch(`/api/bdl/faq/${userId}?limit=${clampedLimit}`);
     if (!response.ok) return [];
     const data = await response.json();
     return data?.faq || [];

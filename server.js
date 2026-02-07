@@ -1403,82 +1403,274 @@ const filterServiceNames = (names = []) => {
   });
 };
 
+const PLATFORM_INTENT_TOKENS = [
+  'chippy',
+  'your app',
+  'your platform',
+  'your product',
+  'this app',
+  'this platform',
+  'use this',
+  'how can i use',
+  'for my business',
+  'use the widget',
+  'widget',
+  'embed',
+  'integration',
+  'setup',
+  'set up',
+  'install',
+  'demo'
+];
+
+const BOOKING_INTENT_TOKENS = [
+  'book',
+  'appointment',
+  'schedule',
+  'availability',
+  'available',
+  'slot',
+  'reschedule',
+  'cancel',
+  'callback',
+  'call back',
+  'call me',
+  'call',
+  'talk to',
+  'speak to',
+  'representative',
+  'sales',
+  'demo'
+];
+
+const INFO_INTENT_TOKENS = [
+  'hours',
+  'open',
+  'close',
+  'location',
+  'address',
+  'phone',
+  'email',
+  'contact',
+  'pricing',
+  'price',
+  'plan',
+  'services',
+  'service',
+  'use',
+  'implement',
+  'implementation',
+  'integrate',
+  'setup',
+  'set up',
+  'for my business',
+  'for my company',
+  'for my clinic',
+  'for my practice',
+  'for my office'
+];
+
+const HOURS_INTENT_TOKENS = [
+  'hours',
+  'open',
+  'close',
+  'closing',
+  'opening',
+  'what time',
+  'business hours',
+  'working hours',
+  'office hours'
+];
+
+const LOCATION_INTENT_TOKENS = [
+  'location',
+  'address',
+  'where are you',
+  'where you are',
+  'located',
+  'directions',
+  'near you',
+  'closest',
+  'near me'
+];
+
+const POLICY_INTENT_TOKENS = [
+  'policy',
+  'policies',
+  'refund',
+  'refunds',
+  'cancellation',
+  'cancelation',
+  'deposit',
+  'late',
+  'reschedule',
+  'no show',
+  'noshow',
+  'return'
+];
+
+const isHoursIntent = (text = '') => {
+  const normalized = String(text || '').toLowerCase();
+  return HOURS_INTENT_TOKENS.some(token => normalized.includes(token));
+};
+
+const isLocationIntent = (text = '') => {
+  const normalized = String(text || '').toLowerCase();
+  return LOCATION_INTENT_TOKENS.some(token => normalized.includes(token));
+};
+
+const isPolicyIntent = (text = '') => {
+  const normalized = String(text || '').toLowerCase();
+  return POLICY_INTENT_TOKENS.some(token => normalized.includes(token));
+};
+
+const isBookingIntent = (text = '') => {
+  const normalized = String(text || '').toLowerCase();
+  return BOOKING_INTENT_TOKENS.some(token => normalized.includes(token));
+};
+
 const isBusinessIntent = (text = '', knowledge) => {
   const normalized = String(text || '').toLowerCase();
   if (isPricingIntent(normalized) || isPlanSelectionIntent(normalized)) return true;
-  const platformTokens = [
-    'chippy',
-    'your app',
-    'your platform',
-    'your product',
-    'this app',
-    'this platform',
-    'use this',
-    'how can i use',
-    'for my business',
-    'use the widget',
-    'widget',
-    'embed',
-    'integration',
-    'setup',
-    'set up',
-    'install',
-    'demo'
-  ];
-  if (platformTokens.some(token => normalized.includes(token))) return true;
-  const bookingTokens = [
-    'book',
-    'appointment',
-    'schedule',
-    'availability',
-    'available',
-    'slot',
-    'reschedule',
-    'cancel',
-    'callback',
-    'call back',
-    'call me',
-    'call',
-    'talk to',
-    'speak to',
-    'representative',
-    'sales',
-    'demo'
-  ];
-  if (bookingTokens.some(token => normalized.includes(token))) return true;
-  const infoTokens = [
-    'hours',
-    'open',
-    'close',
-    'location',
-    'address',
-    'phone',
-    'email',
-    'contact',
-    'pricing',
-    'price',
-    'plan',
-    'services',
-    'service',
-    'use',
-    'implement',
-    'implementation',
-    'integrate',
-    'setup',
-    'set up',
-    'for my business',
-    'for my company',
-    'for my clinic',
-    'for my practice',
-    'for my office'
-  ];
-  if (infoTokens.some(token => normalized.includes(token))) return true;
+  if (PLATFORM_INTENT_TOKENS.some(token => normalized.includes(token))) return true;
+  if (BOOKING_INTENT_TOKENS.some(token => normalized.includes(token))) return true;
+  if (INFO_INTENT_TOKENS.some(token => normalized.includes(token))) return true;
   const serviceNames = filterServiceNames(extractServiceNames(knowledge));
   if (serviceNames.some(name => normalized.includes(String(name).toLowerCase()))) return true;
   const keywords = Array.isArray(knowledge?.keywords) ? knowledge.keywords : [];
   if (keywords.some(kw => normalized.includes(String(kw).toLowerCase()))) return true;
   if (knowledge?.companyName && normalized.includes(String(knowledge.companyName).toLowerCase())) return true;
   return false;
+};
+
+const detectIntentHeuristic = (text = '') => {
+  if (isPricingIntent(text) || isPlanSelectionIntent(text)) return 'pricing';
+  if (isHoursIntent(text)) return 'hours';
+  if (isLocationIntent(text)) return 'location';
+  if (isPolicyIntent(text)) return 'policies';
+  if (isBookingIntent(text)) return 'booking';
+  return null;
+};
+
+const shouldUseLlmIntent = (text = '') => {
+  const normalized = String(text || '').trim();
+  if (normalized.length < 6) return false;
+  if (!/[a-zA-Z]/.test(normalized)) return false;
+  if (/^\d+(\s*[\+\-\*\/]\s*\d+)+$/.test(normalized)) return false;
+  return true;
+};
+
+const parseJsonFromText = (raw = '') => {
+  const cleaned = String(raw || '').replace(/```json|```/gi, '').trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch (error) {
+    return null;
+  }
+};
+
+const classifyIntentWithLlm = async (text = '', knowledge) => {
+  try {
+    if (!process.env.VITE_GEMINI_API_KEY) return null;
+    const serviceNames = filterServiceNames(extractServiceNames(knowledge)).slice(0, 5);
+    const prompt = [
+      'Classify the user intent for a business assistant.',
+      'Return JSON only:',
+      '{ "intent": "pricing|hours|location|policies|booking|services|general|offtopic", "is_business_related": true|false, "confidence": 0-1 }',
+      `User message: "${text}"`,
+      serviceNames.length > 0 ? `Known services: ${serviceNames.join(', ')}` : ''
+    ].filter(Boolean).join('\n');
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.VITE_GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 150 }
+      })
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    const content = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+    const parsed = parseJsonFromText(content);
+    if (!parsed) return null;
+
+    const intentRaw = String(parsed.intent || '').toLowerCase();
+    const intentMap = {
+      pricing: 'pricing',
+      plan: 'pricing',
+      plans: 'pricing',
+      hours: 'hours',
+      opening_hours: 'hours',
+      location: 'location',
+      address: 'location',
+      policies: 'policies',
+      policy: 'policies',
+      booking: 'booking',
+      appointment: 'booking',
+      services: 'services',
+      service: 'services',
+      general: 'general',
+      offtopic: 'offtopic',
+      off_topic: 'offtopic',
+      chitchat: 'offtopic'
+    };
+
+    const mappedIntent = intentMap[intentRaw] || 'general';
+    const confidence = Number(parsed.confidence);
+    const isBusinessRelated = typeof parsed.is_business_related === 'boolean'
+      ? parsed.is_business_related
+      : ['pricing', 'hours', 'location', 'policies', 'booking', 'services'].includes(mappedIntent);
+
+    return { intent: mappedIntent, isBusinessRelated, confidence: Number.isFinite(confidence) ? confidence : 0.5 };
+  } catch (error) {
+    console.warn('[BDL] LLM intent classification failed:', error?.message || error);
+    return null;
+  }
+};
+
+const formatHoursByDay = (hoursByDay = {}) => {
+  if (!hoursByDay || typeof hoursByDay !== 'object') return null;
+  const order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const lines = [];
+  for (const day of order) {
+    const value = hoursByDay[day] || hoursByDay[day.toLowerCase()] || hoursByDay[day.toUpperCase()];
+    if (value) lines.push(`${day}: ${value}`);
+  }
+  return lines.length > 0 ? lines.join('\n') : null;
+};
+
+const buildHoursResponse = (knowledge) => {
+  if (!knowledge) return null;
+  const byDay = formatHoursByDay(knowledge.businessHoursByDay);
+  if (byDay) return `Our hours are:\n${byDay}`;
+  if (knowledge.businessHours) return `Our hours are ${knowledge.businessHours}.`;
+  return null;
+};
+
+const buildLocationResponse = (knowledge) => {
+  if (!knowledge) return null;
+  const locations = Array.isArray(knowledge.locations) ? knowledge.locations : [];
+  if (locations.length > 0) {
+    const lines = locations.map(loc => {
+      const name = loc.name ? `${loc.name}` : 'Location';
+      const address = [loc.address, loc.city, loc.state, loc.zip].filter(Boolean).join(', ');
+      const phone = loc.phone ? ` (${loc.phone})` : '';
+      return `- ${name}${address ? ` — ${address}` : ''}${phone}`;
+    });
+    return `Here are our locations:\n${lines.join('\n')}`;
+  }
+  if (knowledge.contactInfo) return `Here’s our location/contact info:\n${knowledge.contactInfo}`;
+  return null;
+};
+
+const buildPolicyResponse = (knowledge) => {
+  if (!knowledge) return null;
+  if (knowledge.policies) return `Here are our policies:\n\n${knowledge.policies}`;
+  return null;
 };
 
 const buildBusinessRedirect = (knowledge, widgetConfig) => {
@@ -1618,9 +1810,21 @@ app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
       const lastUserText = extractLastUserText(req.body.contents);
       const widgetConfig = await fetchWidgetConfig(String(tenantId));
       const knowledge = await fetchKnowledgeBase(String(tenantId));
+      let inferredIntent = lastUserText ? detectIntentHeuristic(lastUserText) : null;
+      let businessIntent = lastUserText ? isBusinessIntent(lastUserText, knowledge) : true;
+
+      if (lastUserText && (!businessIntent || !inferredIntent) && shouldUseLlmIntent(lastUserText)) {
+        const llmIntent = await classifyIntentWithLlm(lastUserText, knowledge);
+        if (llmIntent && llmIntent.confidence >= 0.6) {
+          if (!inferredIntent || llmIntent.intent !== 'general') {
+            inferredIntent = llmIntent.intent;
+          }
+          businessIntent = llmIntent.isBusinessRelated;
+        }
+      }
 
       if (lastUserText) {
-        if (!isBusinessIntent(lastUserText, knowledge)) {
+        if (!businessIntent) {
           return res.json({
             candidates: [
               {
@@ -1646,7 +1850,7 @@ app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
         }
       }
 
-      if (lastUserText && isPricingIntent(lastUserText)) {
+      if (lastUserText && (inferredIntent === 'pricing' || isPricingIntent(lastUserText))) {
         const canAnswerPricing = widgetConfig?.capabilities?.canAnswerPricing !== false;
         if (!canAnswerPricing) {
           return res.json({
@@ -1666,6 +1870,48 @@ app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
             {
               content: {
                 parts: [{ text: pricingResponse || fallback }]
+              }
+            }
+          ]
+        });
+      }
+
+      if (lastUserText && inferredIntent === 'hours') {
+        const hoursResponse = buildHoursResponse(knowledge);
+        const fallback = "I don't have our hours available right now. Would you like me to connect you with someone?";
+        return res.json({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: hoursResponse || fallback }]
+              }
+            }
+          ]
+        });
+      }
+
+      if (lastUserText && inferredIntent === 'location') {
+        const locationResponse = buildLocationResponse(knowledge);
+        const fallback = "I don't have our location details available right now. Would you like me to connect you with someone?";
+        return res.json({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: locationResponse || fallback }]
+              }
+            }
+          ]
+        });
+      }
+
+      if (lastUserText && inferredIntent === 'policies') {
+        const policyResponse = buildPolicyResponse(knowledge);
+        const fallback = "I don't have our policies available right now. Would you like me to connect you with someone?";
+        return res.json({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: policyResponse || fallback }]
               }
             }
           ]
@@ -3211,7 +3457,9 @@ app.post('/api/bdl/memory', async (req, res) => {
 app.get('/api/bdl/faq/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const limit = Number(req.query.limit || 50);
+    const rawLimit = Number(req.query.limit);
+    const normalizedLimit = Number.isFinite(rawLimit) ? rawLimit : 100;
+    const limit = Math.max(50, Math.min(200, Math.floor(normalizedLimit)));
 
     if (!userId) return res.status(400).json({ error: 'Missing userId' });
 
@@ -3478,7 +3726,25 @@ cron.schedule('*/5 * * * *', async () => {
 // =====================
 // BDL Event + Job Processor (v0.2)
 // =====================
-const BDL_DEFAULT_ON_SKILLS = new Set(['appointment-reminders', 'daily-admin-report']);
+const BDL_DEFAULT_ON_SKILLS = new Set(['appointment-reminders', 'daily-admin-report', 'weekly-admin-report']);
+
+const BDL_JOB_DEFINITIONS = {
+  'appointment-reminder': {
+    skillId: 'appointment-reminders',
+    requiredData: ['customer.email', 'start_at'],
+    guardrails: ['quiet_hours']
+  },
+  'daily-admin-report': {
+    skillId: 'daily-admin-report',
+    requiredData: [],
+    guardrails: []
+  },
+  'weekly-admin-report': {
+    skillId: 'weekly-admin-report',
+    requiredData: [],
+    guardrails: []
+  }
+};
 
 const isSkillActive = async (tenantId, skillId) => {
   const { data, error } = await supabaseAdmin
@@ -3495,6 +3761,71 @@ const isSkillActive = async (tenantId, skillId) => {
 
   if (!data) return BDL_DEFAULT_ON_SKILLS.has(skillId);
   return data.status === 'active';
+};
+
+const getValueAtPath = (payload, path) => {
+  if (!payload || !path) return undefined;
+  return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), payload);
+};
+
+const hasRequiredData = (payload, requiredData = []) => {
+  return requiredData.every(path => {
+    const value = getValueAtPath(payload, path);
+    return value !== undefined && value !== null && value !== '';
+  });
+};
+
+const getHoursTextForDate = (knowledge, date) => {
+  if (knowledge?.businessHoursByDay) {
+    return getBusinessHoursForDate(date, knowledge.businessHoursByDay);
+  }
+  return knowledge?.businessHours || null;
+};
+
+const getNextBusinessOpenTime = (fromDate, knowledge) => {
+  if (!fromDate) return null;
+  for (let offset = 0; offset < 7; offset += 1) {
+    const candidate = new Date(fromDate);
+    candidate.setDate(candidate.getDate() + offset);
+    const hoursText = getHoursTextForDate(knowledge, candidate);
+    if (!hoursText) continue;
+    const range = parseHoursRange(hoursText);
+    if (!range) continue;
+
+    const candidateMinutes = candidate.getHours() * 60 + candidate.getMinutes();
+    if (offset === 0 && candidateMinutes >= range.start && candidateMinutes <= range.end) {
+      return candidate;
+    }
+
+    if (offset === 0 && candidateMinutes < range.start) {
+      const nextOpen = new Date(candidate);
+      nextOpen.setHours(Math.floor(range.start / 60), range.start % 60, 0, 0);
+      return nextOpen;
+    }
+
+    if (offset > 0) {
+      const nextOpen = new Date(candidate);
+      nextOpen.setHours(Math.floor(range.start / 60), range.start % 60, 0, 0);
+      return nextOpen;
+    }
+  }
+  return null;
+};
+
+const deferJobForQuietHours = async (job, knowledge) => {
+  const executeAt = job.execute_at ? new Date(job.execute_at) : new Date();
+  const hoursText = getHoursTextForDate(knowledge, executeAt);
+  if (!hoursText) return false;
+  if (isWithinBusinessHours(executeAt, hoursText)) return false;
+
+  const nextOpen = getNextBusinessOpenTime(executeAt, knowledge);
+  if (!nextOpen) return false;
+
+  await supabaseAdmin
+    .from('bdl_jobs')
+    .update({ status: 'queued', execute_at: nextOpen.toISOString() })
+    .eq('id', job.id);
+  return true;
 };
 
 const enqueueBdlJob = async (tenantId, type, executeAt, payload, idempotencyKey) => {
@@ -3550,6 +3881,7 @@ const processBdlEvents = async () => {
             'appointment-reminder',
             executeAt,
             {
+              booking_id: event.payload?.booking_id,
               customer: event.payload?.customer,
               service: event.payload?.service,
               location_id: event.payload?.location_id,
@@ -3570,6 +3902,19 @@ const processBdlEvents = async () => {
           event.occurred_at,
           { date: event.payload?.date || event.occurred_at },
           `${event.id}:daily-admin-report`
+        );
+      }
+
+      if (event.type === 'report.weekly') {
+        const active = await isSkillActive(event.tenant_id, 'weekly-admin-report');
+        if (!active) continue;
+
+        await enqueueBdlJob(
+          event.tenant_id,
+          'weekly-admin-report',
+          event.occurred_at,
+          { date: event.payload?.date || event.occurred_at },
+          `${event.id}:weekly-admin-report`
         );
       }
     }
@@ -3598,6 +3943,38 @@ const processBdlJobs = async () => {
         .eq('id', job.id);
 
       try {
+        const definition = BDL_JOB_DEFINITIONS[job.type];
+        if (!definition) {
+          await supabaseAdmin
+            .from('bdl_jobs')
+            .update({ status: 'failed' })
+            .eq('id', job.id);
+          continue;
+        }
+
+        const active = await isSkillActive(job.tenant_id, definition.skillId);
+        if (!active) {
+          await supabaseAdmin
+            .from('bdl_jobs')
+            .update({ status: 'completed' })
+            .eq('id', job.id);
+          continue;
+        }
+
+        if (!hasRequiredData(job.payload || {}, definition.requiredData)) {
+          await supabaseAdmin
+            .from('bdl_jobs')
+            .update({ status: 'failed' })
+            .eq('id', job.id);
+          continue;
+        }
+
+        const knowledge = await fetchKnowledgeBase(job.tenant_id);
+        if (definition.guardrails.includes('quiet_hours')) {
+          const deferred = await deferJobForQuietHours(job, knowledge);
+          if (deferred) continue;
+        }
+
         if (job.type === 'appointment-reminder') {
           const customerEmail = job.payload?.customer?.email;
           if (customerEmail) {
@@ -3637,6 +4014,31 @@ const processBdlJobs = async () => {
               bookings: bookingCount || 0,
               leads: leadCount || 0,
               chats: chatCount || 0
+            });
+          }
+        }
+
+        if (job.type === 'weekly-admin-report') {
+          const { data: { user } } = await supabaseAdmin.auth.admin.getUserById(job.tenant_id);
+          if (user?.email) {
+            const since = new Date();
+            since.setDate(since.getDate() - 7);
+
+            const { count: bookingCount } = await supabaseAdmin
+              .from('bookings')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', job.tenant_id)
+              .gte('created_at', since.toISOString());
+
+            const { count: leadCount } = await supabaseAdmin
+              .from('leads')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', job.tenant_id)
+              .gte('created_at', since.toISOString());
+
+            await emailService.sendWeeklyReport(user.email, {
+              bookings: bookingCount || 0,
+              leads: leadCount || 0
             });
           }
         }
@@ -3796,17 +4198,15 @@ app.post('/api/followup/test', async (req, res) => {
 });
 
 // =====================
-// Weekly Analytics Report (Cron Job)
+// Weekly Analytics Report (BDL Event Scheduler)
 // =====================
 // Runs every Monday at 9:00 AM
 cron.schedule('0 9 * * 1', async () => {
-  console.log('[Cron] Starting weekly reports...');
+  console.log('[Cron] Scheduling weekly BDL reports...');
   try {
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
-    // 1. Find users who had bookings in the last week
-    // Note: returning duplicate user_ids is fine, we'll dedupe in JS
     const { data: activeUsers, error } = await supabaseAdmin
       .from('bookings')
       .select('user_id')
@@ -3814,42 +4214,28 @@ cron.schedule('0 9 * * 1', async () => {
 
     if (error) throw error;
 
-    const uniqueUserIds = [...new Set(activeUsers.map(u => u.user_id))];
-    console.log(`[Cron] Found ${uniqueUserIds.length} active users for reports.`);
+    const uniqueUserIds = [...new Set((activeUsers || []).map(u => u.user_id).filter(Boolean))];
+    console.log(`[Cron] Found ${uniqueUserIds.length} active users for weekly reports.`);
 
+    const today = new Date().toISOString().split('T')[0];
     for (const userId of uniqueUserIds) {
       try {
-        // 2. Get User Email
-        const { data: { user }, error: userErr } = await supabaseAdmin.auth.admin.getUserById(userId);
-        if (userErr || !user?.email) continue;
+        const active = await isSkillActive(userId, 'weekly-admin-report');
+        if (!active) continue;
 
-        // 3. Get Stats
-        const { count: bookingCount } = await supabaseAdmin
-          .from('bookings')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', userId)
-          .gte('created_at', oneWeekAgo.toISOString());
-
-        // (Optional) Get Leads count if you have a leads table
-        const { count: leadCount } = await supabaseAdmin
-          .from('leads')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', userId)
-          .gte('created_at', oneWeekAgo.toISOString());
-
-        // 4. Send Email
-        if (bookingCount > 0 || leadCount > 0) {
-          await emailService.sendWeeklyReport(user.email, {
-            bookings: bookingCount || 0,
-            leads: leadCount || 0
-          });
-        }
+        await supabaseAdmin.from('bdl_events').insert({
+          tenant_id: userId,
+          type: 'report.weekly',
+          occurred_at: new Date().toISOString(),
+          payload: { date: today },
+          source: 'system'
+        });
       } catch (innerErr) {
-        console.error(`[Cron] Failed report for user ${userId}:`, innerErr);
+        console.error(`[Cron] Failed scheduling weekly report for user ${userId}:`, innerErr);
       }
     }
   } catch (err) {
-    console.error('[Cron] Weekly report job failed:', err);
+    console.error('[Cron] Weekly report scheduler failed:', err);
   }
 });
 

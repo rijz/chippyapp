@@ -62,5 +62,21 @@ export const CORE_SKILLS: SkillDefinition[] = [
     ],
     guardrails: [],
     action: 'send_admin_report'
+  },
+  {
+    id: 'weekly-admin-report',
+    name: 'Weekly Admin Report',
+    version: '1.0',
+    triggers: ['report.weekly'],
+    requiredData: [],
+    permissions: {
+      requiresMarketingConsent: false,
+      channels: ['email']
+    },
+    schedule: [
+      { cron: '0 9 * * 1' }
+    ],
+    guardrails: [],
+    action: 'send_admin_report'
   }
 ];
