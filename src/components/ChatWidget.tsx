@@ -433,6 +433,71 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     ].some(token => normalized.includes(token));
   };
 
+  const isPlanSelectionIntent = (text: string): boolean => {
+    const normalized = text.toLowerCase();
+    return [
+      'which one',
+      'which plan',
+      'best',
+      'recommend',
+      'good for',
+      'fit for',
+      'suitable',
+      'right plan',
+      'plan for',
+      'best for'
+    ].some(token => normalized.includes(token));
+  };
+
+  const isGreeting = (text: string): boolean => {
+    const normalized = text.toLowerCase().trim();
+    return ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'].some(g => normalized === g || normalized.startsWith(`${g} `));
+  };
+
+  const extractServiceNames = (data: any): string[] => {
+    const services = data?.services;
+    if (!Array.isArray(services)) return [];
+    if (services.length === 0) return [];
+    if (typeof services[0] === 'string') {
+      return (services as string[]).map(s => s.trim()).filter(Boolean);
+    }
+    if (typeof services[0] === 'object') {
+      return (services as Service[]).map(s => s.name).filter(Boolean);
+    }
+    return [];
+  };
+
+  const isBusinessIntent = (text: string): boolean => {
+    const normalized = text.toLowerCase();
+    if (isPricingIntent(normalized) || isPlanSelectionIntent(normalized)) return true;
+    const bookingTokens = ['book', 'appointment', 'schedule', 'availability', 'available', 'slot', 'reschedule', 'cancel', 'callback', 'call back'];
+    if (bookingTokens.some(token => normalized.includes(token))) return true;
+    const infoTokens = ['hours', 'open', 'close', 'location', 'address', 'phone', 'email', 'contact', 'pricing', 'price', 'plan', 'services', 'service'];
+    if (infoTokens.some(token => normalized.includes(token))) return true;
+    if (knowledgeSnapshot) {
+      const serviceNames = extractServiceNames(knowledgeSnapshot);
+      if (serviceNames.some(name => normalized.includes(name.toLowerCase()))) return true;
+      const keywords = Array.isArray(knowledgeSnapshot.keywords) ? knowledgeSnapshot.keywords : [];
+      if (keywords.some((kw: string) => normalized.includes(String(kw).toLowerCase()))) return true;
+      if (knowledgeSnapshot.companyName && normalized.includes(String(knowledgeSnapshot.companyName).toLowerCase())) return true;
+    }
+    return false;
+  };
+
+  const buildBusinessRedirect = (): string => {
+    const items: string[] = [];
+    const serviceNames = knowledgeSnapshot ? extractServiceNames(knowledgeSnapshot) : [];
+    if (serviceNames.length > 0) {
+      items.push(`services like ${serviceNames.slice(0, 4).join(', ')}`);
+    }
+    if (capabilities.canAnswerPricing) items.push('pricing');
+    items.push('hours', 'location');
+    if (capabilities.canBookAppointments) items.push('booking');
+    if (capabilities.canRequestCallback) items.push('callbacks');
+    const summary = items.length > 0 ? items.join(', ') : 'our services, pricing, hours, and booking';
+    return `I can help with ${summary}. What would you like to know?`;
+  };
+
   const extractContactFields = (text: string): { name?: string; email?: string; phone?: string } => {
     const result: { name?: string; email?: string; phone?: string } = {};
     const parts: string[] = [];
@@ -1048,6 +1113,68 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     let sessionToUse = chatSession;
 
     try {
+      if (isGreeting(currentText) && !isBusinessIntent(currentText)) {
+        const responseText = buildBusinessRedirect();
+        const botMsgId = (Date.now() + 1).toString();
+        const botMsg: Message = {
+          id: botMsgId,
+          role: 'model',
+          text: '',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, botMsg]);
+        setIsLoading(false);
+        playNotificationSound();
+        const chars = responseText.split('');
+        for (let i = 0; i < chars.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          setMessages(prev => prev.map(msg =>
+            msg.id === botMsgId
+              ? { ...msg, text: responseText.substring(0, i + 1) }
+              : msg
+          ));
+        }
+
+        analyzeInteraction(currentText, responseText).then(analysis => {
+          if (onInteraction) {
+            onInteraction(currentText, responseText, analysis);
+          }
+        });
+
+        return;
+      }
+
+      if (!isBusinessIntent(currentText)) {
+        const responseText = buildBusinessRedirect();
+        const botMsgId = (Date.now() + 1).toString();
+        const botMsg: Message = {
+          id: botMsgId,
+          role: 'model',
+          text: '',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, botMsg]);
+        setIsLoading(false);
+        playNotificationSound();
+        const chars = responseText.split('');
+        for (let i = 0; i < chars.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          setMessages(prev => prev.map(msg =>
+            msg.id === botMsgId
+              ? { ...msg, text: responseText.substring(0, i + 1) }
+              : msg
+          ));
+        }
+
+        analyzeInteraction(currentText, responseText).then(analysis => {
+          if (onInteraction) {
+            onInteraction(currentText, responseText, analysis);
+          }
+        });
+
+        return;
+      }
+
       const blockedCustom = matchCustomCapability(currentText);
       if (blockedCustom) {
         const responseText = `I’m not able to help with ${blockedCustom.label || 'that'} right now. Is there something else I can assist with?`;
@@ -1116,7 +1243,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
           // No KB available, let the model handle the request.
         } else {
           const pricingResponse = buildPricingResponse(knowledgeSnapshot, currentText);
-        if (pricingResponse) {
+          if (pricingResponse) {
           const botMsgId = (Date.now() + 1).toString();
           const botMsg: Message = {
             id: botMsgId,
@@ -1143,9 +1270,40 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
             }
           });
 
-          return;
+            return;
+          }
         }
+      }
+
+      if (knowledgeSnapshot && isPlanSelectionIntent(currentText)) {
+        const pricingResponse = "I can help you choose the best plan. What matters most—budget, advanced analytics, custom branding, or multiple user seats?";
+        const botMsgId = (Date.now() + 1).toString();
+        const botMsg: Message = {
+          id: botMsgId,
+          role: 'model',
+          text: '',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, botMsg]);
+        setIsLoading(false);
+        playNotificationSound();
+        const chars = pricingResponse.split('');
+        for (let i = 0; i < chars.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          setMessages(prev => prev.map(msg =>
+            msg.id === botMsgId
+              ? { ...msg, text: pricingResponse.substring(0, i + 1) }
+              : msg
+          ));
         }
+
+        analyzeInteraction(currentText, pricingResponse).then(analysis => {
+          if (onInteraction) {
+            onInteraction(currentText, pricingResponse, analysis);
+          }
+        });
+
+        return;
       }
 
       if (!sessionToUse) {

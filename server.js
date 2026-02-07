@@ -1366,6 +1366,64 @@ const isPricingIntent = (text = '') => {
   return PRICING_INTENT_TOKENS.some(token => normalized.includes(token));
 };
 
+const isPlanSelectionIntent = (text = '') => {
+  const normalized = String(text || '').toLowerCase();
+  const tokens = [
+    'which one',
+    'which plan',
+    'best',
+    'recommend',
+    'good for',
+    'fit for',
+    'suitable',
+    'right plan',
+    'plan for',
+    'best for'
+  ];
+  return tokens.some(token => normalized.includes(token));
+};
+
+const extractServiceNames = (knowledge) => {
+  const services = knowledge?.services;
+  if (!Array.isArray(services)) return [];
+  if (services.length === 0) return [];
+  if (typeof services[0] === 'string') {
+    return services.map(s => String(s).trim()).filter(Boolean);
+  }
+  if (typeof services[0] === 'object') {
+    return services.map(s => s?.name).filter(Boolean);
+  }
+  return [];
+};
+
+const isBusinessIntent = (text = '', knowledge) => {
+  const normalized = String(text || '').toLowerCase();
+  if (isPricingIntent(normalized) || isPlanSelectionIntent(normalized)) return true;
+  const bookingTokens = ['book', 'appointment', 'schedule', 'availability', 'available', 'slot', 'reschedule', 'cancel', 'callback', 'call back'];
+  if (bookingTokens.some(token => normalized.includes(token))) return true;
+  const infoTokens = ['hours', 'open', 'close', 'location', 'address', 'phone', 'email', 'contact', 'pricing', 'price', 'plan', 'services', 'service'];
+  if (infoTokens.some(token => normalized.includes(token))) return true;
+  const serviceNames = extractServiceNames(knowledge);
+  if (serviceNames.some(name => normalized.includes(String(name).toLowerCase()))) return true;
+  const keywords = Array.isArray(knowledge?.keywords) ? knowledge.keywords : [];
+  if (keywords.some(kw => normalized.includes(String(kw).toLowerCase()))) return true;
+  if (knowledge?.companyName && normalized.includes(String(knowledge.companyName).toLowerCase())) return true;
+  return false;
+};
+
+const buildBusinessRedirect = (knowledge, widgetConfig) => {
+  const items = [];
+  const serviceNames = extractServiceNames(knowledge);
+  if (serviceNames.length > 0) {
+    items.push(`services like ${serviceNames.slice(0, 4).join(', ')}`);
+  }
+  if (widgetConfig?.capabilities?.canAnswerPricing !== false) items.push('pricing');
+  items.push('hours', 'location');
+  if (widgetConfig?.capabilities?.canBookAppointments !== false) items.push('booking');
+  if (widgetConfig?.capabilities?.canRequestCallback !== false) items.push('callbacks');
+  const summary = items.length > 0 ? items.join(', ') : 'our services, pricing, hours, and booking';
+  return `I can help with ${summary}. What would you like to know?`;
+};
 const extractLastUserText = (contents = []) => {
   if (!Array.isArray(contents)) return '';
   for (let i = contents.length - 1; i >= 0; i -= 1) {
@@ -1481,8 +1539,21 @@ app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
     if (tenantId && req.body?.contents) {
       const lastUserText = extractLastUserText(req.body.contents);
       const widgetConfig = await fetchWidgetConfig(String(tenantId));
+      const knowledge = await fetchKnowledgeBase(String(tenantId));
 
       if (lastUserText) {
+        if (!isBusinessIntent(lastUserText, knowledge)) {
+          return res.json({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: buildBusinessRedirect(knowledge, widgetConfig) }]
+                }
+              }
+            ]
+          });
+        }
+
         const blockedCustom = matchDisabledCustomCapability(widgetConfig, lastUserText);
         if (blockedCustom) {
           return res.json({
@@ -1510,7 +1581,6 @@ app.all('/api-proxy/*', geminiProxyLimiter, async (req, res) => {
             ]
           });
         }
-        const knowledge = await fetchKnowledgeBase(String(tenantId));
         const pricingResponse = buildPricingResponse(knowledge, lastUserText);
         const fallback = "I don't have pricing details available right now. Would you like me to connect you with someone?";
         return res.json({
