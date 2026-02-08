@@ -1,12 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, Zap, User, Mail, Phone, BrainCircuit, X, Eye, MessageSquare, Layout, FormInput, MessageCircle, Plus, Trash2 } from 'lucide-react';
+import {
+    Palette, Zap, Bell, Code, Layout, FormInput, MessageCircle,
+    Plus, Trash2, Check, Copy, ExternalLink, Shield,
+    User, Mail, Phone
+} from 'lucide-react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { PageHeader } from '../components/layout/PageHeader';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { ContactFieldSelector } from '../components/ui/Shared';
-import { ContactFieldRequirement, LeadCaptureMode } from '../types';
+import { ContactFieldRequirement } from '../types';
+import { EmailPreview } from '../components/knowledge/EmailPreview';
+import clsx from 'clsx';
+import { ChatWidget } from '../components/ChatWidget';
 
 export const WidgetStudio = () => {
     const { widgetConfig, setWidgetConfig, tenantConfig, calendarConnections } = useData();
@@ -15,14 +22,57 @@ export const WidgetStudio = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     const navigate = useNavigate();
     const location = useLocation();
-    const [activeTab, setActiveTab] = useState<'appearance' | 'behavior' | 'followup'>('appearance');
+
+    // Tabs: appearance, behavior, notifications, install
+    const [activeTab, setActiveTab] = useState<'appearance' | 'behavior' | 'notifications' | 'install'>('appearance');
+
+    // Email Test State
     const [isSendingTest, setIsSendingTest] = useState(false);
-    const [previewRecipient, setPreviewRecipient] = useState<'customer' | 'owner'>('customer');
     const [testEmail, setTestEmail] = useState('');
+
+    // Custom Capabilities State
     const [newCapabilityLabel, setNewCapabilityLabel] = useState('');
 
-    const hasActiveCalendar = calendarConnections.some(c => c.isActive);
+    // Install Code State
+    const [isCopied, setIsCopied] = useState(false);
 
+    // Derived State
+    const hasActiveCalendar = calendarConnections.some(c => c.isActive);
+    const userId = session?.user?.id || '';
+
+    // Initialize tabs from URL
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab === 'appearance' || tab === 'behavior' || tab === 'install') {
+            setActiveTab(tab);
+        } else if (tab === 'followup' || tab === 'notifications') {
+            setActiveTab('notifications');
+        }
+    }, [searchParams]);
+
+    // Handle scroll to hash
+    useEffect(() => {
+        if (!location.hash) return;
+        const target = document.querySelector(location.hash);
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, [activeTab, location.hash]);
+
+    // Initialize test email
+    useEffect(() => {
+        if (!testEmail && session?.user?.email) {
+            setTestEmail(session.user.email);
+        }
+    }, [session?.user?.email, testEmail]);
+
+    // Switch Tab Helper
+    const switchTab = (tab: typeof activeTab) => {
+        setActiveTab(tab);
+        setSearchParams({ tab });
+    };
+
+    // --- Capabilities Logic ---
     const capabilities = widgetConfig.capabilities || {
         canAnswerPricing: true,
         canBookAppointments: true,
@@ -34,10 +84,7 @@ export const WidgetStudio = () => {
     const updateCapability = (key: keyof typeof capabilities, value: boolean) => {
         setWidgetConfig(prev => ({
             ...prev,
-            capabilities: {
-                ...capabilities,
-                [key]: value
-            }
+            capabilities: { ...capabilities, [key]: value }
         }));
     };
 
@@ -47,10 +94,7 @@ export const WidgetStudio = () => {
         nextCustom[index] = { ...nextCustom[index], enabled };
         setWidgetConfig(prev => ({
             ...prev,
-            capabilities: {
-                ...capabilities,
-                custom: nextCustom
-            }
+            capabilities: { ...capabilities, custom: nextCustom }
         }));
     };
 
@@ -58,10 +102,7 @@ export const WidgetStudio = () => {
         const nextCustom = [...(capabilities.custom || [])].filter((_, idx) => idx !== index);
         setWidgetConfig(prev => ({
             ...prev,
-            capabilities: {
-                ...capabilities,
-                custom: nextCustom
-            }
+            capabilities: { ...capabilities, custom: nextCustom }
         }));
     };
 
@@ -71,60 +112,25 @@ export const WidgetStudio = () => {
         const baseKey = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
         if (!baseKey) return;
 
-        const reservedKeys = new Set([
-            'canAnswerPricing',
-            'canBookAppointments',
-            'canRequestCallback',
-            'canCollectLeads'
-        ]);
+        // Prevent duplicates
         const existingKeys = new Set((capabilities.custom || []).map(c => c.key));
-        let key = baseKey;
-        let suffix = 1;
-        while (reservedKeys.has(key) || existingKeys.has(key)) {
-            key = `${baseKey}_${suffix}`;
-            suffix += 1;
+        if (existingKeys.has(baseKey)) {
+            showToast('Capability already exists', 'error');
+            return;
         }
 
-        const nextCustom = [...(capabilities.custom || []), { key, label, enabled: true }];
+        const nextCustom = [...(capabilities.custom || []), { key: baseKey, label, enabled: true }];
         setWidgetConfig(prev => ({
             ...prev,
-            capabilities: {
-                ...capabilities,
-                custom: nextCustom
-            }
+            capabilities: { ...capabilities, custom: nextCustom }
         }));
         setNewCapabilityLabel('');
     };
 
-    useEffect(() => {
-        const tab = searchParams.get('tab');
-        if (tab === 'appearance' || tab === 'behavior' || tab === 'followup') {
-            setActiveTab(tab);
-        }
-    }, [searchParams]);
-
-    useEffect(() => {
-        if (activeTab !== 'behavior' || !location.hash) return;
-        const target = document.querySelector(location.hash);
-        if (target) {
-            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    }, [activeTab, location.hash]);
-
-    useEffect(() => {
-        if (!testEmail && session?.user?.email) {
-            setTestEmail(session.user.email);
-        }
-    }, [session?.user?.email, testEmail]);
-
+    // --- Actions ---
     const sendTestEmail = async (mode: 'customer' | 'owner') => {
-        if (!session?.access_token || !session?.user?.id || !session?.user?.email) {
-            showToast('You must be logged in to send a test email.', 'error');
-            return;
-        }
-
-        if (!testEmail.trim()) {
-            showToast('Enter an email address to send the test.', 'error');
+        if (!userId || !testEmail.trim()) {
+            showToast('Please sign in and enter an email address.', 'error');
             return;
         }
 
@@ -141,6 +147,7 @@ export const WidgetStudio = () => {
                 intent: 'Pricing + booking'
             };
 
+            // Use current config values
             const subject = mode === 'customer'
                 ? (widgetConfig.followUp.customerSubject || '')
                 : (widgetConfig.followUp.ownerSubject || '');
@@ -152,10 +159,10 @@ export const WidgetStudio = () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
+                    'Authorization': `Bearer ${session?.access_token}`
                 },
                 body: JSON.stringify({
-                    userId: session.user.id,
+                    userId,
                     toEmail: testEmail.trim(),
                     mode,
                     subject,
@@ -164,17 +171,21 @@ export const WidgetStudio = () => {
                 })
             });
 
-            if (!response.ok) {
-                const err = await response.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to send test email');
-            }
-
-            showToast('Test email sent to your inbox.', 'success');
-        } catch (e: any) {
-            showToast(e.message || 'Failed to send test email', 'error');
+            if (!response.ok) throw new Error('Failed to send');
+            showToast('Test email sent!', 'success');
+        } catch (e) {
+            showToast('Failed to send test email', 'error');
         } finally {
             setIsSendingTest(false);
         }
+    };
+
+    const copyEmbedCode = () => {
+        const code = `<script src="https://app.hellochippy.com/widget.js" data-chippy-id="${userId}"></script>`;
+        navigator.clipboard.writeText(code);
+        setIsCopied(true);
+        showToast('Code copied to clipboard', 'success');
+        setTimeout(() => setIsCopied(false), 2000);
     };
 
     const updateContactField = (field: keyof typeof widgetConfig.contactFields, value: ContactFieldRequirement) => {
@@ -184,901 +195,478 @@ export const WidgetStudio = () => {
         }));
     };
 
-    const previewSubject = (previewRecipient === 'customer'
-        ? (widgetConfig.followUp.customerSubject || '')
-        : (widgetConfig.followUp.ownerSubject || '')
-    );
+    // Define tabs configuration
+    const tabs = [
+        { id: 'appearance', label: 'Appearance', icon: Palette },
+        { id: 'behavior', label: 'Behavior', icon: Zap },
+        { id: 'notifications', label: 'Notifications', icon: Bell },
+        { id: 'install', label: 'Install', icon: Code },
+    ];
 
-    const previewBody = (previewRecipient === 'customer'
-        ? (widgetConfig.followUp.customerBody || '')
-        : (widgetConfig.followUp.ownerBody || '')
-    );
-
+    // --- Render ---
     return (
-        <div className="w-full space-y-8 animate-in fade-in duration-500 pb-20">
-            <PageHeader
-                title={activeTab === 'followup' ? 'Email Follow-ups' : 'Chat Widget'}
-                subtitle={activeTab === 'followup'
-                    ? 'Control the email follow-up experience.'
-                    : 'Customize how the chat widget looks and behaves on your site.'}
-                actions={activeTab === 'followup' ? undefined : (
-                    <div className="bg-white border border-slate-200 p-1 rounded-lg flex gap-1">
-                        <button
-                            onClick={() => {
-                                setActiveTab('appearance');
-                                setSearchParams({ tab: 'appearance' });
-                            }}
-                            className={`px-4 py-2 rounded-md text-xs font-semibold transition-all flex items-center gap-2 ${activeTab === 'appearance' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-                        >
-                            <Palette className="w-4 h-4" /> Appearance
-                        </button>
-                        <button
-                            onClick={() => {
-                                setActiveTab('behavior');
-                                setSearchParams({ tab: 'behavior' });
-                            }}
-                            className={`px-4 py-2 rounded-md text-xs font-semibold transition-all flex items-center gap-2 ${activeTab === 'behavior' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-                        >
-                            <Zap className="w-4 h-4" /> Behavior
-                        </button>
-                    </div>
-                )}
-            />
+        <div className="h-[calc(100vh-theme(spacing.20))] flex flex-col md:flex-row bg-slate-50 overflow-hidden">
+            {/* Left Panel: Settings (Scrollable) */}
+            <div className="flex-1 flex flex-col min-w-0 bg-slate-50 md:border-r border-slate-200">
+                {/* Header & Tabs */}
+                <div className="px-8 pt-8 pb-6 shrink-0 z-10 bg-slate-50 space-y-6">
+                    <PageHeader
+                        title="Widget Studio"
+                        subtitle="Customize your on-site assistant."
+                    />
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                {/* Configuration Panel */}
-                <div className="lg:col-span-5 space-y-6">
-                    {activeTab === 'appearance' ? (
-                        <div className="space-y-6 animate-in slide-in-from-left-4 duration-300">
-                            <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-6">
-                                <h3 className="font-bold text-lg text-chippy-navy">Brand Identity</h3>
-                                <div>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Widget Title</label>
-                                    <input
-                                        type="text"
-                                        className="w-full mt-2 p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral font-bold text-chippy-navy"
-                                        value={widgetConfig.title}
-                                        onChange={(e) => setWidgetConfig({ ...widgetConfig, title: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Subtitle</label>
-                                    <input
-                                        type="text"
-                                        className="w-full mt-2 p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                        value={widgetConfig.subtitle || ''}
-                                        onChange={(e) => setWidgetConfig({ ...widgetConfig, subtitle: e.target.value })}
-                                        placeholder="e.g. AI Assistant"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Primary Color</label>
-                                    <div className="flex gap-4 mt-2">
-                                        <input
-                                            type="color"
-                                            value={widgetConfig.color}
-                                            onChange={(e) => setWidgetConfig({ ...widgetConfig, color: e.target.value })}
-                                            className="w-12 h-12 rounded-xl border-none cursor-pointer overflow-hidden p-0"
-                                        />
-                                        <div className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono flex items-center text-slate-500">
-                                            {widgetConfig.color}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-6">
-                                <h3 className="font-bold text-lg text-chippy-navy">Positioning</h3>
-                                <div className="grid grid-cols-2 gap-4">
+                    {/* Navigation Tabs - Knowledge Style */}
+                    <div className="bg-white border border-slate-200 rounded-xl p-2 w-fit shadow-sm">
+                        <div className="flex gap-2">
+                            {tabs.map((tab) => {
+                                const isActive = activeTab === tab.id;
+                                return (
                                     <button
-                                        onClick={() => setWidgetConfig({ ...widgetConfig, position: 'left' })}
-                                        className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${widgetConfig.position === 'left' ? 'border-chippy-navy bg-slate-50' : 'border-slate-100 hover:border-slate-300'}`}
+                                        key={tab.id}
+                                        onClick={() => switchTab(tab.id as any)}
+                                        className={clsx(
+                                            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+                                            isActive
+                                                ? "bg-slate-900 text-white shadow-sm"
+                                                : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50"
+                                        )}
                                     >
-                                        <Layout className="w-6 h-6 rotate-180" />
-                                        <span className="text-xs font-bold">Bottom Left</span>
+                                        <tab.icon className="w-4 h-4" />
+                                        <span className="hidden xl:inline">{tab.label}</span>
                                     </button>
-                                    <button
-                                        onClick={() => setWidgetConfig({ ...widgetConfig, position: 'right' })}
-                                        className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${widgetConfig.position === 'right' ? 'border-chippy-navy bg-slate-50' : 'border-slate-100 hover:border-slate-300'}`}
-                                    >
-                                        <Layout className="w-6 h-6" />
-                                        <span className="text-xs font-bold">Bottom Right</span>
-                                    </button>
-                                </div>
-                            </div>
+                                );
+                            })}
                         </div>
-                    ) : activeTab === 'behavior' ? (
-                        <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-                            <div id="behavior-lead-capture" className="bg-white p-6 rounded-xl border border-slate-200 space-y-6">
-                                <h3 className="font-bold text-lg text-chippy-navy">Lead Capture Strategy</h3>
-                                <p className="text-sm text-slate-500">Decide when to collect visitor information.</p>
+                    </div>
+                </div>
 
-                                <div className="grid grid-cols-1 gap-4">
-                                    <button
-                                        onClick={() => setWidgetConfig({ ...widgetConfig, leadCaptureMode: 'pre-chat' })}
-                                        className={`p-4 rounded-xl border-2 text-left transition-all ${widgetConfig.leadCaptureMode === 'pre-chat' ? 'border-chippy-navy bg-slate-50' : 'border-slate-100 hover:border-slate-300'}`}
-                                    >
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <div className={`p-2 rounded-lg ${widgetConfig.leadCaptureMode === 'pre-chat' ? 'bg-chippy-navy text-white' : 'bg-slate-100 text-slate-400'}`}>
-                                                <FormInput className="w-4 h-4" />
-                                            </div>
-                                            <span className="font-bold text-chippy-navy">Pre-Chat Form</span>
+                {/* Content Scroll Area */}
+                <div className="flex-1 overflow-y-auto px-8 pb-20 animate-in fade-in duration-300">
+                    <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm max-w-3xl">
+                        {/* APPEARANCE TAB */}
+                        {activeTab === 'appearance' && (
+                            <div className="space-y-8">
+                                {/* Brand Settings */}
+                                <section className="space-y-6">
+                                    <h3 className="text-lg font-bold text-chippy-navy border-b border-slate-100 pb-2">Brand Identity</h3>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Widget Title</label>
+                                            <input
+                                                type="text"
+                                                value={widgetConfig.title}
+                                                onChange={(e) => setWidgetConfig({ ...widgetConfig, title: e.target.value })}
+                                                className="w-full mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-chippy-navy focus:ring-2 focus:ring-chippy-coral outline-none"
+                                            />
                                         </div>
-                                        <p className="text-xs text-slate-500 pl-[3.25rem]">Require details before the conversation starts. Best for high-intent leads.</p>
-                                    </button>
-
-                                    <button
-                                        onClick={() => setWidgetConfig({ ...widgetConfig, leadCaptureMode: 'ai-driven' })}
-                                        className={`p-4 rounded-xl border-2 text-left transition-all ${widgetConfig.leadCaptureMode === 'ai-driven' ? 'border-chippy-navy bg-slate-50' : 'border-slate-100 hover:border-slate-300'}`}
-                                    >
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <div className={`p-2 rounded-lg ${widgetConfig.leadCaptureMode === 'ai-driven' ? 'bg-chippy-navy text-white' : 'bg-slate-100 text-slate-400'}`}>
-                                                <MessageCircle className="w-4 h-4" />
-                                            </div>
-                                            <span className="font-bold text-chippy-navy">Conversational (AI)</span>
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Subtitle</label>
+                                            <input
+                                                type="text"
+                                                value={widgetConfig.subtitle || ''}
+                                                onChange={(e) => setWidgetConfig({ ...widgetConfig, subtitle: e.target.value })}
+                                                placeholder="e.g. AI Assistant"
+                                                className="w-full mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:ring-2 focus:ring-chippy-coral outline-none"
+                                            />
                                         </div>
-                                        <p className="text-xs text-slate-500 pl-[3.25rem]">Agent X collects info naturally when a user wants to book or connect.</p>
-                                    </button>
-                                </div>
-                            </div>
+                                    </div>
 
-                            <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-6">
-                                <div className="flex items-center justify-between">
                                     <div>
-                                        <h3 className="font-bold text-lg text-chippy-navy">Capabilities</h3>
-                                        <p className="text-sm text-slate-500">Control what this widget is allowed to do.</p>
-                                    </div>
-                                    <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                                        <BrainCircuit className="w-4 h-4" />
-                                    </div>
-                                </div>
-
-                                <div className="space-y-3">
-                                    <label className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                                        <div className="space-y-1">
-                                            <p className="text-sm font-semibold text-slate-800">Answer pricing questions</p>
-                                            <p className="text-xs text-slate-500">Share pricing plans and rates.</p>
-                                            <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    navigate('/knowledge?tab=pricing#kb-pricing');
-                                                }}
-                                                className="text-xs font-semibold text-chippy-coral hover:text-chippy-coral/80"
-                                            >
-                                                Edit pricing
-                                            </button>
-                                        </div>
-                                        <input
-                                            type="checkbox"
-                                            checked={capabilities.canAnswerPricing}
-                                            onChange={(e) => updateCapability('canAnswerPricing', e.target.checked)}
-                                            className="h-5 w-5"
-                                        />
-                                    </label>
-
-                                    <label className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                                        <div className="space-y-1">
-                                            <p className="text-sm font-semibold text-slate-800">Book appointments</p>
-                                            <p className="text-xs text-slate-500">Allow scheduling directly in chat.</p>
-                                            <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    navigate('/integrations');
-                                                }}
-                                                className="text-xs font-semibold text-chippy-coral hover:text-chippy-coral/80"
-                                            >
-                                                {hasActiveCalendar ? 'Manage calendars' : 'Connect calendar'}
-                                            </button>
-                                            <p className={`text-xs ${hasActiveCalendar ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                                {hasActiveCalendar ? 'Calendar connected' : 'No calendar connected yet'}
-                                            </p>
-                                        </div>
-                                        <input
-                                            type="checkbox"
-                                            checked={capabilities.canBookAppointments}
-                                            onChange={(e) => updateCapability('canBookAppointments', e.target.checked)}
-                                            className="h-5 w-5"
-                                            disabled={!hasActiveCalendar}
-                                        />
-                                    </label>
-
-                                    <label className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                                        <div className="space-y-1">
-                                            <p className="text-sm font-semibold text-slate-800">Request callbacks</p>
-                                            <p className="text-xs text-slate-500">Let visitors ask for a phone callback.</p>
-                                            <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    setActiveTab('behavior');
-                                                    setSearchParams({ tab: 'behavior' });
-                                                    window.location.hash = '#behavior-lead-capture';
-                                                }}
-                                                className="text-xs font-semibold text-chippy-coral hover:text-chippy-coral/80"
-                                            >
-                                                Edit behavior
-                                            </button>
-                                        </div>
-                                        <input
-                                            type="checkbox"
-                                            checked={capabilities.canRequestCallback}
-                                            onChange={(e) => updateCapability('canRequestCallback', e.target.checked)}
-                                            className="h-5 w-5"
-                                        />
-                                    </label>
-
-                                    <label className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                                        <div className="space-y-1">
-                                            <p className="text-sm font-semibold text-slate-800">Collect lead info</p>
-                                            <p className="text-xs text-slate-500">Allow pre-chat forms and lead capture.</p>
-                                            <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    setActiveTab('behavior');
-                                                    setSearchParams({ tab: 'behavior' });
-                                                    window.location.hash = '#behavior-lead-capture';
-                                                }}
-                                                className="text-xs font-semibold text-chippy-coral hover:text-chippy-coral/80"
-                                            >
-                                                Edit behavior
-                                            </button>
-                                        </div>
-                                        <input
-                                            type="checkbox"
-                                            checked={capabilities.canCollectLeads}
-                                            onChange={(e) => updateCapability('canCollectLeads', e.target.checked)}
-                                            className="h-5 w-5"
-                                        />
-                                    </label>
-                                </div>
-
-                                <div className="pt-4 border-t border-slate-100 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <h4 className="text-sm font-semibold text-slate-700">Custom capabilities</h4>
-                                        <span className="text-xs text-slate-400">Optional</span>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        {(capabilities.custom || []).map((cap, idx) => (
-                                            <div key={cap.key} className="flex items-center gap-2">
-                                                <label className="flex-1 flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg">
-                                                    <div>
-                                                        <p className="text-sm font-semibold text-slate-800">{cap.label}</p>
-                                                        <p className="text-xs text-slate-500">{cap.key}</p>
-                                                    </div>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={cap.enabled}
-                                                        onChange={(e) => updateCustomCapability(idx, e.target.checked)}
-                                                        className="h-5 w-5"
-                                                    />
-                                                </label>
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Primary Color</label>
+                                        <div className="flex flex-wrap gap-3 mt-3">
+                                            {['#0F172A', '#FF6B6B', '#3B82F6', '#10B981', '#8B5CF6', '#F59E0B'].map(color => (
                                                 <button
-                                                    type="button"
-                                                    onClick={() => removeCustomCapability(idx)}
-                                                    className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-red-500 hover:border-red-200"
-                                                    aria-label={`Remove ${cap.label}`}
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
+                                                    key={color}
+                                                    onClick={() => setWidgetConfig({ ...widgetConfig, color })}
+                                                    className={clsx(
+                                                        "w-10 h-10 rounded-full border-2 transition-all",
+                                                        widgetConfig.color === color ? "border-slate-900 scale-110 shadow-md" : "border-transparent hover:scale-105"
+                                                    )}
+                                                    style={{ backgroundColor: color }}
+                                                />
+                                            ))}
+                                            <div className="relative ml-2">
+                                                <input
+                                                    type="color"
+                                                    value={widgetConfig.color}
+                                                    onChange={(e) => setWidgetConfig({ ...widgetConfig, color: e.target.value })}
+                                                    className="w-10 h-10 -m-1 rounded-full overflow-hidden cursor-pointer opacity-0 absolute inset-0"
+                                                />
+                                                <div className="w-10 h-10 rounded-full border border-slate-200 bg-white flex items-center justify-center text-slate-400 hover:bg-slate-50 pointer-events-none">
+                                                    <Plus className="w-4 h-4" />
+                                                </div>
                                             </div>
-                                        ))}
+                                        </div>
                                     </div>
+                                </section>
+
+                                {/* Position Settings */}
+                                <section className="space-y-6">
+                                    <h3 className="text-lg font-bold text-chippy-navy border-b border-slate-100 pb-2">Positioning</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <button
+                                            onClick={() => setWidgetConfig({ ...widgetConfig, position: 'left' })}
+                                            className={clsx(
+                                                "p-4 rounded-xl border-2 flex flex-col items-center gap-3 transition-all",
+                                                widgetConfig.position === 'left'
+                                                    ? "border-chippy-navy bg-slate-50 ring-1 ring-chippy-navy/50"
+                                                    : "border-slate-100 hover:border-slate-300 hover:bg-slate-50"
+                                            )}
+                                        >
+                                            <div className="w-full h-20 bg-white border border-slate-200 rounded-lg relative overflow-hidden">
+                                                <div className="absolute bottom-2 left-2 w-8 h-8 bg-chippy-navy rounded-full shadow-sm" />
+                                            </div>
+                                            <span className="text-xs font-bold text-slate-700">Bottom Left</span>
+                                        </button>
+                                        <button
+                                            onClick={() => setWidgetConfig({ ...widgetConfig, position: 'right' })}
+                                            className={clsx(
+                                                "p-4 rounded-xl border-2 flex flex-col items-center gap-3 transition-all",
+                                                widgetConfig.position === 'right'
+                                                    ? "border-chippy-navy bg-slate-50 ring-1 ring-chippy-navy/50"
+                                                    : "border-slate-100 hover:border-slate-300 hover:bg-slate-50"
+                                            )}
+                                        >
+                                            <div className="w-full h-20 bg-white border border-slate-200 rounded-lg relative overflow-hidden">
+                                                <div className="absolute bottom-2 right-2 w-8 h-8 bg-chippy-navy rounded-full shadow-sm" />
+                                            </div>
+                                            <span className="text-xs font-bold text-slate-700">Bottom Right</span>
+                                        </button>
+                                    </div>
+                                </section>
+
+                                {/* Welcome Message */}
+                                <section className="space-y-6">
+                                    <h3 className="text-lg font-bold text-chippy-navy border-b border-slate-100 pb-2">Welcome Message</h3>
+                                    <textarea
+                                        value={widgetConfig.welcomeMessage}
+                                        onChange={(e) => setWidgetConfig({ ...widgetConfig, welcomeMessage: e.target.value })}
+                                        className="w-full h-32 p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-chippy-coral outline-none resize-none text-slate-700"
+                                        placeholder="Hi there! How can I help you today?"
+                                    />
+                                </section>
+                            </div>
+                        )}
+
+                        {/* BEHAVIOR TAB */}
+                        {activeTab === 'behavior' && (
+                            <div className="space-y-8">
+                                <section className="space-y-6">
+                                    <h3 className="text-lg font-bold text-chippy-navy border-b border-slate-100 pb-2">Lead Capture Mode</h3>
+                                    <div className="space-y-4">
+                                        {/* Pre-Chat Form Option */}
+                                        <div
+                                            className={clsx(
+                                                "relative p-5 rounded-xl border-2 cursor-pointer transition-all",
+                                                widgetConfig.leadCaptureMode === 'pre-chat'
+                                                    ? "border-chippy-navy bg-slate-50"
+                                                    : "border-slate-100 hover:border-slate-300"
+                                            )}
+                                            onClick={() => setWidgetConfig({ ...widgetConfig, leadCaptureMode: 'pre-chat' })}
+                                        >
+                                            <div className="flex items-start gap-4">
+                                                <div className={clsx("p-3 rounded-xl", widgetConfig.leadCaptureMode === 'pre-chat' ? "bg-chippy-navy text-white" : "bg-slate-100 text-slate-500")}>
+                                                    <FormInput className="w-6 h-6" />
+                                                </div>
+                                                <div className="flex-1">
+                                                    <h4 className="font-bold text-chippy-navy">Pre-Chat Form</h4>
+                                                    <p className="text-sm text-slate-500 mt-1">Visitors must enter details before starting a chat.</p>
+                                                </div>
+                                                {widgetConfig.leadCaptureMode === 'pre-chat' && <div className="w-5 h-5 bg-chippy-navy rounded-full flex items-center justify-center text-white"><Check className="w-3 h-3" /></div>}
+                                            </div>
+
+                                            {/* Field Config (Only show if active) */}
+                                            {widgetConfig.leadCaptureMode === 'pre-chat' && (
+                                                <div className="mt-4 pt-4 border-t border-slate-200 space-y-3 pl-16">
+                                                    <ContactFieldSelector label="Name" icon={<User className="w-4 h-4" />} value={widgetConfig.contactFields.name} onChange={(v) => updateContactField('name', v)} />
+                                                    <ContactFieldSelector label="Email" icon={<Mail className="w-4 h-4" />} value={widgetConfig.contactFields.email} onChange={(v) => updateContactField('email', v)} />
+                                                    <ContactFieldSelector label="Phone" icon={<Phone className="w-4 h-4" />} value={widgetConfig.contactFields.phone} onChange={(v) => updateContactField('phone', v)} />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* AI Driven Option */}
+                                        <div
+                                            className={clsx(
+                                                "relative p-5 rounded-xl border-2 cursor-pointer transition-all",
+                                                widgetConfig.leadCaptureMode === 'ai-driven'
+                                                    ? "border-chippy-navy bg-slate-50"
+                                                    : "border-slate-100 hover:border-slate-300"
+                                            )}
+                                            onClick={() => setWidgetConfig({ ...widgetConfig, leadCaptureMode: 'ai-driven' })}
+                                        >
+                                            <div className="flex items-start gap-4">
+                                                <div className={clsx("p-3 rounded-xl", widgetConfig.leadCaptureMode === 'ai-driven' ? "bg-chippy-navy text-white" : "bg-slate-100 text-slate-500")}>
+                                                    <MessageCircle className="w-6 h-6" />
+                                                </div>
+                                                <div className="flex-1">
+                                                    <h4 className="font-bold text-chippy-navy">Conversational AI</h4>
+                                                    <p className="text-sm text-slate-500 mt-1">Agent X collects information naturally during the conversation.</p>
+                                                </div>
+                                                {widgetConfig.leadCaptureMode === 'ai-driven' && <div className="w-5 h-5 bg-chippy-navy rounded-full flex items-center justify-center text-white"><Check className="w-3 h-3" /></div>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                <section className="space-y-6">
+                                    <h3 className="text-lg font-bold text-chippy-navy border-b border-slate-100 pb-2">Capabilities</h3>
+                                    {/* List capabilities with toggles */}
+                                    {[
+                                        { key: 'canAnswerPricing', label: 'Answer Pricing Questions', sub: 'Uses your configured services & plans.', link: '/knowledge?tab=pricing', linkText: 'Manage Pricing' },
+                                        { key: 'canBookAppointments', label: 'Book Appointments', sub: hasActiveCalendar ? 'Connected to calendar.' : 'Requires calendar connection.', link: '/integrations', linkText: 'Manage Calendars' },
+                                        { key: 'canRequestCallback', label: 'Request Callbacks', sub: 'Allow users to request a phone call.' },
+                                        { key: 'canCollectLeads', label: 'Collect Leads', sub: 'Capture visitor contact info.' },
+                                    ].map((cap: any) => (
+                                        <div key={cap.key} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                                            <div>
+                                                <h4 className="font-bold text-slate-800">{cap.label}</h4>
+                                                <p className="text-xs text-slate-500 mt-0.5">{cap.sub}</p>
+                                                {cap.link && (
+                                                    <button onClick={() => navigate(cap.link)} className="text-xs font-semibold text-chippy-coral mt-2 flex items-center gap-1 hover:underline">
+                                                        {cap.linkText} <ExternalLink className="w-3 h-3" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <input
+                                                type="checkbox"
+                                                checked={(capabilities as any)[cap.key]}
+                                                onChange={(e) => updateCapability(cap.key, e.target.checked)}
+                                                className="w-5 h-5 accent-chippy-navy cursor-pointer"
+                                            />
+                                        </div>
+                                    ))}
+
+                                    {/* Custom Capabilities */}
+                                    {capabilities.custom?.map((cap, idx) => (
+                                        <div key={cap.key} className="flex items-center gap-2">
+                                            <div className="flex-1 flex items-center justify-between p-4 bg-white border border-slate-200 rounded-xl">
+                                                <div>
+                                                    <p className="font-bold text-slate-800">{cap.label}</p>
+                                                    <p className="text-xs text-slate-500">{cap.key}</p>
+                                                </div>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={cap.enabled}
+                                                    onChange={(e) => updateCustomCapability(idx, e.target.checked)}
+                                                    className="w-5 h-5 accent-chippy-navy cursor-pointer"
+                                                />
+                                            </div>
+                                            <button onClick={() => removeCustomCapability(idx)} className="p-4 rounded-xl border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 bg-white">
+                                                <Trash2 className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    ))}
 
                                     <div className="flex gap-2">
                                         <input
                                             type="text"
                                             value={newCapabilityLabel}
                                             onChange={(e) => setNewCapabilityLabel(e.target.value)}
-                                            placeholder="Add a custom capability..."
-                                            className="flex-1 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                            placeholder="Add custom capability..."
+                                            className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
                                         />
-                                        <button
-                                            type="button"
-                                            onClick={addCustomCapability}
-                                            className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold flex items-center gap-2"
-                                        >
-                                            <Plus className="w-4 h-4" />
-                                            Add
-                                        </button>
+                                        <button onClick={addCustomCapability} className="px-4 bg-slate-900 text-white rounded-xl font-bold text-sm">Add</button>
                                     </div>
-                                </div>
+                                </section>
                             </div>
+                        )}
 
-                            <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-6">
-                                <h3 className="font-bold text-lg text-chippy-navy">Follow-Up Emails</h3>
-                                <p className="text-sm text-slate-500">Send a short, helpful recap after a chat ends.</p>
-
-                                <div className="space-y-4">
-                                    <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">Settings</p>
-
-                                    <label className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                                        <div>
-                                            <p className="text-sm font-semibold text-slate-800">Enable follow-ups</p>
-                                            <p className="text-xs text-slate-500">Only sends when no booking is made.</p>
-                                        </div>
+                        {/* NOTIFICATIONS TAB (Formerly Email Follow-ups) */}
+                        {activeTab === 'notifications' && (
+                            <div className="space-y-8">
+                                <div className="flex items-center justify-between bg-slate-900 text-white p-6 rounded-2xl shadow-lg shadow-slate-200">
+                                    <div>
+                                        <h3 className="text-lg font-bold">Email Follow-ups</h3>
+                                        <p className="text-slate-300 text-sm">Send automatic recaps after chats.</p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className={clsx("text-sm font-bold", widgetConfig.followUp.enabled ? "text-emerald-400" : "text-slate-400")}>
+                                            {widgetConfig.followUp.enabled ? 'On' : 'Off'}
+                                        </span>
                                         <input
                                             type="checkbox"
                                             checked={widgetConfig.followUp.enabled}
-                                            onChange={(e) => setWidgetConfig({
-                                                ...widgetConfig,
-                                                followUp: { ...widgetConfig.followUp, enabled: e.target.checked }
-                                            })}
-                                            className="h-5 w-5"
+                                            onChange={(e) => setWidgetConfig({ ...widgetConfig, followUp: { ...widgetConfig.followUp, enabled: e.target.checked } })}
+                                            className="w-6 h-6 accent-emerald-500 cursor-pointer"
                                         />
-                                    </label>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Timing</label>
-                                            <select
-                                                value={widgetConfig.followUp.delayMinutes}
-                                                onChange={(e) => setWidgetConfig({
-                                                    ...widgetConfig,
-                                                    followUp: { ...widgetConfig.followUp, delayMinutes: Number(e.target.value) }
-                                                })}
-                                                className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                                disabled={!widgetConfig.followUp.enabled}
-                                            >
-                                                <option value={0}>Send immediately</option>
-                                                <option value={30}>Send after 30 minutes</option>
-                                                <option value={120}>Send after 2 hours</option>
-                                                <option value={1440}>Send next morning</option>
-                                            </select>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Reply-To Email</label>
-                                            <input
-                                                type="email"
-                                                value={widgetConfig.followUp.replyToEmail || ''}
-                                                onChange={(e) => setWidgetConfig({
-                                                    ...widgetConfig,
-                                                    followUp: { ...widgetConfig.followUp, replyToEmail: e.target.value }
-                                                })}
-                                                className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                                placeholder="owner@business.com"
-                                                disabled={!widgetConfig.followUp.enabled}
-                                            />
-                                            <p className="text-xs text-slate-500">Replies from customers will go to this address.</p>
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Recipients</label>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                            <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={widgetConfig.followUp.sendToCustomer}
-                                                    onChange={(e) => setWidgetConfig({
-                                                        ...widgetConfig,
-                                                        followUp: { ...widgetConfig.followUp, sendToCustomer: e.target.checked }
-                                                    })}
-                                                    className="h-4 w-4"
-                                                    disabled={!widgetConfig.followUp.enabled}
-                                                />
-                                                <span>Customer</span>
-                                            </label>
-                                            <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={widgetConfig.followUp.sendToOwner}
-                                                    onChange={(e) => setWidgetConfig({
-                                                        ...widgetConfig,
-                                                        followUp: { ...widgetConfig.followUp, sendToOwner: e.target.checked }
-                                                    })}
-                                                    className="h-4 w-4"
-                                                    disabled={!widgetConfig.followUp.enabled}
-                                                />
-                                                <span>Owner</span>
-                                            </label>
-                                        </div>
                                     </div>
                                 </div>
 
-                                <div className="space-y-4">
-                                    <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">Templates</p>
+                                <section className={clsx("space-y-6 transition-opacity", !widgetConfig.followUp.enabled && "opacity-50 pointer-events-none")}>
+                                    <h3 className="text-lg font-bold text-chippy-navy border-b border-slate-100 pb-2">Settings</h3>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div className="space-y-3">
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Customer Subject</label>
+                                    <div className="grid grid-cols-1 gap-6">
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Sender Info</label>
+                                            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <input
-                                                    type="text"
-                                                    value={widgetConfig.followUp.customerSubject || ''}
-                                                    onChange={(e) => setWidgetConfig({
-                                                        ...widgetConfig,
-                                                        followUp: { ...widgetConfig.followUp, customerSubject: e.target.value }
-                                                    })}
-                                                    className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                                    disabled={!widgetConfig.followUp.enabled}
+                                                    type="email"
+                                                    value={widgetConfig.followUp.replyToEmail || ''}
+                                                    onChange={(e) => setWidgetConfig({ ...widgetConfig, followUp: { ...widgetConfig.followUp, replyToEmail: e.target.value } })}
+                                                    placeholder="Reply-to Email (e.g. you@company.com)"
+                                                    className="p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
                                                 />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Customer Body</label>
-                                                <textarea
-                                                    value={widgetConfig.followUp.customerBody || ''}
-                                                    onChange={(e) => setWidgetConfig({
-                                                        ...widgetConfig,
-                                                        followUp: { ...widgetConfig.followUp, customerBody: e.target.value }
-                                                    })}
-                                                    className="w-full h-36 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
-                                                    disabled={!widgetConfig.followUp.enabled}
-                                                />
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview (Customer)</label>
-                                                <div className="bg-white border border-slate-200 rounded-lg p-3 text-sm whitespace-pre-wrap">
-                                                    {(widgetConfig.followUp.customerBody || '')
-                                                        .replace(/{{customer_name}}/g, 'Alex')
-                                                        .replace(/{{customer_email}}/g, 'alex@example.com')
-                                                        .replace(/{{company_name}}/g, 'Acme Co.')
-                                                        .replace(/{{company_url}}/g, 'https://example.com')
-                                                        .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
-                                                        .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
-                                                        .replace(/{{priority}}/g, 'Warm')
-                                                        .replace(/{{intent}}/g, 'Pricing + booking')}
-                                                </div>
+                                                <select
+                                                    value={widgetConfig.followUp.delayMinutes}
+                                                    onChange={(e) => setWidgetConfig({ ...widgetConfig, followUp: { ...widgetConfig.followUp, delayMinutes: Number(e.target.value) } })}
+                                                    className="p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                                >
+                                                    <option value={0}>Send Immediately</option>
+                                                    <option value={30}>Wait 30 Minutes</option>
+                                                    <option value={120}>Wait 2 Hours</option>
+                                                    <option value={1440}>Send Next Morning</option>
+                                                </select>
                                             </div>
                                         </div>
 
-                                        <div className="space-y-3">
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Owner Subject</label>
-                                                <input
-                                                    type="text"
-                                                    value={widgetConfig.followUp.ownerSubject || ''}
-                                                    onChange={(e) => setWidgetConfig({
-                                                        ...widgetConfig,
-                                                        followUp: { ...widgetConfig.followUp, ownerSubject: e.target.value }
-                                                    })}
-                                                    className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                                    disabled={!widgetConfig.followUp.enabled}
-                                                />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Owner Body</label>
-                                                <textarea
-                                                    value={widgetConfig.followUp.ownerBody || ''}
-                                                    onChange={(e) => setWidgetConfig({
-                                                        ...widgetConfig,
-                                                        followUp: { ...widgetConfig.followUp, ownerBody: e.target.value }
-                                                    })}
-                                                    className="w-full h-36 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
-                                                    disabled={!widgetConfig.followUp.enabled}
-                                                />
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview (Owner)</label>
-                                                <div className="bg-white border border-slate-200 rounded-lg p-3 text-sm whitespace-pre-wrap">
-                                                    {(widgetConfig.followUp.ownerBody || '')
-                                                        .replace(/{{customer_name}}/g, 'Alex')
-                                                        .replace(/{{customer_email}}/g, 'alex@example.com')
-                                                        .replace(/{{company_name}}/g, 'Acme Co.')
-                                                        .replace(/{{company_url}}/g, 'https://example.com')
-                                                        .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
-                                                        .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
-                                                        .replace(/{{priority}}/g, 'Warm')
-                                                        .replace(/{{intent}}/g, 'Pricing + booking')}
-                                                </div>
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Recipients</label>
+                                            <div className="flex gap-4 mt-2">
+                                                <label className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold cursor-pointer select-none">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={widgetConfig.followUp.sendToCustomer}
+                                                        onChange={(e) => setWidgetConfig({ ...widgetConfig, followUp: { ...widgetConfig.followUp, sendToCustomer: e.target.checked } })}
+                                                        className="w-4 h-4 accent-chippy-navy"
+                                                    />
+                                                    Customer
+                                                </label>
+                                                <label className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold cursor-pointer select-none">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={widgetConfig.followUp.sendToOwner}
+                                                        onChange={(e) => setWidgetConfig({ ...widgetConfig, followUp: { ...widgetConfig.followUp, sendToOwner: e.target.checked } })}
+                                                        className="w-4 h-4 accent-chippy-navy"
+                                                    />
+                                                    Owner (Me)
+                                                </label>
                                             </div>
                                         </div>
                                     </div>
+                                </section>
 
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preview Tokens</label>
-                                        <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                                            Use tokens: {'{{customer_name}}'}, {'{{customer_email}}'}, {'{{company_name}}'}, {'{{company_url}}'}, {'{{summary}}'}, {'{{next_action}}'}, {'{{priority}}'}, {'{{intent}}'}
+                                <section className={clsx("space-y-6 transition-opacity", !widgetConfig.followUp.enabled && "opacity-50 pointer-events-none")}>
+                                    <h3 className="text-lg font-bold text-chippy-navy border-b border-slate-100 pb-2">Content Template</h3>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Subject Line</label>
+                                            <input
+                                                type="text"
+                                                value={widgetConfig.followUp.customerSubject || ''}
+                                                onChange={(e) => setWidgetConfig({ ...widgetConfig, followUp: { ...widgetConfig.followUp, customerSubject: e.target.value } })}
+                                                placeholder={`Follow-up from ${widgetConfig.title}`}
+                                                className="w-full mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Body Message</label>
+                                            <textarea
+                                                value={widgetConfig.followUp.customerBody || ''}
+                                                onChange={(e) => setWidgetConfig({ ...widgetConfig, followUp: { ...widgetConfig.followUp, customerBody: e.target.value } })}
+                                                className="w-full h-48 mt-2 p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-chippy-coral text-sm leading-relaxed"
+                                                placeholder="Write your message here... Use {{summary}} to include the chat summary."
+                                            />
+                                            <p className="text-xs text-slate-400 mt-2">Available tokens: {'{{customer_name}}, {{summary}}, {{company_name}}'}</p>
                                         </div>
                                     </div>
 
-                                    <div className="space-y-2 pt-2">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Send Test To</label>
+                                    <div className="pt-6 border-t border-slate-100 flex gap-4">
                                         <input
                                             type="email"
                                             value={testEmail}
                                             onChange={(e) => setTestEmail(e.target.value)}
-                                            className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                            placeholder="name@company.com"
+                                            placeholder="test@email.com"
+                                            className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none"
                                         />
-                                    </div>
-                                    <div className="flex gap-2 pt-2">
                                         <button
                                             onClick={() => sendTestEmail('customer')}
-                                            disabled={isSendingTest || !widgetConfig.followUp.enabled}
-                                            className="flex-1 py-2 bg-slate-900 text-white font-semibold rounded-md hover:bg-slate-900/90 transition-colors disabled:opacity-50"
+                                            disabled={isSendingTest}
+                                            className="px-6 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-colors"
                                         >
-                                            {isSendingTest ? 'Sending...' : 'Send Test (Customer)'}
+                                            {isSendingTest ? 'Sending...' : 'Send Test'}
                                         </button>
+                                    </div>
+                                </section>
+                            </div>
+                        )}
+
+                        {/* INSTALL TAB */}
+                        {activeTab === 'install' && (
+                            <div className="space-y-8">
+                                <section className="space-y-6">
+                                    <h3 className="text-lg font-bold text-chippy-navy border-b border-slate-100 pb-2">Installation</h3>
+                                    <p className="text-slate-600">Copy this code and paste it into your website's HTML, preferably before the closing <code>&lt;/body&gt;</code> tag.</p>
+
+                                    <div className="relative group">
+                                        <div className="bg-slate-900 rounded-xl p-6 overflow-x-auto shadow-xl">
+                                            <pre className="text-slate-300 font-mono text-sm">
+                                                <span className="text-purple-400">&lt;script</span> <span className="text-sky-400">src</span>=<span className="text-emerald-400">"https://app.hellochippy.com/widget.js"</span> <span className="text-sky-400">data-chippy-id</span>=<span className="text-emerald-400">"{userId}"</span><span className="text-purple-400">&gt;&lt;/script&gt;</span>
+                                            </pre>
+                                        </div>
                                         <button
-                                            onClick={() => sendTestEmail('owner')}
-                                            disabled={isSendingTest || !widgetConfig.followUp.enabled}
-                                            className="flex-1 py-2 bg-slate-100 text-slate-700 font-semibold rounded-md hover:bg-slate-200 transition-colors disabled:opacity-50"
+                                            onClick={copyEmbedCode}
+                                            className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 backdrop-blur-sm"
                                         >
-                                            {isSendingTest ? 'Sending...' : 'Send Test (Owner)'}
+                                            {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                            {isCopied ? 'Copied' : 'Copy Code'}
                                         </button>
                                     </div>
-                                </div>
-                            </div>
 
-                            <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4">
-                                <h3 className="font-bold text-lg text-chippy-navy mb-4">Required Fields</h3>
-                                <ContactFieldSelector label="Name" icon={<User className="w-4 h-4" />} value={widgetConfig.contactFields.name} onChange={(v) => updateContactField('name', v)} />
-                                <ContactFieldSelector label="Email" icon={<Mail className="w-4 h-4" />} value={widgetConfig.contactFields.email} onChange={(v) => updateContactField('email', v)} />
-                                <ContactFieldSelector label="Phone" icon={<Phone className="w-4 h-4" />} value={widgetConfig.contactFields.phone} onChange={(v) => updateContactField('phone', v)} />
-                            </div>
-
-                            <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4">
-                                <h3 className="font-bold text-lg text-chippy-navy">Welcome Message</h3>
-                                <textarea
-                                    className="w-full h-32 p-4 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
-                                    value={widgetConfig.welcomeMessage}
-                                    onChange={(e) => setWidgetConfig({ ...widgetConfig, welcomeMessage: e.target.value })}
-                                />
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-                            <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-6">
-                                <div className="flex flex-wrap items-start justify-between gap-4">
-                                    <div>
-                                        <h3 className="text-lg font-semibold text-chippy-navy">Follow-up emails</h3>
-                                        <p className="text-sm text-slate-500">Send a short recap after a chat ends without a booking.</p>
-                                    </div>
-                                    <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                                        <input
-                                            type="checkbox"
-                                            checked={widgetConfig.followUp.enabled}
-                                            onChange={(e) => setWidgetConfig({
-                                                ...widgetConfig,
-                                                followUp: { ...widgetConfig.followUp, enabled: e.target.checked }
-                                            })}
-                                            className="h-5 w-5 accent-slate-900"
-                                        />
-                                        Enabled
-                                    </label>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-semibold text-slate-600">Send timing</label>
-                                        <select
-                                            value={widgetConfig.followUp.delayMinutes}
-                                            onChange={(e) => setWidgetConfig({
-                                                ...widgetConfig,
-                                                followUp: { ...widgetConfig.followUp, delayMinutes: Number(e.target.value) }
-                                            })}
-                                            className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                            disabled={!widgetConfig.followUp.enabled}
-                                        >
-                                            <option value={0}>Immediately</option>
-                                            <option value={30}>After 30 minutes</option>
-                                            <option value={120}>After 2 hours</option>
-                                            <option value={1440}>Next morning</option>
-                                        </select>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-semibold text-slate-600">Reply-to address</label>
-                                        <input
-                                            type="email"
-                                            value={widgetConfig.followUp.replyToEmail || ''}
-                                            onChange={(e) => setWidgetConfig({
-                                                ...widgetConfig,
-                                                followUp: { ...widgetConfig.followUp, replyToEmail: e.target.value }
-                                            })}
-                                            className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                            placeholder="owner@business.com"
-                                            disabled={!widgetConfig.followUp.enabled}
-                                        />
-                                        <p className="text-xs text-slate-500">Customer replies go here.</p>
-                                    </div>
-
-                                    <div className="space-y-2 md:col-span-2">
-                                        <label className="text-xs font-semibold text-slate-600">Send to</label>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                            <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={widgetConfig.followUp.sendToCustomer}
-                                                    onChange={(e) => setWidgetConfig({
-                                                        ...widgetConfig,
-                                                        followUp: { ...widgetConfig.followUp, sendToCustomer: e.target.checked }
-                                                    })}
-                                                    className="h-4 w-4"
-                                                    disabled={!widgetConfig.followUp.enabled}
-                                                />
-                                                Customer
-                                            </label>
-                                            <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={widgetConfig.followUp.sendToOwner}
-                                                    onChange={(e) => setWidgetConfig({
-                                                        ...widgetConfig,
-                                                        followUp: { ...widgetConfig.followUp, sendToOwner: e.target.checked }
-                                                    })}
-                                                    className="h-4 w-4"
-                                                    disabled={!widgetConfig.followUp.enabled}
-                                                />
-                                                Owner
-                                            </label>
+                                    <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex gap-3">
+                                        <Shield className="w-5 h-5 text-amber-500 shrink-0" />
+                                        <div>
+                                            <h4 className="font-bold text-amber-800 text-sm">Domain Verification</h4>
+                                            <p className="text-amber-700 text-xs mt-1 leading-relaxed">
+                                                Ensure your website's domain is added to the allowed list, otherwise the widget may be blocked by security settings.
+                                            </p>
+                                            <button
+                                                onClick={() => navigate('/integrations')}
+                                                className="text-amber-800 underline font-bold text-xs mt-2 hover:text-amber-900"
+                                            >
+                                                Manage Allowed Domains &rarr;
+                                            </button>
                                         </div>
                                     </div>
-                                </div>
+                                </section>
                             </div>
+                        )}
+                    </div>
+                </div>
+            </div>
 
-                            <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-6">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <h3 className="text-lg font-semibold text-chippy-navy">Templates</h3>
-                                        <p className="text-sm text-slate-500">Customize the message sent after each chat.</p>
-                                    </div>
-                                    <div className="flex gap-2 bg-slate-100 p-1 rounded-lg">
-                                        <button
-                                            onClick={() => setPreviewRecipient('customer')}
-                                            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${previewRecipient === 'customer' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
-                                        >
-                                            Customer
-                                        </button>
-                                        <button
-                                            onClick={() => setPreviewRecipient('owner')}
-                                            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${previewRecipient === 'owner' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
-                                        >
-                                            Owner
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {previewRecipient === 'customer' ? (
-                                    <div className="space-y-4">
-                                        <div className="space-y-2">
-                                            <label className="text-xs font-semibold text-slate-600">Subject line</label>
-                                            <input
-                                                type="text"
-                                                value={widgetConfig.followUp.customerSubject || ''}
-                                                onChange={(e) => setWidgetConfig({
-                                                    ...widgetConfig,
-                                                    followUp: { ...widgetConfig.followUp, customerSubject: e.target.value }
-                                                })}
-                                                className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                                disabled={!widgetConfig.followUp.enabled}
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="text-xs font-semibold text-slate-600">Email body</label>
-                                            <textarea
-                                                value={widgetConfig.followUp.customerBody || ''}
-                                                onChange={(e) => setWidgetConfig({
-                                                    ...widgetConfig,
-                                                    followUp: { ...widgetConfig.followUp, customerBody: e.target.value }
-                                                })}
-                                                className="w-full h-48 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
-                                                disabled={!widgetConfig.followUp.enabled}
-                                            />
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        <div className="space-y-2">
-                                            <label className="text-xs font-semibold text-slate-600">Subject line</label>
-                                            <input
-                                                type="text"
-                                                value={widgetConfig.followUp.ownerSubject || ''}
-                                                onChange={(e) => setWidgetConfig({
-                                                    ...widgetConfig,
-                                                    followUp: { ...widgetConfig.followUp, ownerSubject: e.target.value }
-                                                })}
-                                                className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm"
-                                                disabled={!widgetConfig.followUp.enabled}
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="text-xs font-semibold text-slate-600">Email body</label>
-                                            <textarea
-                                                value={widgetConfig.followUp.ownerBody || ''}
-                                                onChange={(e) => setWidgetConfig({
-                                                    ...widgetConfig,
-                                                    followUp: { ...widgetConfig.followUp, ownerBody: e.target.value }
-                                                })}
-                                                className="w-full h-48 p-3 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-chippy-coral text-sm resize-none"
-                                                disabled={!widgetConfig.followUp.enabled}
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="space-y-3">
-                                    <p className="text-xs font-semibold text-slate-600">Tokens</p>
-                                    <div className="flex flex-wrap gap-2 text-xs">
-                                        {['{{customer_name}}', '{{customer_email}}', '{{company_name}}', '{{company_url}}', '{{summary}}', '{{next_action}}', '{{priority}}', '{{intent}}'].map(token => (
-                                            <span key={token} className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-full text-slate-600 font-mono">
-                                                {token}
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => sendTestEmail('customer')}
-                                        disabled={isSendingTest || !widgetConfig.followUp.enabled}
-                                        className="flex-1 py-2 bg-slate-900 text-white font-semibold rounded-md hover:bg-slate-900/90 transition-colors disabled:opacity-50"
-                                    >
-                                        {isSendingTest ? 'Sending...' : 'Send test (customer)'}
-                                    </button>
-                                    <button
-                                        onClick={() => sendTestEmail('owner')}
-                                        disabled={isSendingTest || !widgetConfig.followUp.enabled}
-                                        className="flex-1 py-2 bg-white border border-slate-200 text-slate-700 font-semibold rounded-md hover:bg-slate-50 transition-colors disabled:opacity-50"
-                                    >
-                                        {isSendingTest ? 'Sending...' : 'Send test (owner)'}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+            {/* Right Panel: Live Preview (Sticky) */}
+            <div className="hidden lg:flex w-[550px] bg-slate-50 border-l border-slate-200 flex-col items-center justify-center p-8 relative">
+                <div className="absolute top-8 left-0 right-0 text-center">
+                    <span className="bg-white border border-slate-200 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        {activeTab === 'notifications' ? 'Email Preview' : 'Interactive Preview'}
+                    </span>
                 </div>
 
-                {/* Preview Panel */}
-                <div className="lg:col-span-7 sticky top-8">
-                    {activeTab === 'followup' ? (
-                        <div className="bg-white rounded-2xl border border-slate-200 p-8 md:p-10">
-                            <div className="flex items-center justify-between mb-6">
-                                <div>
-                                    <h3 className="text-lg font-semibold text-chippy-navy">Preview</h3>
-                                    <p className="text-sm text-slate-500">Sample email sent after a chat.</p>
-                                </div>
-                                <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-                                    {previewRecipient === 'customer' ? 'Customer' : 'Owner'}
-                                </span>
-                            </div>
-
-                            <div className="border border-slate-200 rounded-xl overflow-hidden">
-                                <div className="bg-slate-50 border-b border-slate-200 px-5 py-4 text-sm">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-1">
-                                            <p className="text-xs text-slate-500">From</p>
-                                            <p className="text-sm text-slate-700">{tenantConfig.companyName || 'Your Business'} &lt;notifications@hellochippy.com&gt;</p>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <p className="text-xs text-slate-500">To</p>
-                                            <p className="text-sm text-slate-700">alex@example.com</p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="px-6 py-4 border-b border-slate-200">
-                                    <p className="text-xs text-slate-500">Subject</p>
-                                    <p className="text-sm text-slate-800 mt-1">
-                                        {previewSubject
-                                            .replace(/{{customer_name}}/g, 'Alex')
-                                            .replace(/{{customer_email}}/g, 'alex@example.com')
-                                            .replace(/{{company_name}}/g, tenantConfig.companyName || 'Your Business')
-                                            .replace(/{{company_url}}/g, tenantConfig.companyUrl || 'https://example.com')
-                                            .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
-                                            .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
-                                            .replace(/{{priority}}/g, 'Warm')
-                                            .replace(/{{intent}}/g, 'Pricing + booking')}
-                                    </p>
-                                </div>
-                                <div className="px-6 py-6 text-sm text-slate-700 whitespace-pre-wrap">
-                                    {previewBody
-                                        .replace(/{{customer_name}}/g, 'Alex')
-                                        .replace(/{{customer_email}}/g, 'alex@example.com')
-                                        .replace(/{{company_name}}/g, tenantConfig.companyName || 'Your Business')
-                                        .replace(/{{company_url}}/g, tenantConfig.companyUrl || 'https://example.com')
-                                        .replace(/{{summary}}/g, 'Asked about pricing and next available appointment.')
-                                        .replace(/{{next_action}}/g, 'Suggested: book a consultation this week.')
-                                        .replace(/{{priority}}/g, 'Warm')
-                                        .replace(/{{intent}}/g, 'Pricing + booking')}
-                                </div>
-                            </div>
+                <div className="w-full max-w-[420px] h-[750px] relative mt-8 transition-all duration-500">
+                    {activeTab === 'notifications' ? (
+                        <div className="scale-[0.85] origin-top h-full">
+                            <EmailPreview config={widgetConfig} />
                         </div>
                     ) : (
-                        <div className="bg-slate-900 rounded-2xl p-8 md:p-10 border border-slate-800 flex items-center justify-center relative min-h-[600px] overflow-hidden">
-                            {/* Background Pattern */}
-                            <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '24px 24px' }}></div>
-
-                            <div className="absolute top-8 left-8 text-white/30 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                                <Eye className="w-4 h-4" /> Live Preview
+                        <div className="h-full relative overflow-hidden bg-white border border-slate-200 rounded-xl shadow-inner bg-[url('/grid-pattern.svg')]">
+                            {/* Placeholder Website Content */}
+                            <div className="absolute inset-x-8 top-12 bottom-32 p-8 text-center text-slate-300 flex flex-col items-center justify-center border-2 border-dashed border-slate-100 rounded-3xl">
+                                <div className="w-16 h-16 bg-slate-50 rounded-full mb-4" />
+                                <div className="w-3/4 h-4 bg-slate-50 rounded mb-3" />
+                                <div className="w-1/2 h-4 bg-slate-50 rounded" />
                             </div>
 
-                            {capabilities.canBookAppointments && !hasActiveCalendar && (
-                                <div className="absolute top-8 right-8 bg-amber-500/90 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-sm">
-                                    Connect a calendar to enable booking
-                                </div>
-                            )}
-
-                            {/* Widget Mockup */}
-                            <div className={`w-full max-w-[340px] bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col h-[600px] transition-all duration-500 ${widgetConfig.position === 'left' ? '-translate-x-8' : 'translate-x-0'}`}>
-                            {/* Header */}
-                            <div className="p-5 text-white flex items-center justify-between shrink-0" style={{ backgroundColor: widgetConfig.color }}>
-                                <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                                            <img src="/logo.png" alt="Chippy" className="w-5 h-5 rounded" />
-                                        </div>
-                                    <div>
-                                        <p className="font-black text-sm">{widgetConfig.title}</p>
-                                        <p className="text-[10px] opacity-80 font-medium">{widgetConfig.subtitle || 'AI Assistant'}</p>
-                                    </div>
-                                </div>
-                                <X className="w-5 h-5 opacity-70 cursor-pointer hover:opacity-100" />
-                            </div>
-
-                            {/* Chat Area */}
-                            <div className="flex-1 bg-slate-50 p-4 overflow-hidden relative">
-                                {widgetConfig.leadCaptureMode === 'pre-chat' ? (
-                                    <div className="absolute inset-x-4 top-4 bottom-4 bg-white rounded-2xl shadow-lg border border-slate-100 z-10 flex flex-col p-6 animate-in zoom-in-95 duration-300">
-                                        <div className="text-center mb-6">
-                                            <h4 className="font-bold text-chippy-navy text-lg mb-1">Welcome! 👋</h4>
-                                            <p className="text-xs text-slate-500">Please fill in your details to start chatting.</p>
-                                        </div>
-                                        <div className="space-y-3 flex-1">
-                                            {widgetConfig.contactFields.name !== 'hidden' && (
-                                                <div className="space-y-1">
-                                                    <label className="text-[10px] font-bold text-slate-400 uppercase">Name {widgetConfig.contactFields.name === 'required' && '*'}</label>
-                                                    <input type="text" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" placeholder="John Doe" disabled />
-                                                </div>
-                                            )}
-                                            {widgetConfig.contactFields.email !== 'hidden' && (
-                                                <div className="space-y-1">
-                                                    <label className="text-[10px] font-bold text-slate-400 uppercase">Email {widgetConfig.contactFields.email === 'required' && '*'}</label>
-                                                    <input type="email" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" placeholder="john@example.com" disabled />
-                                                </div>
-                                            )}
-                                            {widgetConfig.contactFields.phone !== 'hidden' && (
-                                                <div className="space-y-1">
-                                                    <label className="text-[10px] font-bold text-slate-400 uppercase">Phone {widgetConfig.contactFields.phone === 'required' && '*'}</label>
-                                                    <input type="tel" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" placeholder="+1 (555) 000-0000" disabled />
-                                                </div>
-                                            )}
-                                        </div>
-                                        <button className="w-full py-3 rounded-xl font-bold text-white text-sm mt-4" style={{ backgroundColor: widgetConfig.color }}>
-                                            Start Chatting
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        <div className="flex items-end gap-2">
-                                            <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[10px] font-black text-white" style={{ backgroundColor: widgetConfig.color }}>
-                                                AI
-                                            </div>
-                                            <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-bl-none text-sm text-slate-600 shadow-sm max-w-[85%]">
-                                                {widgetConfig.welcomeMessage}
-                                            </div>
-                                        </div>
-
-                                        {/* Mock User Message if Conversational */}
-                                        <div className="opacity-50 flex items-end justify-end gap-2">
-                                            <div className="bg-slate-200 p-3 rounded-2xl rounded-br-none text-sm text-slate-600 max-w-[85%]">
-                                                I'd like to book an appointment.
-                                            </div>
-                                        </div>
-                                        <div className="opacity-50 flex items-end gap-2">
-                                            <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[10px] font-black text-white" style={{ backgroundColor: widgetConfig.color }}>
-                                                AI
-                                            </div>
-                                            <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-bl-none text-sm text-slate-600 shadow-sm max-w-[85%]">
-                                                Great! I can help with that. What is your phone number?
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Footer / Input */}
-                            <div className="p-3 bg-white border-t border-slate-100 shrink-0">
-                                <div className="h-10 bg-slate-50 rounded-full border border-slate-200 flex items-center px-4 text-xs text-slate-400">
-                                    Type a message...
-                                </div>
-                                <div className="text-[9px] text-center text-slate-300 mt-2 font-medium">Powered by Agent X</div>
-                            </div>
+                            {/* Render the actual Chat Widget Component */}
+                            <div className="absolute inset-0 pointer-events-none">
+                                <ChatWidget
+                                    tenantConfig={tenantConfig}
+                                    widgetConfig={widgetConfig}
+                                    knowledgeSummary=""
+                                    forceOpen={true}
+                                    previewMode={true}
+                                />
                             </div>
                         </div>
                     )}

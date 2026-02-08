@@ -57,8 +57,8 @@ export const KnowledgeData = () => {
     const handlePricingChange = (index: number, field: keyof PricingPlan, val: string) => {
         const newPricing = [...(tempValue as PricingPlan[])];
         if (field === 'features') {
-            // Handle features parsing (comma or newline separated)
-            newPricing[index].features = val.split(',').map(f => f.trim()).filter(f => f.length > 0);
+            // Handle features parsing (comma or newline separated) - convert to PlanFeature objects
+            newPricing[index].features = val.split(',').map(f => ({ text: f.trim(), included: true })).filter(f => f.text.length > 0);
         } else {
             // @ts-ignore
             newPricing[index][field] = val;
@@ -78,15 +78,15 @@ export const KnowledgeData = () => {
                             <div className="p-2 bg-slate-100 rounded-md text-slate-700">{icon}</div>
                             <h3 className="font-semibold text-slate-800">{title}</h3>
                         </div>
-                    {isEditing ? (
-                        <div className="flex gap-2">
-                            <button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
-                            <button onClick={saveEditing} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">Save</button>
-                        </div>
-                    ) : (
-                        <button onClick={() => startEditing(field, content)} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Edit</button>
-                    )}
-                </div>
+                        {isEditing ? (
+                            <div className="flex gap-2">
+                                <button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
+                                <button onClick={saveEditing} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">Save</button>
+                            </div>
+                        ) : (
+                            <button onClick={() => startEditing(field, content)} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Edit</button>
+                        )}
+                    </div>
 
                     {isEditing ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -101,13 +101,13 @@ export const KnowledgeData = () => {
                                     />
                                     <input
                                         type="text"
-                                        value={plan.price}
+                                        value={typeof plan.price === 'object' ? `$${plan.price.monthly || plan.price.annually}/mo` : plan.price || ''}
                                         onChange={(e) => handlePricingChange(idx, 'price', e.target.value)}
                                         className="w-full p-2 text-sm border border-slate-300 rounded-lg"
                                         placeholder="Price"
                                     />
                                     <textarea
-                                        value={plan.features.join(', ')}
+                                        value={plan.features.map(f => typeof f === 'string' ? f : f.text).join(', ')}
                                         onChange={(e) => handlePricingChange(idx, 'features', e.target.value)}
                                         className="w-full p-2 text-xs border border-slate-300 rounded-lg h-20"
                                         placeholder="Features (comma separated)"
@@ -120,12 +120,14 @@ export const KnowledgeData = () => {
                             {(content as PricingPlan[]).map((plan, idx) => (
                                 <div key={idx} className="border border-slate-200 rounded-lg p-5 bg-white">
                                     <h4 className="font-semibold text-slate-800 text-base">{plan.name}</h4>
-                                    <p className="text-slate-700 font-semibold text-lg mb-4">{plan.price}</p>
+                                    <p className="text-slate-700 font-semibold text-lg mb-4">
+                                        {typeof plan.price === 'object' ? `$${plan.price.monthly || plan.price.annually}/mo` : plan.price}
+                                    </p>
                                     <ul className="space-y-2">
                                         {plan.features.map((feature, fIdx) => (
                                             <li key={fIdx} className="flex items-start gap-2 text-xs text-slate-600 font-medium">
                                                 <CheckSquare className="w-3 h-3 text-slate-500 mt-0.5 shrink-0" />
-                                                <span>{feature}</span>
+                                                <span>{typeof feature === 'string' ? feature : feature.text}</span>
                                             </li>
                                         ))}
                                     </ul>
@@ -169,82 +171,82 @@ export const KnowledgeData = () => {
             };
 
             return (
-            <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all">
-                <div className="flex justify-between items-start mb-6">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-100 rounded-md text-slate-700">{icon}</div>
-                        <div>
-                            <h3 className="font-semibold text-slate-800">{title}</h3>
-                            <span className="text-xs text-slate-500">{content.length} services</span>
+                <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all">
+                    <div className="flex justify-between items-start mb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-slate-100 rounded-md text-slate-700">{icon}</div>
+                            <div>
+                                <h3 className="font-semibold text-slate-800">{title}</h3>
+                                <span className="text-xs text-slate-500">{content.length} services</span>
+                            </div>
                         </div>
+                        {isEditing ? (
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                                    Cancel
+                                </button>
+                                <button onClick={saveServices} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">
+                                    Save
+                                </button>
+                            </div>
+                        ) : (
+                            <button onClick={startEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                                Edit
+                            </button>
+                        )}
                     </div>
                     {isEditing ? (
-                        <div className="flex gap-2">
-                            <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
-                                Cancel
-                            </button>
-                            <button onClick={saveServices} className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-lg transition-colors">
-                                Save
-                            </button>
+                        <div className="space-y-3">
+                            <div className="flex flex-wrap gap-2">
+                                {services.map((svc, idx) => (
+                                    <span key={svc.id || idx} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full text-xs font-semibold flex items-center gap-2">
+                                        {svc.name || 'Untitled'}
+                                        <button onClick={() => removeService(idx)} className="hover:text-red-500 transition-colors">
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </span>
+                                ))}
+                            </div>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={newService}
+                                    onChange={(e) => setNewService(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && addService()}
+                                    placeholder="Add a service..."
+                                    className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none"
+                                />
+                                <button onClick={addService} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-1">
+                                    <Plus className="w-4 h-4" /> Add
+                                </button>
+                            </div>
+                            <p className="text-xs text-slate-400">
+                                This edits service names. Pricing and details stay unchanged for existing services.
+                            </p>
                         </div>
                     ) : (
-                        <button onClick={startEditing} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
-                            Edit
-                        </button>
+                        <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {(content as Service[]).map((service) => (
+                                    <div key={service.id} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
+                                        <h4 className="font-semibold text-slate-800 text-sm mb-1">{service.name}</h4>
+                                        {service.description && (
+                                            <p className="text-xs text-slate-500 mb-2 line-clamp-2">{service.description}</p>
+                                        )}
+                                        <div className="flex items-center justify-between text-xs">
+                                            <span className="font-semibold text-slate-700">{formatServicePrice(service.pricing)}</span>
+                                            {service.duration && (
+                                                <span className="text-slate-400 flex items-center gap-1">
+                                                    <Clock className="w-3 h-3" /> {service.duration} min
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
                     )}
                 </div>
-                {isEditing ? (
-                    <div className="space-y-3">
-                        <div className="flex flex-wrap gap-2">
-                            {services.map((svc, idx) => (
-                                <span key={svc.id || idx} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full text-xs font-semibold flex items-center gap-2">
-                                    {svc.name || 'Untitled'}
-                                    <button onClick={() => removeService(idx)} className="hover:text-red-500 transition-colors">
-                                        <X className="w-3 h-3" />
-                                    </button>
-                                </span>
-                            ))}
-                        </div>
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                value={newService}
-                                onChange={(e) => setNewService(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && addService()}
-                                placeholder="Add a service..."
-                                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none"
-                            />
-                            <button onClick={addService} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-1">
-                                <Plus className="w-4 h-4" /> Add
-                            </button>
-                        </div>
-                        <p className="text-xs text-slate-400">
-                            This edits service names. Pricing and details stay unchanged for existing services.
-                        </p>
-                    </div>
-                ) : (
-                    <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {(content as Service[]).map((service) => (
-                                <div key={service.id} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
-                                    <h4 className="font-semibold text-slate-800 text-sm mb-1">{service.name}</h4>
-                                    {service.description && (
-                                        <p className="text-xs text-slate-500 mb-2 line-clamp-2">{service.description}</p>
-                                    )}
-                                    <div className="flex items-center justify-between text-xs">
-                                        <span className="font-semibold text-slate-700">{formatServicePrice(service.pricing)}</span>
-                                        {service.duration && (
-                                            <span className="text-slate-400 flex items-center gap-1">
-                                                <Clock className="w-3 h-3" /> {service.duration} min
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </>
-                )}
-            </div>
             );
         }
 
@@ -364,12 +366,12 @@ export const KnowledgeData = () => {
 
                 <div className="pl-[3.25rem]">
                     {isEditing ? (
-                            <textarea
-                                value={tempValue}
-                                onChange={(e) => setTempValue(e.target.value)}
-                                className="w-full h-32 p-3 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none resize-none"
-                                placeholder={Array.isArray(content) ? "Comma separated values..." : "Enter text..."}
-                            />
+                        <textarea
+                            value={tempValue}
+                            onChange={(e) => setTempValue(e.target.value)}
+                            className="w-full h-32 p-3 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none resize-none"
+                            placeholder={Array.isArray(content) ? "Comma separated values..." : "Enter text..."}
+                        />
                     ) : (
                         <div className={`text-sm text-slate-600 leading-relaxed whitespace-pre-wrap`}>
                             {Array.isArray(content) ? (
@@ -434,18 +436,11 @@ export const KnowledgeData = () => {
                         ))}
                     </div>
                     <p className="text-xs text-slate-500 mt-4">
-                        Tip: Use the Services section to set per-service pricing. Use Pricing Information for plan-style pricing.
+                        Tip: Use the <strong>Services & Pricing</strong> tab to manage service pricing, plans, and pricing settings.
                     </p>
                 </div>
 
-                <div id="kb-pricing">
-                    <RenderSection
-                        title="Pricing Information"
-                        icon={<DollarSign className="w-5 h-5" />}
-                        field="pricing"
-                        content={knowledgeData.pricing}
-                    />
-                </div>
+                {/* Pricing moved to dedicated Services & Pricing tab */}
                 <RenderSection
                     title="Business Policies"
                     icon={<ShieldCheck className="w-5 h-5" />}
@@ -614,14 +609,14 @@ Always confirm the service before booking"
                                 ))}
                             </div>
                             <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={newKeyword}
-                                        onChange={(e) => setNewKeyword(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && addKeyword()}
-                                        placeholder="Add a keyword..."
-                                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none"
-                                    />
+                                <input
+                                    type="text"
+                                    value={newKeyword}
+                                    onChange={(e) => setNewKeyword(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && addKeyword()}
+                                    placeholder="Add a keyword..."
+                                    className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-chippy-coral outline-none"
+                                />
                                 <button onClick={addKeyword} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-1">
                                     <Plus className="w-4 h-4" /> Add
                                 </button>

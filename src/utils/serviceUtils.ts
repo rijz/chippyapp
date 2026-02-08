@@ -11,7 +11,7 @@ export const generateServiceId = (): string => {
  * Creates a default pricing object for a service
  */
 export const defaultPricing = (): ServicePricing => ({
-    type: 'contact',
+    type: 'quote',
     currency: 'USD'
 });
 
@@ -29,15 +29,28 @@ export const migrateLegacyServices = (legacyServices: string[]): Service[] => {
 /**
  * Formats a service price for display
  */
-export const formatServicePrice = (pricing: ServicePricing): string => {
+export const formatServicePrice = (pricing?: ServicePricing): string => {
+    if (!pricing) {
+        return 'No price set';
+    }
+
     const currency = pricing.currency || 'USD';
     const symbol = currency === 'USD' ? '$' : currency;
 
-    if (pricing.type === 'contact') {
-        return 'Contact for quote';
+    // Handle quote-based types
+    if (pricing.type === 'quote') {
+        return 'Request a Quote';
     }
 
-    if (pricing.type === 'custom' && pricing.customText) {
+    if (pricing.type === 'negotiable') {
+        return 'Contact for pricing';
+    }
+
+    if (pricing.type === 'free') {
+        return 'Free';
+    }
+
+    if (pricing.customText) {
         return pricing.customText;
     }
 
@@ -51,23 +64,20 @@ export const formatServicePrice = (pricing: ServicePricing): string => {
         case 'fixed':
             return price;
         case 'starting_from':
-            return `Starting from ${price}`;
+            return `From ${price}`;
+        case 'range':
+            if (pricing.maxAmount) {
+                return `${price} - ${symbol}${pricing.maxAmount.toFixed(2)}`;
+            }
+            return `From ${price}`;
         case 'hourly':
             return `${price}/hr`;
-        case 'per_session':
-            return `${price} per session`;
-        case 'per_project':
-            return `${price} per project`;
-        case 'per_day':
-            return `${price} per day`;
-        case 'per_week':
-            return `${price} per week`;
-        case 'per_month':
-            return `${price} per month`;
-        case 'subscription': {
-            const unit = pricing.unitLabel ? pricing.unitLabel.trim() : 'month';
-            return `${price} per ${unit}`;
-        }
+        case 'daily':
+            return `${price}/day`;
+        case 'weekly':
+            return `${price}/week`;
+        case 'monthly':
+            return `${price}/mo`;
         case 'per_unit': {
             const unit = pricing.unitLabel ? pricing.unitLabel.trim() : 'unit';
             return `${price} per ${unit}`;
@@ -82,8 +92,9 @@ export const formatServicePrice = (pricing: ServicePricing): string => {
  */
 export const hasValidPricing = (service: Service): boolean => {
     if (!service.pricing) return false;
-    if (service.pricing.type === 'contact') return true;
-    if (service.pricing.type === 'custom' && service.pricing.customText) return true;
+    if (service.pricing.type === 'quote' || service.pricing.type === 'negotiable') return true;
+    if (service.pricing.type === 'free') return true;
+    if (service.pricing.customText) return true;
     return service.pricing.amount !== undefined && service.pricing.amount !== null;
 };
 

@@ -42,7 +42,7 @@ export const KnowledgeBase = () => {
     const tabs = [
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
         { id: 'data', label: 'Knowledge Data', icon: Database },
-        { id: 'pricing', label: 'Pricing Models', icon: DollarSign },
+        { id: 'pricing', label: 'Services & Pricing', icon: DollarSign },
         { id: 'sources', label: 'Sources', icon: LinkIcon },
     ];
 

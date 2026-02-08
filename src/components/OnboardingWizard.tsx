@@ -905,6 +905,32 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                  <input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.phoneNumber || ''} onChange={(e) => setScannedData({ ...scannedData, phoneNumber: e.target.value })} placeholder="e.g. +1 (555) 000-0000" />
                               </div>
                               <div><label className="text-xs font-bold text-slate-500 uppercase">Category</label><input type="text" className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.businessCategory} onChange={(e) => setScannedData({ ...scannedData, businessCategory: e.target.value })} /></div>
+                              <div>
+                                 <label className="text-xs font-bold text-slate-500 uppercase">Pricing Model</label>
+                                 <select
+                                    className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400"
+                                    value={scannedData.pricingSettings?.pricingModel || 'services'}
+                                    onChange={(e) => setScannedData({
+                                       ...scannedData,
+                                       pricingSettings: {
+                                          ...scannedData.pricingSettings,
+                                          pricingModel: e.target.value as any,
+                                          hideAllPrices: scannedData.pricingSettings?.hideAllPrices || false,
+                                          defaultCurrency: scannedData.pricingSettings?.defaultCurrency || 'USD',
+                                          defaultCtaText: scannedData.pricingSettings?.defaultCtaText || 'Get a Quote',
+                                          taxDisplay: scannedData.pricingSettings?.taxDisplay || 'none'
+                                       }
+                                    })}
+                                 >
+                                    <option value="services">Service-Based (Spa, Salon, Clinic)</option>
+                                    <option value="tiered_plans">Tiered Plans (SaaS, Software)</option>
+                                    <option value="menu">Menu (Restaurant, Cafe)</option>
+                                    <option value="packages">Packages (Gym, Classes)</option>
+                                    <option value="catalog">Product Catalog (E-commerce)</option>
+                                    <option value="hourly">Hourly Rates (Consulting, Legal)</option>
+                                    <option value="quote_based">Quote-Based (Custom, Real Estate)</option>
+                                 </select>
+                              </div>
                               <div><label className="text-xs font-bold text-slate-500 uppercase">Executive Summary</label><textarea rows={3} className="w-full mt-1 p-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400" value={scannedData.summary} onChange={(e) => setScannedData({ ...scannedData, summary: e.target.value })} /></div>
                            </div>
                         </ReviewCard>
@@ -1038,32 +1064,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         <ReviewCard title="Pricing & Rates" icon={<DollarSign className="w-5 h-5 text-slate-500" />} isExpanded={expandedSection === 'pricing'} isApproved={sectionStatus.pricing} onToggle={() => setExpandedSection(expandedSection === 'pricing' ? null : 'pricing')} onApprove={() => toggleApproval('pricing')} isEmpty={!scannedData.pricing}>
                            <div>
                               {!scannedData.pricing && <div className="bg-slate-50 text-slate-600 p-3 rounded-lg text-sm mb-3 flex items-start gap-2 border border-slate-200"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><div><p className="font-semibold">Missing Pricing Data</p><p className="text-xs">We couldn't find pricing on the site.</p></div></div>}
-                              <textarea rows={6} placeholder="e.g. \nBasic Plan: $50/mo" className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400 font-mono" value={scannedData.pricing || ''} onChange={(e) => setScannedData({ ...scannedData, pricing: e.target.value })} />
-                              <div className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
-                                 <p className="font-semibold text-slate-700 mb-2">Pricing models supported</p>
-                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                    {[
-                                       'Fixed price',
-                                       'Starting from',
-                                       'Hourly rate',
-                                       'Per session',
-                                       'Per project',
-                                       'Per day / week / month',
-                                       'Subscription (per unit)',
-                                       'Per unit (custom label)',
-                                       'Custom text',
-                                       'Contact for quote'
-                                    ].map(item => (
-                                       <div key={item} className="flex items-center gap-2">
-                                          <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                                          <span>{item}</span>
-                                       </div>
-                                    ))}
-                                 </div>
-                                 <p className="text-xs text-slate-500 mt-3">
-                                    Tip: Use the Services section to set per-service pricing.
-                                 </p>
-                              </div>
+                              <textarea rows={6} placeholder="e.g. \nBasic Plan: $50/mo" className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900 outline-none focus:ring-2 focus:ring-slate-400 font-mono" value={typeof scannedData.pricing === 'string' ? scannedData.pricing : ''} onChange={(e) => setScannedData({ ...scannedData, pricing: e.target.value })} />
+
                            </div>
                         </ReviewCard>
                      </div>

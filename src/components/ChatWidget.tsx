@@ -133,6 +133,8 @@ interface ChatWidgetProps {
   showPoweredBy?: boolean; // Show "Powered by Chippy" badge for free users
   locations?: BusinessLocation[]; // Business locations for multi-location support
   calendarConnections?: CalendarConnection[]; // Calendar connections per location
+  forceOpen?: boolean; // Force the widget to be open (e.g. for preview)
+  previewMode?: boolean; // Use absolute positioning for preview
 }
 
 
@@ -149,10 +151,17 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   onFeedback,
   showPoweredBy = false,
   locations = [],
-  calendarConnections = []
+  calendarConnections = [],
+  forceOpen = false,
+  previewMode = false, // Default to false
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(forceOpen);
   const [showLeadForm, setShowLeadForm] = useState(true);
+
+  // Sync forceOpen
+  useEffect(() => {
+    if (forceOpen) setIsOpen(true);
+  }, [forceOpen]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -307,8 +316,8 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     'What are your business hours?'
   ];
 
-  const initialPromptTitle = widgetConfig.welcomeTitle || `Welcome to ${tenantConfig.companyName}.`;
-  const initialPromptSubtitle = widgetConfig.welcomeSubtitle || 'How can I help?';
+  const initialPromptTitle = `Welcome to ${tenantConfig.companyName}.`;
+  const initialPromptSubtitle = 'How can I help?';
 
   // Initialize welcome message and restore persisted messages
   useEffect(() => {
@@ -391,14 +400,96 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       if (plans.length === 0) return 'Not provided';
       return plans.map(plan => {
         const name = plan.name || 'Plan';
-        const price = plan.price || 'Price not specified';
+        // Handle both legacy string price and new object price format
+        let priceStr = 'Price not specified';
+        if (typeof plan.price === 'object' && plan.price) {
+          const { monthly, annually, currency } = plan.price;
+          const curr = currency === 'USD' ? '$' : currency;
+          if (monthly) priceStr = `${curr}${monthly}/mo`;
+          else if (annually) priceStr = `${curr}${annually}/yr`;
+        } else if (plan.price) {
+          priceStr = String(plan.price);
+        }
         const features = plan.features && plan.features.length > 0
-          ? ` — ${plan.features.join(', ')}`
+          ? ` — ${plan.features.map(f => typeof f === 'string' ? f : f.text).join(', ')}`
           : '';
-        return `${name}: ${price}${features}`;
+        return `${name}: ${priceStr}${features}`;
       }).join(' | ');
     }
     return String(pricing);
+  };
+
+  // Format pricing settings for the AI prompt
+  const formatPricingSettingsForPrompt = (settings: any): string => {
+    if (!settings) return '';
+    const parts = [];
+
+    if (settings.pricingModel) {
+      const modelLabels: Record<string, string> = {
+        'services': 'Service-based pricing',
+        'tiered_plans': 'Tiered subscription plans',
+        'menu': 'Menu pricing',
+        'packages': 'Package-based pricing',
+        'catalog': 'Product catalog',
+        'hourly': 'Hourly rates',
+        'quote_based': 'Quote-based (custom pricing)'
+      };
+      parts.push(`Pricing Model: ${modelLabels[settings.pricingModel] || settings.pricingModel}`);
+    }
+
+    if (settings.taxDisplay && settings.taxDisplay !== 'none') {
+      const taxInfo = settings.taxDisplay === 'included' ? 'Tax included in prices' : 'Tax added at checkout';
+      if (settings.taxRate) parts.push(`${taxInfo} (${settings.taxRate}%${settings.taxLabel ? ' ' + settings.taxLabel : ''})`);
+      else parts.push(taxInfo);
+    }
+
+    if (settings.cancellationPolicy) {
+      const cp = settings.cancellationPolicy;
+      let cancelStr = `Cancellation: ${cp.noticePeriod}hr notice required`;
+      if (cp.fee) {
+        cancelStr += cp.fee.type === 'percentage'
+          ? `, ${cp.fee.amount}% fee`
+          : `, $${cp.fee.amount} fee`;
+      }
+      parts.push(cancelStr);
+    }
+
+    if (settings.memberDiscount) {
+      parts.push(`Member Discount: ${settings.memberDiscount.percentage}% off${settings.memberDiscount.label ? ` (${settings.memberDiscount.label})` : ''}`);
+    }
+
+    if (settings.minimumSpend) {
+      parts.push(`Minimum Spend: $${settings.minimumSpend}`);
+    }
+
+    if (settings.paymentTerms) {
+      parts.push(`Payment Terms: ${settings.paymentTerms}`);
+    }
+
+    return parts.length > 0 ? parts.join(' | ') : '';
+  };
+
+  // Format add-ons for the AI prompt
+  const formatAddOnsForPrompt = (addOns: any[]): string => {
+    if (!addOns || addOns.length === 0) return '';
+    return addOns.map(addon => {
+      const popular = addon.isPopular ? ' (Popular)' : '';
+      const desc = addon.description ? ` — ${addon.description}` : '';
+      return `${addon.name}: +$${addon.price}${popular}${desc}`;
+    }).join(' | ');
+  };
+
+  // Format bundles for the AI prompt  
+  const formatBundlesForPrompt = (bundles: any[], services: any[]): string => {
+    if (!bundles || bundles.length === 0) return '';
+    return bundles.map(bundle => {
+      const serviceNames = bundle.includedServices
+        ?.map((s: any) => services?.find((svc: any) => svc.id === s.serviceId)?.name)
+        .filter(Boolean)
+        .join(', ') || 'Multiple services';
+      const savings = bundle.savings ? ` (Save $${bundle.savings})` : '';
+      return `${bundle.name}: $${bundle.price}${savings} — Includes: ${serviceNames}`;
+    }).join(' | ');
   };
 
   const formatTimestampForPrompt = (value: any): string => {
@@ -763,6 +854,12 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     try {
       if (knowledgeSnapshot) {
         const parsed = knowledgeSnapshot;
+
+        // Build pricing context with all structured data
+        const pricingSettingsStr = formatPricingSettingsForPrompt(parsed.pricingSettings);
+        const addOnsStr = formatAddOnsForPrompt(parsed.addOns);
+        const bundlesStr = formatBundlesForPrompt(parsed.bundles, parsed.services);
+
         structuredInfo = `
           Business Category: ${parsed.businessCategory}
           Summary: ${parsed.summary}
@@ -771,7 +868,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
           Hours: ${parsed.businessHours}
           ${parsed.businessHoursByDay ? `Hours by Day: ${Object.entries(parsed.businessHoursByDay).map(([day, hours]) => `${day}: ${hours || 'Closed'}`).join(', ')}` : ''}
           Contact: ${parsed.contactInfo}
-          Pricing: ${formatPricingForPrompt(parsed.pricing)}
+          Pricing Plans: ${formatPricingForPrompt(parsed.pricing)}
+          ${pricingSettingsStr ? `Pricing Policy: ${pricingSettingsStr}` : ''}
+          ${addOnsStr ? `Available Add-ons: ${addOnsStr}` : ''}
+          ${bundlesStr ? `Bundle Deals: ${bundlesStr}` : ''}
           Policies: ${parsed.policies}
           KB Last Updated: ${formatTimestampForPrompt(parsed.lastUpdated)}
         `;
@@ -1563,14 +1663,16 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     return true;
   };
 
-  const positionClass = widgetConfig.position === 'left' ? 'left-6 items-start' : 'right-6 items-end';
+  const positionClass = previewMode
+    ? (widgetConfig.position === 'left' ? 'left-4 items-start' : 'right-4 items-end')
+    : (widgetConfig.position === 'left' ? 'left-6 items-start' : 'right-6 items-end');
 
   if (!isMounted) return null;
 
   return (
-    <div className={`fixed bottom-6 z-50 flex flex-col ${positionClass} pointer-events-none`}>
+    <div className={`${previewMode ? 'absolute bottom-4' : 'fixed bottom-6'} z-50 flex flex-col ${positionClass} pointer-events-none`}>
       {isOpen && (
-        <div className="bg-white/95 w-[calc(100vw-48px)] sm:w-[380px] h-[calc(100vh-100px)] sm:h-[600px] max-h-[80vh] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur pointer-events-auto">
+        <div className={`bg-white/95 w-[calc(100vw-48px)] sm:w-[380px] h-[calc(100vh-100px)] sm:h-[600px] max-h-[80vh] rounded-[28px] shadow-[0_30px_80px_-30px_rgba(15,23,42,0.4)] border border-slate-200/70 flex flex-col mb-4 overflow-hidden animate-in slide-in-from-bottom-4 duration-300 backdrop-blur pointer-events-auto ${previewMode ? 'w-full h-full' : ''}`}>
           {/* Header */}
           <div className="px-5 py-4 flex items-center justify-between text-white border-b border-white/20" style={{ backgroundColor: widgetConfig.color }}>
             <div className="flex items-center gap-2">

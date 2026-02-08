@@ -43,7 +43,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             subItems: [
                 { id: '/widget?tab=appearance', label: 'Appearance' },
                 { id: '/widget?tab=behavior', label: 'Behavior' },
-                { id: '/widget?tab=followup', label: 'Email Follow-ups' }
+                { id: '/widget?tab=notifications', label: 'Notifications' }
             ]
         },
         { id: '/integrations', label: 'Integrations', icon: Settings },
