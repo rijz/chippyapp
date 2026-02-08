@@ -404,7 +404,11 @@ export const PricingModels = () => {
     };
 
     const saveSettings = () => {
-        setKnowledgeData({ ...knowledgeData, pricingSettings: editSettings });
+        setKnowledgeData({
+            ...knowledgeData,
+            pricingSettings: editSettings,
+            lastUpdated: new Date()
+        });
         setEditingSection(null);
     };
 
@@ -415,7 +419,11 @@ export const PricingModels = () => {
     };
 
     const saveServices = () => {
-        setKnowledgeData({ ...knowledgeData, services: editServices });
+        setKnowledgeData({
+            ...knowledgeData,
+            services: editServices,
+            lastUpdated: new Date()
+        });
         setEditingSection(null);
     };
 
@@ -448,8 +456,78 @@ export const PricingModels = () => {
     };
 
     const savePlans = () => {
-        setKnowledgeData({ ...knowledgeData, pricing: editPlans.length > 0 ? editPlans : null });
+        setKnowledgeData({
+            ...knowledgeData,
+            pricing: editPlans.length > 0 ? editPlans : null,
+            lastUpdated: new Date()
+        });
         setEditingSection(null);
+    };
+
+    const addPlan = () => {
+        setEditPlans(prev => [...prev, {
+            id: generateId('plan'),
+            name: 'New Plan',
+            price: { monthly: 0, currency: 'USD' },
+            features: [
+                { text: 'Feature 1', included: true },
+                { text: 'Feature 2', included: true },
+            ]
+        }]);
+    };
+
+    const removePlan = (idx: number) => {
+        setEditPlans(prev => prev.filter((_, i) => i !== idx));
+    };
+
+    const updatePlan = (idx: number, field: keyof PricingPlan, value: any) => {
+        setEditPlans(prev => prev.map((p, i) =>
+            i === idx ? { ...p, [field]: value } : p
+        ));
+    };
+
+    const updatePlanPrice = (idx: number, amount: number) => {
+        setEditPlans(prev => prev.map((p, i) =>
+            i === idx ? {
+                ...p,
+                price: typeof p.price === 'object'
+                    ? { ...p.price, monthly: amount }
+                    : { monthly: amount, currency: 'USD' }
+            } : p
+        ));
+    };
+
+    const updatePlanFeature = (planIdx: number, featureIdx: number, text: string) => {
+        setEditPlans(prev => prev.map((p, pIdx) => {
+            if (pIdx !== planIdx) return p;
+            const newFeatures = [...p.features];
+            const oldFeature = newFeatures[featureIdx];
+            // Handle both string and object features
+            if (typeof oldFeature === 'string') {
+                newFeatures[featureIdx] = { text, included: true };
+            } else {
+                newFeatures[featureIdx] = { ...oldFeature, text };
+            }
+            return { ...p, features: newFeatures };
+        }));
+    };
+
+    const addPlanFeature = (planIdx: number) => {
+        setEditPlans(prev => prev.map((p, i) =>
+            i === planIdx ? {
+                ...p,
+                features: [...p.features, { text: '', included: true }]
+            } : p
+        ));
+    };
+
+    const removePlanFeature = (planIdx: number, featureIdx: number) => {
+        setEditPlans(prev => prev.map((p, i) =>
+            i === planIdx ? {
+                ...p,
+                features: p.features.filter((_, fIdx) => fIdx !== featureIdx)
+            } : p
+        ));
     };
 
     const services = knowledgeData.services || [];
@@ -459,6 +537,31 @@ export const PricingModels = () => {
 
     return (
         <div className="space-y-6">
+            {/* Pricing Summary */}
+            {servicesWithPricing.length > 0 && (
+                <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 text-white">
+                    <h3 className="font-semibold mb-4">Pricing Summary</h3>
+                    <div className="grid md:grid-cols-4 gap-4">
+                        <div className="bg-white/10 rounded-xl p-4">
+                            <p className="text-xs text-slate-400 uppercase mb-1">Total Services</p>
+                            <p className="text-2xl font-bold">{services.length}</p>
+                        </div>
+                        <div className="bg-white/10 rounded-xl p-4">
+                            <p className="text-xs text-slate-400 uppercase mb-1">With Pricing</p>
+                            <p className="text-2xl font-bold">{servicesWithPricing.length}</p>
+                        </div>
+                        <div className="bg-white/10 rounded-xl p-4">
+                            <p className="text-xs text-slate-400 uppercase mb-1">Pricing Plans</p>
+                            <p className="text-2xl font-bold">{plans.length}</p>
+                        </div>
+                        <div className="bg-white/10 rounded-xl p-4">
+                            <p className="text-xs text-slate-400 uppercase mb-1">Add-ons</p>
+                            <p className="text-2xl font-bold">{addOns.length}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Pricing Settings Section */}
             <div className="bg-white border border-slate-200 rounded-2xl p-6">
                 <div className="flex items-center justify-between mb-6">
@@ -889,7 +992,63 @@ export const PricingModels = () => {
                         )}
                     </div>
 
-                    {editingSection !== 'plans' && (
+                    {editingSection === 'plans' ? (
+                        <div className="space-y-4">
+                            {editPlans.map((plan, idx) => (
+                                <div key={plan.id || idx} className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                                    <div className="flex items-start justify-between mb-3">
+                                        <input
+                                            type="text"
+                                            value={plan.name}
+                                            onChange={(e) => updatePlan(idx, 'name', e.target.value)}
+                                            className="font-medium text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-slate-500 outline-none flex-1 mr-4"
+                                            placeholder="Plan Name (e.g. Pro)"
+                                        />
+                                        <div className="flex items-center gap-2">
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                                                <input
+                                                    type="number"
+                                                    value={typeof plan.price === 'object' ? (plan.price.monthly || 0) : plan.price}
+                                                    onChange={(e) => updatePlanPrice(idx, parseFloat(e.target.value) || 0)}
+                                                    className="w-24 pl-6 pr-2 py-1 text-sm border border-slate-200 rounded-lg text-right"
+                                                    placeholder="0.00"
+                                                />
+                                            </div>
+                                            <span className="text-xs text-slate-500">/mo</span>
+                                            <button onClick={() => removePlan(idx)} className="p-1 text-red-400 hover:text-red-600 ml-2">
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2 pl-2">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase">Features</label>
+                                        {plan.features.map((feature, fIdx) => (
+                                            <div key={fIdx} className="flex items-center gap-2">
+                                                <span className="text-emerald-500">✓</span>
+                                                <input
+                                                    type="text"
+                                                    value={typeof feature === 'string' ? feature : feature.text}
+                                                    onChange={(e) => updatePlanFeature(idx, fIdx, e.target.value)}
+                                                    className="flex-1 text-sm bg-transparent border-b border-transparent hover:border-slate-300 focus:border-slate-500 outline-none"
+                                                    placeholder="Feature description"
+                                                />
+                                                <button onClick={() => removePlanFeature(idx, fIdx)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 transition-opacity">
+                                                    <X className="w-3 h-3" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        <button onClick={() => addPlanFeature(idx)} className="text-xs text-blue-500 hover:text-blue-700 font-medium flex items-center gap-1 mt-1">
+                                            <Plus className="w-3 h-3" /> Add Feature
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            <button onClick={addPlan} className="flex items-center gap-2 px-4 py-2 text-slate-600 text-sm font-medium border border-dashed border-slate-300 rounded-xl hover:bg-slate-50 w-full justify-center">
+                                <Plus className="w-4 h-4" /> Add Pricing Plan
+                            </button>
+                        </div>
+                    ) : (
                         <div className="space-y-3">
                             {plans.length === 0 ? (
                                 <p className="text-sm text-slate-400 italic">No pricing plans configured yet. Add plans for memberships or subscription tiers.</p>
@@ -922,43 +1081,28 @@ export const PricingModels = () => {
                 </div>
             )}
 
-            {/* Pricing Summary */}
-            {servicesWithPricing.length > 0 && (
-                <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 text-white">
-                    <h3 className="font-semibold mb-4">Pricing Summary</h3>
-                    <div className="grid md:grid-cols-4 gap-4">
-                        <div className="bg-white/10 rounded-xl p-4">
-                            <p className="text-xs text-slate-400 uppercase mb-1">Total Services</p>
-                            <p className="text-2xl font-bold">{services.length}</p>
-                        </div>
-                        <div className="bg-white/10 rounded-xl p-4">
-                            <p className="text-xs text-slate-400 uppercase mb-1">With Pricing</p>
-                            <p className="text-2xl font-bold">{servicesWithPricing.length}</p>
-                        </div>
-                        <div className="bg-white/10 rounded-xl p-4">
-                            <p className="text-xs text-slate-400 uppercase mb-1">Pricing Plans</p>
-                            <p className="text-2xl font-bold">{plans.length}</p>
-                        </div>
-                        <div className="bg-white/10 rounded-xl p-4">
-                            <p className="text-xs text-slate-400 uppercase mb-1">Add-ons</p>
-                            <p className="text-2xl font-bold">{addOns.length}</p>
-                        </div>
-                    </div>
-                </div>
-            )}
+
 
             {/* Add-ons Section */}
             <AddOnsSection
                 addOns={addOns}
                 services={services}
-                onSave={(newAddOns) => setKnowledgeData({ ...knowledgeData, addOns: newAddOns })}
+                onSave={(newAddOns) => setKnowledgeData({
+                    ...knowledgeData,
+                    addOns: newAddOns,
+                    lastUpdated: new Date()
+                })}
             />
 
             {/* Bundles Section */}
             <BundlesSection
                 bundles={bundles}
                 services={services}
-                onSave={(newBundles) => setKnowledgeData({ ...knowledgeData, bundles: newBundles })}
+                onSave={(newBundles) => setKnowledgeData({
+                    ...knowledgeData,
+                    bundles: newBundles,
+                    lastUpdated: new Date()
+                })}
             />
         </div>
     );

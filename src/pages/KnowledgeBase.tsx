@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, LayoutDashboard, Database, Link as LinkIcon, AlertTriangle, DollarSign } from 'lucide-react';
+import { Zap, LayoutDashboard, Database, Link as LinkIcon, AlertTriangle, DollarSign, Clock } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { OnboardingWizard } from '../components/OnboardingWizard';
@@ -96,7 +96,17 @@ export const KnowledgeBase = () => {
             {/* Header with Re-scan */}
             <PageHeader
                 title="Knowledge"
-                subtitle="Manage exactly what your assistant knows about your business."
+                subtitle={
+                    <div className="flex items-center gap-3">
+                        <span>Manage exactly what your assistant knows about your business.</span>
+                        {knowledgeData?.lastUpdated && (
+                            <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+                                <Clock className="w-3 h-3" />
+                                Updated {new Date(knowledgeData.lastUpdated).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                            </span>
+                        )}
+                    </div>
+                }
                 actions={(
                     <button
                         onClick={() => setShowRescanWarning(true)}

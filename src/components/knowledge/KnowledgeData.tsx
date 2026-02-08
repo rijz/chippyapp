@@ -151,7 +151,11 @@ export const KnowledgeData = () => {
             };
 
             const saveServices = () => {
-                setKnowledgeData({ ...knowledgeData!, services, lastUpdated: new Date() });
+                setKnowledgeData({
+                    ...knowledgeData!,
+                    services,
+                    lastUpdated: new Date()
+                });
                 setIsEditing(false);
             };
 
@@ -406,39 +410,7 @@ export const KnowledgeData = () => {
 
                 <KeywordsSection />
 
-                <div className="bg-white border border-slate-200 rounded-xl p-6 transition-all hover:bg-slate-50/50">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-slate-100 rounded-md text-slate-700">
-                            <DollarSign className="w-5 h-5" />
-                        </div>
-                        <div>
-                            <h3 className="font-semibold text-slate-800">Pricing Models Supported</h3>
-                            <p className="text-xs text-slate-500">Use service pricing or plan pricing as needed.</p>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-600">
-                        {[
-                            'Fixed price',
-                            'Starting from',
-                            'Hourly rate',
-                            'Per session',
-                            'Per project',
-                            'Per day / week / month',
-                            'Subscription (per unit)',
-                            'Per unit (custom label)',
-                            'Custom text',
-                            'Contact for quote'
-                        ].map((item) => (
-                            <div key={item} className="flex items-center gap-2">
-                                <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                                <span>{item}</span>
-                            </div>
-                        ))}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-4">
-                        Tip: Use the <strong>Services & Pricing</strong> tab to manage service pricing, plans, and pricing settings.
-                    </p>
-                </div>
+                {/* Pricing Models Supported removed as requested */}
 
                 {/* Pricing moved to dedicated Services & Pricing tab */}
                 <RenderSection
@@ -473,7 +445,11 @@ export const KnowledgeData = () => {
         };
 
         const saveTopRules = () => {
-            setKnowledgeData({ ...knowledgeData!, topRules, lastUpdated: new Date() });
+            setKnowledgeData({
+                ...knowledgeData!,
+                topRules,
+                lastUpdated: new Date()
+            });
             setIsEditing(false);
         };
 
@@ -555,7 +531,11 @@ Always confirm the service before booking"
         };
 
         const saveKeywords = () => {
-            setKnowledgeData({ ...knowledgeData!, keywords, lastUpdated: new Date() });
+            setKnowledgeData({
+                ...knowledgeData!,
+                keywords,
+                lastUpdated: new Date()
+            });
             setIsEditing(false);
         };
 
@@ -651,7 +631,11 @@ Always confirm the service before booking"
         };
 
         const saveLocations = () => {
-            setKnowledgeData({ ...knowledgeData!, locations, lastUpdated: new Date() });
+            setKnowledgeData({
+                ...knowledgeData!,
+                locations,
+                lastUpdated: new Date()
+            });
             setIsEditing(false);
         };
 
