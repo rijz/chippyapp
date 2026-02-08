@@ -2407,7 +2407,33 @@ OTHER INSTRUCTIONS:
     knowledgeBaseData.sources = scrapedData.pages.map(p => p.url);
     knowledgeBaseData.lastUpdated = new Date().toISOString();
 
-    console.log(`[API] Successfully structured data for: ${knowledgeBaseData.companyName}`);
+    // Auto-detect pricing model based on business category
+    const category = (knowledgeBaseData.businessCategory || '').toLowerCase();
+    let pricingModel = 'services'; // Default
+    if (category.includes('saas') || category.includes('software') || category.includes('platform') || category.includes('app')) {
+      pricingModel = 'tiered_plans';
+    } else if (category.includes('restaurant') || category.includes('cafe') || category.includes('food') || category.includes('bakery')) {
+      pricingModel = 'menu';
+    } else if (category.includes('gym') || category.includes('fitness') || category.includes('yoga') || category.includes('class') || category.includes('training')) {
+      pricingModel = 'packages';
+    } else if (category.includes('store') || category.includes('retail') || category.includes('e-commerce') || category.includes('shop')) {
+      pricingModel = 'catalog';
+    } else if (category.includes('consult') || category.includes('legal') || category.includes('agency') || category.includes('freelance')) {
+      pricingModel = 'hourly';
+    } else if (category.includes('real estate') || category.includes('insurance') || category.includes('custom')) {
+      pricingModel = 'quote_based';
+    }
+
+    // Set default pricing settings
+    knowledgeBaseData.pricingSettings = {
+      pricingModel,
+      hideAllPrices: false,
+      defaultCurrency: 'USD',
+      defaultCtaText: 'Get a Quote',
+      taxDisplay: 'none'
+    };
+
+    console.log(`[API] Successfully structured data for: ${knowledgeBaseData.companyName} (pricing model: ${pricingModel})`);
 
     clearTimeout(timeout);
     res.json(knowledgeBaseData);

@@ -682,6 +682,16 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     const plans = extractPricingPlans(data);
     if (plans.length === 0) return null;
 
+    // Helper to format plan price for display
+    const formatPlanPrice = (plan: PricingPlan): string => {
+      if (!plan.price) return 'Contact for pricing';
+      if (typeof plan.price === 'string') return plan.price; // Legacy format
+      const { monthly, annually, currency = 'USD' } = plan.price;
+      if (monthly) return `$${monthly}/mo`;
+      if (annually) return `$${annually}/yr`;
+      return 'Contact for pricing';
+    };
+
     const normalized = text.toLowerCase();
     const budgetMatch = normalized.replace(/,/g, '').match(/(\d+(\.\d+)?)/);
     const budget = budgetMatch ? parseFloat(budgetMatch[1]) : null;
@@ -696,31 +706,40 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
 
     if (budget !== null && cheapest) {
       if (budget < cheapest.value) {
-        return `Thanks for sharing your budget. Our lowest plan is ${cheapest.plan.name} at ${cheapest.plan.price}. Would you like details on that plan?`;
+        return `Thanks for sharing your budget. Our lowest plan is ${cheapest.plan.name} at ${formatPlanPrice(cheapest.plan)}. Would you like details on that plan?`;
       }
     }
 
     if ((normalized.includes('cheapest') || normalized.includes('budget') || normalized.includes('lowest')) && cheapest) {
-      return `Based on budget, I'd recommend our ${cheapest.plan.name} at ${cheapest.plan.price}. It's our most affordable option. Would you like to get started with that plan?`;
+      return `Based on budget, I'd recommend our ${cheapest.plan.name} at ${formatPlanPrice(cheapest.plan)}. It's our most affordable option. Would you like to get started with that plan?`;
     }
 
     if (normalized.includes('difference') || normalized.includes('compare')) {
       const lines = plans.map(plan => {
-        const features = plan.features && plan.features.length > 0 ? ` — ${plan.features.join(', ')}` : '';
-        return `${plan.name}: ${plan.price}${features}`;
+        const features = plan.features && plan.features.length > 0
+          ? ` — ${plan.features.map(f => typeof f === 'string' ? f : f.text).join(', ')}`
+          : '';
+        return `${plan.name}: ${formatPlanPrice(plan)}${features}`;
       });
-      return `Here’s how the plans compare:\n\n${lines.join('\n')}`;
+      return `Here's how the plans compare:\n\n${lines.join('\n')}`;
     }
 
     const lines = plans.map(plan => {
-      const features = plan.features && plan.features.length > 0 ? ` — ${plan.features.join(', ')}` : '';
-      return `${plan.name}: ${plan.price}${features}`;
+      const features = plan.features && plan.features.length > 0
+        ? ` — ${plan.features.map(f => typeof f === 'string' ? f : f.text).join(', ')}`
+        : '';
+      return `${plan.name}: ${formatPlanPrice(plan)}${features}`;
     });
     return `Here are our pricing plans:\n\n${lines.join('\n')}`;
   };
 
-  const extractNumericPrice = (price?: string): number | null => {
+  const extractNumericPrice = (price?: string | { monthly?: number; annually?: number; currency: string }): number | null => {
     if (!price) return null;
+    // Handle new object format
+    if (typeof price === 'object') {
+      return price.monthly ?? price.annually ?? null;
+    }
+    // Handle legacy string format
     const match = price.replace(/,/g, '').match(/(\d+(\.\d+)?)/);
     if (!match) return null;
     return parseFloat(match[1]);

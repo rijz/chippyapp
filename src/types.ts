@@ -170,10 +170,87 @@ export interface EnquiryDataPoint {
   color: string;
 }
 
+// Pricing model types
+export type PricingModel = 'services' | 'tiered_plans' | 'menu' | 'packages' | 'catalog' | 'hourly' | 'quote_based';
+
+// Feature in a pricing plan
+export interface PlanFeature {
+  text: string;
+  included: boolean;
+  tooltip?: string;
+}
+
+// Enhanced Pricing Plan (for SaaS/subscription businesses)
 export interface PricingPlan {
+  id: string;
+  name: string;                  // "Pro"
+  description?: string;          // "For growing teams"
+  price: {
+    monthly?: number;
+    annually?: number;
+    currency: string;
+  };
+  features: PlanFeature[];
+  limits?: {
+    label: string;
+    value: string | number;
+  }[];
+  isPopular?: boolean;
+  ctaText?: string;
+  sortOrder?: number;
+}
+
+// Add-ons / Upsells
+export interface AddOn {
+  id: string;
   name: string;
-  price: string;
-  features: string[];
+  description?: string;
+  price: number;
+  currency: string;
+  appliesTo?: string[];          // Service IDs, empty = all
+  isPopular?: boolean;
+}
+
+// Service Bundles / Packages
+export interface Bundle {
+  id: string;
+  name: string;
+  description?: string;
+  includedServices: {
+    serviceId: string;
+    quantity?: number;
+  }[];
+  price: number;
+  originalPrice?: number;
+  savings?: number;
+  currency: string;
+  validityDays?: number;
+}
+
+// Business-level pricing settings
+export interface PricingSettings {
+  pricingModel: PricingModel;
+  hideAllPrices: boolean;
+  defaultCurrency: string;
+  defaultCtaText: string;
+  taxDisplay: 'included' | 'excluded' | 'none';
+  taxRate?: number;
+  taxLabel?: string;
+  paymentTerms?: string;
+  acceptedPayments?: string[];
+  minimumSpend?: number;
+  cancellationPolicy?: {
+    noticePeriod: number;         // Hours
+    fee?: {
+      amount: number;
+      type: 'fixed' | 'percentage';
+    };
+    description?: string;
+  };
+  memberDiscount?: {
+    percentage: number;
+    label?: string;
+  };
 }
 
 export interface BusinessLocation {
@@ -188,11 +265,34 @@ export interface BusinessLocation {
 
 // Service pricing configuration
 export interface ServicePricing {
-  type: 'fixed' | 'starting_from' | 'hourly' | 'per_session' | 'per_project' | 'per_day' | 'per_week' | 'per_month' | 'subscription' | 'per_unit' | 'custom' | 'contact';
-  amount?: number;        // e.g., 50 (in cents or dollars based on currency)
-  currency?: string;      // e.g., 'USD'
-  customText?: string;    // For 'custom' type: "Varies by project"
-  unitLabel?: string;     // For 'per_unit' or subscription (e.g., 'project', 'month')
+  type: 'fixed' | 'starting_from' | 'range' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'per_unit' | 'free' | 'quote' | 'negotiable';
+  amount?: number;           // Primary price
+  maxAmount?: number;        // For ranges: "$500 - $2,000"
+  currency?: string;         // e.g., 'USD'
+  customText?: string;       // For 'custom' type: "Varies by project"
+  unitLabel?: string;        // For 'per_unit': "per sq ft", "per guest"
+
+  // Display controls
+  hidePrice?: boolean;       // Don't show price, show CTA instead
+  ctaText?: string;          // "Request Quote", "Get Pricing"
+  requireLeadFirst?: boolean; // Capture contact before discussing price
+
+  // Deposit
+  deposit?: {
+    amount: number;
+    type: 'fixed' | 'percentage';
+    refundable?: boolean;
+  };
+
+  // Promotions
+  promo?: {
+    price: number;
+    label?: string;           // "Summer Sale"
+    endDate?: string;         // ISO date
+  };
+
+  // Variable pricing notes
+  variableFactors?: string;   // "Price varies by size and complexity"
 }
 
 // Structured service with linked pricing
@@ -201,8 +301,11 @@ export interface Service {
   name: string;
   description?: string;
   pricing: ServicePricing;
-  duration?: number;      // Duration in minutes (for booking)
-  category?: string;      // Service category (e.g., "Hair", "Nails")
+  duration?: number;        // Duration in minutes (for booking)
+  category?: string;        // Service category (e.g., "Hair", "Nails")
+  addOns?: AddOn[];         // Add-ons available for this service
+  isActive?: boolean;       // Show in AI responses
+  sortOrder?: number;       // Display order
 }
 
 export interface KnowledgeBaseData {
@@ -212,19 +315,24 @@ export interface KnowledgeBaseData {
   businessCategory: string | null;
   keywords: string[];
   summary: string | null;
-  services: Service[];        // NEW: Structured services with pricing
+  services: Service[];        // Structured services with pricing
   legacyServices?: string[];  // OLD: For migration - string array format
   businessHours: string | null;
   businessHoursByDay?: Record<string, string>;
   contactInfo: string | null;
-  pricing?: string | PricingPlan[] | null;    // Legacy pricing text or structured plans
+  pricing?: string | PricingPlan[] | null;  // Legacy text or tiered plans
   policies: string | null;
   locations?: BusinessLocation[];
   sources?: string[];
   lastUpdated?: Date;
   isMock?: boolean;
   corrections?: { query: string; correction: string }[];
-  topRules?: string; // Priority instructions for the AI (one rule per line)
+  topRules?: string;
+
+  // New pricing model fields
+  pricingSettings?: PricingSettings;
+  addOns?: AddOn[];
+  bundles?: Bundle[];
 }
 
 export interface KnowledgeConflict {
