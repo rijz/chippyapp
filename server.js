@@ -2354,6 +2354,15 @@ Based on this content, extract and return a JSON object with this exact structur
     }
   ],
   "businessHours": "Operating hours if found (or 'Not specified')",
+  "businessHoursByDay": {
+    "Mon": "9:00 AM - 5:00 PM",
+    "Tue": "9:00 AM - 5:00 PM",
+    "Wed": "9:00 AM - 5:00 PM",
+    "Thu": "9:00 AM - 5:00 PM",
+    "Fri": "9:00 AM - 5:00 PM",
+    "Sat": "Closed",
+    "Sun": "Closed"
+  },
   "contactInfo": "Email, address, other contact methods (or 'Not specified')",
   "policies": "Cancellation, refund, or booking policies found. If none, say 'No policies found.'",
   "locations": [
@@ -2383,6 +2392,7 @@ IMPORTANT SERVICE EXTRACTION RULES:
 
 OTHER INSTRUCTIONS:
 - For LOCATIONS: Look for physical addresses, storefronts, clinics, offices, or branches. Return empty array [] if none found.
+- For BUSINESS HOURS: If you find specific hours for different days (e.g., "Mon-Fri 9-5, Sat 10-2"), populate businessHoursByDay with each day's hours. If hours are the same every day, repeat them. Use "Closed" for days the business is closed.
 - Return ONLY valid JSON, no explanations.`;
 
     const result = await model.generateContent(prompt);

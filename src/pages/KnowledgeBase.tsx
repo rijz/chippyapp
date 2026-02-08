@@ -7,11 +7,12 @@ import { PageHeader } from '../components/layout/PageHeader';
 import { KnowledgeOverview } from '../components/knowledge/KnowledgeOverview';
 import { KnowledgeData } from '../components/knowledge/KnowledgeData';
 import { KnowledgeSources } from '../components/knowledge/KnowledgeSources';
+import { PricingModels } from '../components/knowledge/PricingModels';
 import { PricingModal } from '../components/ui/Shared';
 import { KnowledgeBaseData } from '../types';
 import { useSearchParams, useLocation } from 'react-router-dom';
 
-    type Tab = 'overview' | 'data' | 'pricing' | 'sources';
+type Tab = 'overview' | 'data' | 'pricing' | 'sources';
 
 export const KnowledgeBase = () => {
     const { session } = useAuth();
@@ -139,7 +140,7 @@ export const KnowledgeBase = () => {
             {/* Main Content */}
             {activeTab === 'overview' && <KnowledgeOverview />}
             {activeTab === 'data' && <KnowledgeData />}
-            {activeTab === 'pricing' && <KnowledgeData />}
+            {activeTab === 'pricing' && <PricingModels />}
             {activeTab === 'sources' && (
                 isSourcesEnabled ? (
                     <KnowledgeSources />

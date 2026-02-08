@@ -62,10 +62,10 @@ export const AIKnowledgePreview: React.FC<AIKnowledgePreviewProps> = ({
 
         try {
             // Simple test response based on KB data
-            let response = "I'm not sure about that. Please check the knowledge base.";
+            let response = "";
             const lowerText = messageText.toLowerCase();
 
-            if (lowerText.includes('service') || lowerText.includes('offer')) {
+            if (lowerText.includes('service') || lowerText.includes('offer') || lowerText.includes('do you do')) {
                 const services = knowledgeData.services || [];
                 if (services.length > 0) {
                     response = `We offer the following services:\n${services.slice(0, 5).map(s =>
@@ -74,10 +74,10 @@ export const AIKnowledgePreview: React.FC<AIKnowledgePreviewProps> = ({
                 } else {
                     response = "Our service information is being updated. Please check back soon!";
                 }
-            } else if (lowerText.includes('hour') || lowerText.includes('open') || lowerText.includes('close')) {
+            } else if (lowerText.includes('hour') || lowerText.includes('open') || lowerText.includes('close') || lowerText.includes('when')) {
                 const hours = formatHoursByDay(knowledgeData.businessHoursByDay) || knowledgeData.businessHours;
                 response = hours ? `Our hours are: ${hours}` : "Please contact us for our current hours.";
-            } else if (lowerText.includes('price') || lowerText.includes('cost') || lowerText.includes('much')) {
+            } else if (lowerText.includes('price') || lowerText.includes('cost') || lowerText.includes('much') || lowerText.includes('fee') || lowerText.includes('rate')) {
                 const services = knowledgeData.services?.filter(s => s.pricing && s.pricing.amount) || [];
                 if (services.length > 0) {
                     response = `Here are some of our prices:\n${services.slice(0, 4).map(s =>
@@ -90,12 +90,49 @@ export const AIKnowledgePreview: React.FC<AIKnowledgePreviewProps> = ({
                 } else {
                     response = "Please contact us for pricing information.";
                 }
-            } else if (lowerText.includes('book') || lowerText.includes('appointment') || lowerText.includes('schedule')) {
+            } else if (lowerText.includes('book') || lowerText.includes('appointment') || lowerText.includes('schedule') || lowerText.includes('reserve')) {
                 response = "I can help you book an appointment! What service are you interested in, and when would you like to come in?";
-            } else if (lowerText.includes('phone') || lowerText.includes('contact') || lowerText.includes('call')) {
-                response = knowledgeData.phoneNumber
+            } else if (lowerText.includes('phone') || lowerText.includes('contact') || lowerText.includes('call') || lowerText.includes('email') || lowerText.includes('reach')) {
+                const contact = knowledgeData.phoneNumber
                     ? `You can reach us at ${knowledgeData.phoneNumber}`
-                    : knowledgeData.contactInfo || "Please check our website for contact information.";
+                    : "";
+                const email = knowledgeData.contactInfo || "";
+                response = contact || email || "Please check our website for contact information.";
+            } else if (lowerText.includes('who') || lowerText.includes('what is') || lowerText.includes('about') || lowerText.includes('tell me')) {
+                // Business identity questions
+                const name = knowledgeData.companyName || "our company";
+                const category = knowledgeData.businessCategory || "";
+                const summary = knowledgeData.summary || "";
+                if (summary) {
+                    response = summary;
+                } else if (category) {
+                    response = `${name} is a ${category}. How can I help you today?`;
+                } else {
+                    response = `Welcome to ${name}! How can I assist you?`;
+                }
+            } else if (lowerText.includes('help') || lowerText.includes('business') || lowerText.includes('work for') || lowerText.includes('will')) {
+                // General "will this help me" type questions
+                const summary = knowledgeData.summary || "";
+                const category = knowledgeData.businessCategory || "business needs";
+                if (summary) {
+                    response = `${summary}\n\nWould you like to learn more about how we can help your specific needs?`;
+                } else {
+                    response = `We specialize in ${category} and can definitely help! What specific needs do you have?`;
+                }
+            } else if (lowerText.includes('location') || lowerText.includes('where') || lowerText.includes('address')) {
+                const locations = knowledgeData.locations || [];
+                if (locations.length > 0) {
+                    response = `We're located at:\n${locations.map(l => `• ${l.name}: ${l.address}, ${l.city}, ${l.state} ${l.zip}`).join('\n')}`;
+                } else {
+                    response = "Please contact us for location information.";
+                }
+            } else {
+                // Fallback - use business summary or generic response
+                if (knowledgeData.summary) {
+                    response = `${knowledgeData.summary}\n\nIs there something specific you'd like to know?`;
+                } else {
+                    response = `Thanks for your question! I'm here to help with ${knowledgeData.companyName || "our services"}. Try asking about our services, pricing, hours, or how to book an appointment.`;
+                }
             }
 
             // Simulate typing delay
@@ -129,9 +166,9 @@ export const AIKnowledgePreview: React.FC<AIKnowledgePreviewProps> = ({
             </div>
 
             {/* Content */}
-            <div className="grid grid-cols-1 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
+            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
                 {/* Left: Knowledge Summary */}
-                <div className="lg:col-span-3 p-6 space-y-5">
+                <div className="p-6 space-y-5">
                     <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                         <Sparkles className="w-3 h-3" /> Knowledge Summary
                     </h4>
@@ -219,7 +256,7 @@ export const AIKnowledgePreview: React.FC<AIKnowledgePreviewProps> = ({
                 </div>
 
                 {/* Right: Test Chat */}
-                <div className="lg:col-span-2 flex flex-col bg-slate-50/50">
+                <div className="flex flex-col bg-slate-50/50">
                     <div className="px-4 py-3 border-b border-slate-200 bg-white">
                         <div className="flex items-center gap-2 text-slate-600">
                             <MessageSquare className="w-4 h-4" />
@@ -229,22 +266,12 @@ export const AIKnowledgePreview: React.FC<AIKnowledgePreviewProps> = ({
 
                     {/* Messages */}
                     <div className="flex-1 p-4 space-y-3 min-h-[200px] max-h-[300px] overflow-y-auto">
-                        {messages.length === 0 ? (
-                            <div className="text-center py-8">
-                                <p className="text-xs text-slate-400 mb-4">Try asking a question:</p>
-                                <div className="flex flex-wrap justify-center gap-2">
-                                    {quickQuestions.map((q, i) => (
-                                        <button
-                                            key={i}
-                                            onClick={() => handleSendMessage(q)}
-                                            className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-xs rounded-full hover:bg-slate-100 transition-colors"
-                                        >
-                                            {q}
-                                        </button>
-                                    ))}
-                                </div>
+                        {messages.length === 0 && (
+                            <div className="text-center py-6">
+                                <p className="text-xs text-slate-400">Ask a question to test your AI assistant</p>
                             </div>
-                        ) : (
+                        )}
+                        {messages.length > 0 && (
                             messages.map(msg => (
                                 <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                     <div className={`max-w-[85%] px-3 py-2 rounded-xl text-sm ${msg.role === 'user'
@@ -267,7 +294,7 @@ export const AIKnowledgePreview: React.FC<AIKnowledgePreviewProps> = ({
                     </div>
 
                     {/* Input */}
-                    <div className="p-3 border-t border-slate-200 bg-white">
+                    <div className="p-3 border-t border-slate-200 bg-white space-y-3">
                         <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="flex gap-2">
                             <input
                                 type="text"
@@ -284,6 +311,19 @@ export const AIKnowledgePreview: React.FC<AIKnowledgePreviewProps> = ({
                                 <Send className="w-4 h-4" />
                             </button>
                         </form>
+                        {/* Quick Questions - Always visible */}
+                        <div className="flex flex-wrap gap-2">
+                            {quickQuestions.map((q, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => handleSendMessage(q)}
+                                    disabled={isLoading}
+                                    className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs rounded-full hover:bg-slate-200 disabled:opacity-50 transition-colors"
+                                >
+                                    {q}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>

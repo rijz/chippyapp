@@ -1125,7 +1125,7 @@ If budget under $100, recommend Basic package"
                            <div className="space-y-4 animate-in slide-in-from-bottom-4 fade-in duration-500">
                               <AIKnowledgePreview
                                  knowledgeData={scannedData!}
-                                 onEdit={() => setStep(4)}
+                                 onEdit={() => { setIsTraining(false); setTrainingPhase(0); setStep(4); }}
                                  onConfirm={() => onComplete(scannedData!)}
                                  showActions={true}
                               />
