@@ -1,4 +1,4 @@
-# Agent X: AI-Powered Front Desk MVP
+Hellochippy: AI-Powered Front Desk MVP
 
 Agent X is a sophisticated command center for managing autonomous AI booking agents. Built for service-based businesses, it leverages Gemini 3 models to scan websites, learn business rules, and interact with customers via a customizable chat widget.
 
