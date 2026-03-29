@@ -591,6 +591,14 @@ const widgetDataLimiter = rateLimit({
   message: { error: 'Too many requests' }
 });
 
+// Live voice token limiter (kept stricter to reduce abuse/costs)
+const liveTokenLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 10 : 40,
+  message: { error: 'Too many voice token requests. Please wait a moment.' },
+  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+});
+
 // =====================
 // SECURITY: Input sanitization for widget APIs
 // =====================
@@ -619,6 +627,155 @@ const sanitizeObject = (obj) => {
   }
   return sanitized;
 };
+
+/**
+ * POST /api/widget/live-token
+ * Issues a short-lived Live API token for widget voice booking.
+ * Security:
+ * - requires tenant userId
+ * - enforces single-location rollout
+ * - enforces booking capability enabled
+ * - enforces embed origin allow-list (when configured)
+ */
+app.post('/api/widget/live-token', liveTokenLimiter, async (req, res) => {
+  try {
+    const userId = sanitizeInput(req.body?.userId || '');
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+
+    const geminiApiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!geminiApiKey) {
+      return res.status(500).json({ error: 'Live voice is not configured on this server.' });
+    }
+
+    const { data: settings, error: settingsError } = await supabaseAdmin
+      .from('settings')
+      .select('allowed_embed_domains, tenant_config, widget_config')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (settingsError) {
+      console.error('[Voice Token] Settings fetch error:', settingsError);
+      return res.status(500).json({ error: 'Failed to load widget settings' });
+    }
+
+    if (!settings) {
+      return res.status(404).json({ error: 'Widget not found' });
+    }
+
+    const canBookAppointments = settings?.widget_config?.capabilities?.canBookAppointments !== false;
+    if (!canBookAppointments) {
+      return res.status(403).json({ error: 'Voice booking is not enabled for this widget.' });
+    }
+
+    // Single-location rollout guard (Phase 1)
+    let locationCount = Array.isArray(settings?.tenant_config?.locations)
+      ? settings.tenant_config.locations.length
+      : 0;
+
+    const { data: knowledge } = await supabaseAdmin
+      .from('knowledge_bases')
+      .select('content')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (locationCount === 0 && Array.isArray(knowledge?.content?.locations)) {
+      locationCount = knowledge.content.locations.length;
+    }
+
+    if (locationCount > 1) {
+      return res.status(403).json({ error: 'Voice booking is currently available for single-location businesses only.' });
+    }
+
+    // Build embed origin allow-list
+    let allowedDomains = settings?.allowed_embed_domains || [];
+    if (allowedDomains.length === 0 && settings?.tenant_config?.companyUrl) {
+      try {
+        allowedDomains = [new URL(settings.tenant_config.companyUrl).origin];
+      } catch {
+        // Ignore malformed URL
+      }
+    }
+    if (allowedDomains.length === 0 && knowledge?.content?.website) {
+      try {
+        allowedDomains = [new URL(knowledge.content.website).origin];
+      } catch {
+        // Ignore malformed URL
+      }
+    }
+
+    // Enforce origin restrictions if configured
+    const originHeader = String(req.headers.origin || '').trim();
+    const refererHeader = String(req.headers.referer || '').trim();
+    let requestOrigin = '';
+    if (originHeader) {
+      requestOrigin = originHeader;
+    } else if (refererHeader) {
+      try {
+        requestOrigin = new URL(refererHeader).origin;
+      } catch {
+        requestOrigin = '';
+      }
+    }
+
+    const isPlatformOrigin = requestOrigin.includes('hellochippy.com') || requestOrigin.includes('localhost');
+    const isAllowedEmbedOrigin = allowedDomains.some((domain) => requestOrigin === domain || requestOrigin === 'null');
+    if (allowedDomains.length === 0 && !isPlatformOrigin) {
+      return res.status(403).json({ error: 'Voice booking requires an authorized embed domain.' });
+    }
+    if (allowedDomains.length > 0 && requestOrigin && !isPlatformOrigin && !isAllowedEmbedOrigin) {
+      console.warn(`[Voice Token] Blocked origin ${requestOrigin} for user ${userId}. Allowed: ${allowedDomains.join(', ')}`);
+      return res.status(403).json({ error: 'Origin not authorized for voice booking.' });
+    }
+
+    const model = process.env.CHIPPY_GEMINI_LIVE_MODEL || 'gemini-3.1-flash-live-preview';
+    const now = Date.now();
+    const expireTime = new Date(now + 30 * 60 * 1000).toISOString();
+    const newSessionExpireTime = new Date(now + 60 * 1000).toISOString();
+
+    const tokenResponse = await fetch(`https://generativelanguage.googleapis.com/v1alpha/auth_tokens?key=${geminiApiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uses: 1,
+        expireTime,
+        newSessionExpireTime,
+        bidiGenerateContentSetup: {
+          model: `models/${model}`,
+          generationConfig: {
+            responseModalities: ['TEXT'],
+            temperature: 0.2
+          },
+          inputAudioTranscription: {},
+          sessionResumption: {}
+        }
+      })
+    });
+
+    const tokenData = await tokenResponse.json().catch(() => null);
+    if (!tokenResponse.ok) {
+      console.error('[Voice Token] Gemini token error:', tokenData);
+      return res.status(502).json({ error: 'Failed to create Live API token.' });
+    }
+
+    const token = tokenData?.name;
+    if (!token) {
+      console.error('[Voice Token] Missing token name in response:', tokenData);
+      return res.status(502).json({ error: 'Invalid Live token response.' });
+    }
+
+    res.json({
+      token,
+      model,
+      expireTime: tokenData?.expireTime || expireTime,
+      newSessionExpireTime: tokenData?.newSessionExpireTime || newSessionExpireTime
+    });
+  } catch (error) {
+    console.error('[Voice Token] Error:', error);
+    res.status(500).json({ error: 'Failed to create voice session token.' });
+  }
+});
 
 /**
  * POST /api/widget/lead
