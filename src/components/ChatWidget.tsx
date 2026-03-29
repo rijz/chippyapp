@@ -1,12 +1,13 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, Loader2, User, Mail, Phone, ArrowRight } from 'lucide-react';
+import { X, Send, Loader2, User, Mail, Phone, ArrowRight, Mic, Square } from 'lucide-react';
 import { Message, TenantConfig, WidgetConfig, BusinessLocation, CalendarConnection, Service, PricingPlan } from '../types';
 import { formatServicePrice } from '../utils/serviceUtils';
 import { createAgentSession, createBdlAgentSession, analyzeInteraction } from '../services/geminiService';
 import { CALENDAR_TOOLS, executeCalendarTool, ToolContext, CallbackRequestData } from '../services/calendarTools';
 import { LOCATION_TOOL, executeFindClosestLocation, getLocationSelectionPrompt } from '../services/locationTools';
 import { ChatSession } from '@google/generative-ai';
+import { GoogleGenAI, Modality, type Session as LiveSession, type LiveServerMessage } from '@google/genai';
 import DOMPurify from 'dompurify';
 import { DateTimePicker } from './DateTimePicker';
 import { bdlService } from '../services/bdlService';
@@ -177,6 +178,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [feedbackDismissed, setFeedbackDismissed] = useState(false);
   const [conversationEnded, setConversationEnded] = useState(false);
   const [capturedContact, setCapturedContact] = useState<{ name?: string; email?: string; phone?: string }>({});
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState('');
+  const [voiceError, setVoiceError] = useState('');
+  const [liveTranscriptPreview, setLiveTranscriptPreview] = useState('');
 
   const capabilities = widgetConfig.capabilities || {
     canAnswerPricing: true,
@@ -221,12 +226,25 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const contactStorageKey = useMemo(() => `chatContact_${sessionId}`, [sessionId]);
 
   const canCollectLeads = capabilities.canCollectLeads !== false;
+  const isVoiceSupported =
+    typeof window !== 'undefined' &&
+    typeof navigator !== 'undefined' &&
+    !!navigator.mediaDevices?.getUserMedia;
+  const isSingleLocationVoiceEligible = locations.length <= 1;
 
   // Determine if we should show lead form based on config
   const isPreChatMode = widgetConfig.leadCaptureMode === 'pre-chat' && canCollectLeads;
   const hasLeadFields = canCollectLeads && (widgetConfig.contactFields.name !== 'hidden' ||
     widgetConfig.contactFields.email !== 'hidden' ||
     widgetConfig.contactFields.phone !== 'hidden');
+
+  const liveSessionRef = useRef<LiveSession | null>(null);
+  const liveTranscriptRef = useRef('');
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const isVoiceRecordingRef = useRef(false);
 
   // Rotate placeholder messages every 3 seconds
   useEffect(() => {
@@ -1356,8 +1374,247 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
     return sanitized;
   };
 
-  const handleSend = async () => {
-    const sanitizedText = sanitizeInput(inputText);
+  const toBase64 = (buffer: Uint8Array): string => {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < buffer.length; i += chunkSize) {
+      const chunk = buffer.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  };
+
+  const downsampleTo16kPcm = (input: Float32Array, sampleRate: number): Int16Array => {
+    if (!input || input.length === 0) return new Int16Array(0);
+
+    const targetRate = 16000;
+    if (sampleRate === targetRate) {
+      const out = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      return out;
+    }
+
+    const ratio = sampleRate / targetRate;
+    const newLength = Math.max(1, Math.round(input.length / ratio));
+    const out = new Int16Array(newLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+
+    while (offsetResult < out.length) {
+      const nextOffsetBuffer = Math.min(input.length, Math.round((offsetResult + 1) * ratio));
+      let accum = 0;
+      let count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer; i++) {
+        accum += input[i];
+        count++;
+      }
+      const sample = count > 0 ? accum / count : 0;
+      const clamped = Math.max(-1, Math.min(1, sample));
+      out[offsetResult] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
+    }
+
+    return out;
+  };
+
+  const teardownVoiceResources = () => {
+    try {
+      audioProcessorRef.current?.disconnect();
+    } catch { }
+    try {
+      audioSourceRef.current?.disconnect();
+    } catch { }
+    try {
+      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+    } catch { }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => undefined);
+    }
+    try {
+      liveSessionRef.current?.close();
+    } catch { }
+
+    audioProcessorRef.current = null;
+    audioSourceRef.current = null;
+    mediaStreamRef.current = null;
+    audioContextRef.current = null;
+    liveSessionRef.current = null;
+  };
+
+  const startVoiceCapture = async () => {
+    if (isVoiceRecordingRef.current) return;
+    if (!isVoiceSupported) {
+      setVoiceError('Voice is not supported in this browser.');
+      return;
+    }
+    if (!isSingleLocationVoiceEligible) {
+      setVoiceError('Voice booking is currently available for single-location businesses only.');
+      return;
+    }
+    if (!chatSession) {
+      setVoiceError('Chat is still initializing. Please try again in a moment.');
+      return;
+    }
+
+    setVoiceError('');
+    setVoiceStatus('Starting microphone...');
+    setLiveTranscriptPreview('');
+    liveTranscriptRef.current = '';
+
+    try {
+      const tokenResponse = await fetch('/api/widget/live-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: tenantConfig.userId })
+      });
+
+      const tokenPayload = await tokenResponse.json().catch(() => ({}));
+      if (!tokenResponse.ok || !tokenPayload?.token) {
+        throw new Error(tokenPayload?.error || 'Failed to create a voice session.');
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: tokenPayload.token,
+        apiVersion: 'v1alpha'
+      });
+
+      const session = await ai.live.connect({
+        model: tokenPayload.model || 'gemini-3.1-flash-live-preview',
+        config: {
+          responseModalities: [Modality.TEXT],
+          inputAudioTranscription: {},
+          sessionResumption: {}
+        },
+        callbacks: {
+          onmessage: (event: LiveServerMessage) => {
+            const inputTranscript = event.serverContent?.inputTranscription?.text?.trim();
+            if (inputTranscript) {
+              liveTranscriptRef.current = inputTranscript;
+              setLiveTranscriptPreview(inputTranscript);
+            }
+            const fallbackText = event.text?.trim();
+            if (fallbackText && !liveTranscriptRef.current) {
+              liveTranscriptRef.current = fallbackText;
+              setLiveTranscriptPreview(fallbackText);
+            }
+          },
+          onerror: () => {
+            setVoiceError('Voice session encountered an error.');
+          },
+          onclose: () => {
+            // handled by stop/cleanup path
+          }
+        }
+      });
+
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const audioContext = new AudioCtx();
+      const source = audioContext.createMediaStreamSource(mediaStream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+      processor.onaudioprocess = (evt) => {
+        if (!isVoiceRecordingRef.current || !liveSessionRef.current) return;
+        const channelData = evt.inputBuffer.getChannelData(0);
+        const pcm16 = downsampleTo16kPcm(channelData, audioContext.sampleRate);
+        if (!pcm16.length) return;
+
+        const base64 = toBase64(new Uint8Array(pcm16.buffer));
+        try {
+          liveSessionRef.current.sendRealtimeInput({
+            audio: {
+              mimeType: 'audio/pcm;rate=16000',
+              data: base64
+            }
+          });
+        } catch (error) {
+          console.warn('[Voice] Failed to send audio chunk', error);
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      liveSessionRef.current = session;
+      mediaStreamRef.current = mediaStream;
+      audioContextRef.current = audioContext;
+      audioSourceRef.current = source;
+      audioProcessorRef.current = processor;
+
+      isVoiceRecordingRef.current = true;
+      setIsVoiceRecording(true);
+      setVoiceStatus('Listening... tap stop when done.');
+    } catch (error: any) {
+      console.error('[Voice] Start failed', error);
+      teardownVoiceResources();
+      isVoiceRecordingRef.current = false;
+      setIsVoiceRecording(false);
+      setVoiceStatus('');
+      setVoiceError(error?.message || 'Unable to start voice input.');
+    }
+  };
+
+  const stopVoiceCapture = async () => {
+    if (!isVoiceRecordingRef.current) return;
+
+    setVoiceStatus('Finalizing transcription...');
+    isVoiceRecordingRef.current = false;
+
+    try {
+      liveSessionRef.current?.sendRealtimeInput({ audioStreamEnd: true });
+    } catch {
+      // ignore
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 900));
+    const transcript = sanitizeInput(liveTranscriptRef.current || '');
+
+    teardownVoiceResources();
+    setIsVoiceRecording(false);
+    setVoiceStatus('');
+
+    if (!transcript) {
+      setVoiceError('I could not hear that clearly. Please try again.');
+      return;
+    }
+
+    setVoiceError('');
+    await handleSend(transcript);
+  };
+
+  const abortVoiceCapture = () => {
+    if (!isVoiceRecordingRef.current) return;
+    isVoiceRecordingRef.current = false;
+    teardownVoiceResources();
+    setIsVoiceRecording(false);
+    setVoiceStatus('');
+  };
+
+  useEffect(() => {
+    isVoiceRecordingRef.current = isVoiceRecording;
+  }, [isVoiceRecording]);
+
+  useEffect(() => {
+    return () => {
+      teardownVoiceResources();
+    };
+  }, []);
+
+  const handleSend = async (overrideText?: string) => {
+    if (isVoiceRecording && typeof overrideText !== 'string') return;
+    const sourceText = typeof overrideText === 'string' ? overrideText : inputText;
+    const sanitizedText = sanitizeInput(sourceText);
     if (!sanitizedText || !chatSession) return;
 
     const currentText = sanitizedText;
@@ -1689,6 +1946,7 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                 if (onSessionUpdate && messages.length > 0) {
                   onSessionUpdate(messages);
                 }
+                abortVoiceCapture();
                 setIsOpen(false);
               }} className="hover:bg-white/20 p-1 rounded transition-colors">
                 <X className="w-5 h-5" />
@@ -1803,10 +2061,8 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                       <DateTimePicker
                         availableSlots={clickableSlots}
                         onSlotSelect={(slot) => {
-                          // Send the slot selection to the AI
-                          setInputText(`I'd like to book the ${slot} slot`);
                           setClickableSlots([]); // Clear slots
-                          setTimeout(() => handleSend(), 100);
+                          void handleSend(`I'd like to book the ${slot} slot`);
                         }}
                         accentColor={widgetConfig.color || '#14b8a6'}
                       />
@@ -1886,6 +2142,29 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                     </button>
                   </div>
                   <div className="flex items-center gap-3 bg-white rounded-2xl px-4 py-3 border border-slate-200 shadow-sm focus-within:border-chippy-coral transition-colors">
+                    {isVoiceSupported && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isVoiceRecording) {
+                            void stopVoiceCapture();
+                          } else {
+                            void startVoiceCapture();
+                          }
+                        }}
+                        disabled={isLoading || !chatSession || (!isVoiceRecording && !isSingleLocationVoiceEligible)}
+                        className={`rounded-full p-2 transition-colors ${isVoiceRecording ? 'text-red-500 bg-red-50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                        title={
+                          isVoiceRecording
+                            ? 'Stop recording'
+                            : isSingleLocationVoiceEligible
+                              ? 'Talk to book'
+                              : 'Voice booking is currently single-location only'
+                        }
+                      >
+                        {isVoiceRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      </button>
+                    )}
                     <input
                       type="text"
                       value={inputText}
@@ -1894,10 +2173,22 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
                       placeholder={placeholderMessages[placeholderIndex % placeholderMessages.length]}
                       className="bg-transparent flex-1 outline-none text-sm text-slate-700 placeholder-slate-400"
                     />
-                    <button onClick={handleSend} disabled={isLoading || !inputText.trim() || !chatSession} className="hover:opacity-80 disabled:opacity-50" style={{ color: widgetConfig.color }}>
+                    <button onClick={() => void handleSend()} disabled={isLoading || isVoiceRecording || !inputText.trim() || !chatSession} className="hover:opacity-80 disabled:opacity-50" style={{ color: widgetConfig.color }}>
                       <Send className="w-4 h-4" />
                     </button>
                   </div>
+                  {voiceStatus && (
+                    <p className="text-[10px] text-slate-500 mt-2">{voiceStatus}</p>
+                  )}
+                  {isVoiceRecording && liveTranscriptPreview && (
+                    <p className="text-[10px] text-slate-500 mt-1 line-clamp-2">Heard: {liveTranscriptPreview}</p>
+                  )}
+                  {!isSingleLocationVoiceEligible && isVoiceSupported && (
+                    <p className="text-[10px] text-slate-500 mt-1">Voice booking is rolling out to multi-location businesses soon.</p>
+                  )}
+                  {voiceError && (
+                    <p className="text-[10px] text-red-500 mt-1">{voiceError}</p>
+                  )}
                   <p className="text-[10px] text-slate-400 mt-2">AI-generated answers may contain errors. Always verify information.</p>
                   {showPoweredBy && (
                     <div className="text-center mt-2">
@@ -1919,7 +2210,10 @@ ${contactReqs.length > 0 ? contactReqs.map(r => `- ${r}`).join('\n') : "No detai
       )}
 
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          if (isOpen) abortVoiceCapture();
+          setIsOpen(!isOpen);
+        }}
         className="text-white p-4 rounded-full shadow-lg hover:scale-110 transition-all duration-300 pointer-events-auto"
         style={{ backgroundColor: widgetConfig.color }}
       >
