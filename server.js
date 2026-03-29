@@ -596,7 +596,6 @@ const liveTokenLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'production' ? 10 : 40,
   message: { error: 'Too many voice token requests. Please wait a moment.' },
-  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
 });
 
 // =====================
