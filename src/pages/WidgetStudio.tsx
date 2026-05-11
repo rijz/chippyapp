@@ -16,7 +16,7 @@ import clsx from 'clsx';
 import { ChatWidget } from '../components/ChatWidget';
 
 export const WidgetStudio = () => {
-    const { widgetConfig, setWidgetConfig, tenantConfig, calendarConnections } = useData();
+    const { widgetConfig, setWidgetConfig, tenantConfig, setTenantConfig, calendarConnections } = useData();
     const { session } = useAuth();
     const { showToast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -25,6 +25,8 @@ export const WidgetStudio = () => {
 
     // Tabs: appearance, behavior, notifications, install
     const [activeTab, setActiveTab] = useState<'appearance' | 'behavior' | 'notifications' | 'install'>('appearance');
+    const isAdvancedMode = tenantConfig.experienceMode === 'advanced';
+    const [blockedAdvancedTab, setBlockedAdvancedTab] = useState<'behavior' | 'notifications' | 'install' | null>(null);
 
     // Email Test State
     const [isSendingTest, setIsSendingTest] = useState(false);
@@ -43,12 +45,21 @@ export const WidgetStudio = () => {
     // Initialize tabs from URL
     useEffect(() => {
         const tab = searchParams.get('tab');
-        if (tab === 'appearance' || tab === 'behavior' || tab === 'install') {
-            setActiveTab(tab);
-        } else if (tab === 'followup' || tab === 'notifications') {
-            setActiveTab('notifications');
+        const resolvedTab = tab === 'followup'
+            ? 'notifications'
+            : (tab === 'appearance' || tab === 'behavior' || tab === 'notifications' || tab === 'install'
+                ? tab
+                : 'appearance');
+
+        if (!isAdvancedMode && resolvedTab !== 'appearance') {
+            setBlockedAdvancedTab(resolvedTab);
+            setActiveTab('appearance');
+            return;
         }
-    }, [searchParams]);
+
+        setBlockedAdvancedTab(null);
+        setActiveTab(resolvedTab);
+    }, [searchParams, isAdvancedMode]);
 
     // Handle scroll to hash
     useEffect(() => {
@@ -183,6 +194,19 @@ export const WidgetStudio = () => {
     const copyEmbedCode = () => {
         const code = `<script src="https://app.hellochippy.com/widget.js" data-chippy-id="${userId}"></script>`;
         navigator.clipboard.writeText(code);
+        setTenantConfig(prev => ({
+            ...prev,
+            setupChecklist: {
+                ...(prev.setupChecklist || {
+                    businessInfo: false,
+                    services: false,
+                    calendar: false,
+                    widgetInstall: false,
+                    testConversation: false
+                }),
+                widgetInstall: true
+            }
+        }));
         setIsCopied(true);
         showToast('Code copied to clipboard', 'success');
         setTimeout(() => setIsCopied(false), 2000);
@@ -202,6 +226,9 @@ export const WidgetStudio = () => {
         { id: 'notifications', label: 'Notifications', icon: Bell },
         { id: 'install', label: 'Install', icon: Code },
     ];
+    const visibleTabs = isAdvancedMode
+        ? tabs
+        : tabs.filter(tab => tab.id === 'appearance');
 
     // --- Render ---
     return (
@@ -212,13 +239,34 @@ export const WidgetStudio = () => {
                 <div className="px-8 pt-8 pb-6 shrink-0 z-10 bg-slate-50 space-y-6">
                     <PageHeader
                         title="Widget Studio"
-                        subtitle="Customize your on-site assistant."
+                        subtitle={isAdvancedMode
+                            ? "Customize your on-site assistant."
+                            : "Basic setup for title, welcome message, color, and position."
+                        }
                     />
+
+                    {!isAdvancedMode && blockedAdvancedTab && (
+                        <div className="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                            <p className="text-xs text-slate-600">
+                                This section is available in Advanced mode.
+                            </p>
+                            <button
+                                onClick={() => {
+                                    setTenantConfig(prev => ({ ...prev, experienceMode: 'advanced' }));
+                                    setSearchParams({ tab: blockedAdvancedTab });
+                                    setActiveTab(blockedAdvancedTab);
+                                }}
+                                className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition-colors"
+                            >
+                                Switch to Advanced
+                            </button>
+                        </div>
+                    )}
 
                     {/* Navigation Tabs - Knowledge Style */}
                     <div className="bg-white border border-slate-200 rounded-xl p-2 w-fit shadow-sm">
                         <div className="flex gap-2">
-                            {tabs.map((tab) => {
+                            {visibleTabs.map((tab) => {
                                 const isActive = activeTab === tab.id;
                                 return (
                                     <button
@@ -260,16 +308,18 @@ export const WidgetStudio = () => {
                                                 className="w-full mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-chippy-navy focus:ring-2 focus:ring-chippy-coral outline-none"
                                             />
                                         </div>
-                                        <div>
-                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Subtitle</label>
-                                            <input
-                                                type="text"
-                                                value={widgetConfig.subtitle || ''}
-                                                onChange={(e) => setWidgetConfig({ ...widgetConfig, subtitle: e.target.value })}
-                                                placeholder="e.g. AI Assistant"
-                                                className="w-full mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:ring-2 focus:ring-chippy-coral outline-none"
-                                            />
-                                        </div>
+                                        {isAdvancedMode && (
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Subtitle</label>
+                                                <input
+                                                    type="text"
+                                                    value={widgetConfig.subtitle || ''}
+                                                    onChange={(e) => setWidgetConfig({ ...widgetConfig, subtitle: e.target.value })}
+                                                    placeholder="e.g. AI Assistant"
+                                                    className="w-full mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:ring-2 focus:ring-chippy-coral outline-none"
+                                                />
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div>

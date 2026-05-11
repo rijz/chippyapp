@@ -1,0 +1,48 @@
+{
+  "tenantId": "tenant-demo-001",
+  "companyName": "Chippy HVAC",
+  "timezone": "America/New_York",
+  "ownerEmail": "owner@example.com",
+  "leads": [
+    {
+      "id": "lead-001",
+      "name": "Alex Morgan",
+      "email": "alex@example.com",
+      "phone": "+1-555-0100",
+      "serviceInterest": "HVAC Tune-up"
+    },
+    {
+      "id": "lead-002",
+      "name": "Jamie Chen",
+      "email": "jamie@example.com",
+      "phone": "+1-555-0101",
+      "serviceInterest": "Emergency Repair"
+    }
+  ],
+  "emails": [
+    {
+      "id": "msg-1001",
+      "threadId": "thread-1001",
+      "fromEmail": "alex@example.com",
+      "fromName": "Alex Morgan",
+      "toEmail": "owner@example.com",
+      "subject": "Can I reschedule my appointment?",
+      "body": "Hi, I need to move my appointment from Monday morning to Tuesday afternoon. Can you help?",
+      "status": "open",
+      "source": "fixture",
+      "receivedAt": "2026-02-14T09:00:00-05:00"
+    },
+    {
+      "id": "msg-1002",
+      "threadId": "thread-1002",
+      "fromEmail": "jamie@example.com",
+      "fromName": "Jamie Chen",
+      "toEmail": "owner@example.com",
+      "subject": "Pricing for emergency service",
+      "body": "What's the estimated cost for an emergency after-hours repair?",
+      "status": "open",
+      "source": "fixture",
+      "receivedAt": "2026-02-14T10:10:00-05:00"
+    }
+  ]
+}

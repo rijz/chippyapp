@@ -367,11 +367,12 @@ const BundlesSection = ({ bundles, services, onSave }: { bundles: Bundle[]; serv
 };
 
 export const PricingModels = () => {
-    const { knowledgeData, setKnowledgeData } = useData();
+    const { knowledgeData, setKnowledgeData, tenantConfig, setTenantConfig } = useData();
     const [editingSection, setEditingSection] = useState<'services' | 'plans' | 'settings' | null>(null);
     const [editServices, setEditServices] = useState<Service[]>([]);
     const [editPlans, setEditPlans] = useState<PricingPlan[]>([]);
     const [editSettings, setEditSettings] = useState<PricingSettings>(DEFAULT_PRICING_SETTINGS);
+    const isAdvancedMode = tenantConfig.experienceMode === 'advanced';
 
     if (!knowledgeData) {
         return (
@@ -537,8 +538,23 @@ export const PricingModels = () => {
 
     return (
         <div className="space-y-6">
+            {!isAdvancedMode && (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between gap-4">
+                    <div>
+                        <p className="text-sm font-semibold text-slate-700">Simple Pricing View</p>
+                        <p className="text-xs text-slate-500 mt-1">Showing core service pricing only. Switch to Advanced mode for plans, add-ons, bundles, and pricing rules.</p>
+                    </div>
+                    <button
+                        onClick={() => setTenantConfig(prev => ({ ...prev, experienceMode: 'advanced' }))}
+                        className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition-colors shrink-0"
+                    >
+                        Switch to Advanced
+                    </button>
+                </div>
+            )}
+
             {/* Pricing Summary */}
-            {servicesWithPricing.length > 0 && (
+            {isAdvancedMode && servicesWithPricing.length > 0 && (
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 text-white">
                     <h3 className="font-semibold mb-4">Pricing Summary</h3>
                     <div className="grid md:grid-cols-4 gap-4">
@@ -563,7 +579,8 @@ export const PricingModels = () => {
             )}
 
             {/* Pricing Settings Section */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-6">
+            {isAdvancedMode && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-6">
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-blue-50 rounded-lg">
@@ -813,6 +830,7 @@ export const PricingModels = () => {
                     </div>
                 )}
             </div>
+            )}
 
             {/* Service Pricing Section */}
             <div className="bg-white border border-slate-200 rounded-2xl p-6">
@@ -823,7 +841,7 @@ export const PricingModels = () => {
                         </div>
                         <div>
                             <h3 className="font-semibold text-slate-900">Service Pricing</h3>
-                            <p className="text-xs text-slate-500">Set prices for your services</p>
+                            <p className="text-xs text-slate-500">{isAdvancedMode ? 'Set prices for your services' : 'Set the prices customers ask about most'}</p>
                         </div>
                     </div>
                     {editingSection === 'services' ? (
@@ -905,30 +923,33 @@ export const PricingModels = () => {
                                             placeholder="60"
                                         />
                                     </div>
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase">Category</label>
+                                    {isAdvancedMode && (
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase">Category</label>
+                                            <input
+                                                type="text"
+                                                value={service.category || ''}
+                                                onChange={(e) => updateServiceField(idx, 'category', e.target.value)}
+                                                className="w-full mt-1 p-2 text-sm border border-slate-200 rounded-lg"
+                                                placeholder="e.g., Hair"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                                {isAdvancedMode && (
+                                    <div className="mt-3 flex items-center gap-2">
                                         <input
-                                            type="text"
-                                            value={service.category || ''}
-                                            onChange={(e) => updateServiceField(idx, 'category', e.target.value)}
-                                            className="w-full mt-1 p-2 text-sm border border-slate-200 rounded-lg"
-                                            placeholder="e.g., Hair"
+                                            type="checkbox"
+                                            id={`hidePrice-${idx}`}
+                                            checked={service.pricing?.hidePrice || false}
+                                            onChange={(e) => updateServicePricing(idx, 'hidePrice', e.target.checked)}
+                                            className="rounded border-slate-300"
                                         />
+                                        <label htmlFor={`hidePrice-${idx}`} className="text-xs text-slate-500">
+                                            Hide price (show "Request Quote" instead)
+                                        </label>
                                     </div>
-                                </div>
-                                {/* Hide Price Toggle */}
-                                <div className="mt-3 flex items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        id={`hidePrice-${idx}`}
-                                        checked={service.pricing?.hidePrice || false}
-                                        onChange={(e) => updateServicePricing(idx, 'hidePrice', e.target.checked)}
-                                        className="rounded border-slate-300"
-                                    />
-                                    <label htmlFor={`hidePrice-${idx}`} className="text-xs text-slate-500">
-                                        Hide price (show "Request Quote" instead)
-                                    </label>
-                                </div>
+                                )}
                             </div>
                         ))}
                         <button onClick={addService} className="flex items-center gap-2 px-4 py-2 text-slate-600 text-sm font-medium border border-dashed border-slate-300 rounded-xl hover:bg-slate-50 w-full justify-center">
@@ -947,7 +968,7 @@ export const PricingModels = () => {
                                             <Tag className="w-4 h-4 text-slate-400" />
                                             <div>
                                                 <span className="text-sm font-medium text-slate-700">{service.name}</span>
-                                                {service.category && (
+                                                {isAdvancedMode && service.category && (
                                                     <span className="ml-2 text-xs text-slate-400">({service.category})</span>
                                                 )}
                                             </div>
@@ -964,7 +985,7 @@ export const PricingModels = () => {
             </div>
 
             {/* Pricing Plans Section (for tiered_plans model) */}
-            {(pricingSettings.pricingModel === 'tiered_plans' || plans.length > 0) && (
+            {isAdvancedMode && (pricingSettings.pricingModel === 'tiered_plans' || plans.length > 0) && (
                 <div className="bg-white border border-slate-200 rounded-2xl p-6">
                     <div className="flex items-center justify-between mb-6">
                         <div className="flex items-center gap-3">
@@ -1084,26 +1105,30 @@ export const PricingModels = () => {
 
 
             {/* Add-ons Section */}
-            <AddOnsSection
-                addOns={addOns}
-                services={services}
-                onSave={(newAddOns) => setKnowledgeData({
-                    ...knowledgeData,
-                    addOns: newAddOns,
-                    lastUpdated: new Date()
-                })}
-            />
+            {isAdvancedMode && (
+                <AddOnsSection
+                    addOns={addOns}
+                    services={services}
+                    onSave={(newAddOns) => setKnowledgeData({
+                        ...knowledgeData,
+                        addOns: newAddOns,
+                        lastUpdated: new Date()
+                    })}
+                />
+            )}
 
             {/* Bundles Section */}
-            <BundlesSection
-                bundles={bundles}
-                services={services}
-                onSave={(newBundles) => setKnowledgeData({
-                    ...knowledgeData,
-                    bundles: newBundles,
-                    lastUpdated: new Date()
-                })}
-            />
+            {isAdvancedMode && (
+                <BundlesSection
+                    bundles={bundles}
+                    services={services}
+                    onSave={(newBundles) => setKnowledgeData({
+                        ...knowledgeData,
+                        bundles: newBundles,
+                        lastUpdated: new Date()
+                    })}
+                />
+            )}
         </div>
     );
 };

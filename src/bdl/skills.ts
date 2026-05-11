@@ -78,5 +78,55 @@ export const CORE_SKILLS: SkillDefinition[] = [
     ],
     guardrails: [],
     action: 'send_admin_report'
+  },
+  {
+    id: 'new-lead-followup',
+    name: 'New Lead Follow-Up',
+    version: '1.0',
+    triggers: ['lead.created', 'lead.unbooked'],
+    requiredData: ['customer.phone'],
+    permissions: {
+      requiresMarketingConsent: false,
+      channels: ['sms', 'email']
+    },
+    schedule: [
+      { offset: '+10m' },
+      { offset: '+24h' }
+    ],
+    guardrails: ['quiet_hours', 'opt_out', 'owner_approval_for_high_risk'],
+    action: 'send_lead_followup'
+  },
+  {
+    id: 'unbooked-consult-recovery',
+    name: 'Unbooked Consult Recovery',
+    version: '1.0',
+    triggers: ['lead.unbooked', 'lead.replied'],
+    requiredData: ['customer.phone'],
+    permissions: {
+      requiresMarketingConsent: false,
+      channels: ['sms', 'email']
+    },
+    schedule: [
+      { offset: '+1h' },
+      { offset: '+2d' }
+    ],
+    guardrails: ['quiet_hours', 'opt_out', 'consult_required_for_medical_advice'],
+    action: 'send_consult_recovery'
+  },
+  {
+    id: 'stale-lead-reactivation',
+    name: 'Stale Lead Reactivation',
+    version: '1.0',
+    triggers: ['lead.followup_due'],
+    requiredData: ['customer.phone'],
+    permissions: {
+      requiresMarketingConsent: true,
+      channels: ['sms', 'email']
+    },
+    schedule: [
+      { offset: '+30d' }
+    ],
+    guardrails: ['quiet_hours', 'opt_out', 'owner_approval_for_bulk'],
+    action: 'send_reactivation'
   }
 ];

@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Tag, DollarSign, ShieldCheck, Edit2, Save, X, CheckSquare, Plus, MapPin, Trash2, Clock, ListChecks } from 'lucide-react';
+import { Tag, ShieldCheck, X, CheckSquare, Plus, MapPin, Trash2, Clock, ListChecks, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
 import { KnowledgeBaseData, PricingPlan, BusinessLocation, Service } from '../../types';
 import { createEmptyService, formatServicePrice } from '../../utils/serviceUtils';
@@ -9,6 +9,7 @@ export const KnowledgeData = () => {
     const { knowledgeData, setKnowledgeData } = useData();
     const [editingSection, setEditingSection] = useState<keyof KnowledgeBaseData | null>(null);
     const [tempValue, setTempValue] = useState<any>('');
+    const [showAdvancedSections, setShowAdvancedSections] = useState(false);
 
     if (!knowledgeData) {
         return (
@@ -380,11 +381,16 @@ export const KnowledgeData = () => {
                         <div className={`text-sm text-slate-600 leading-relaxed whitespace-pre-wrap`}>
                             {Array.isArray(content) ? (
                                 <div className="flex flex-wrap gap-2">
-                                    {content.map((item: string, i: number) => (
+                                    {content.slice(0, 10).map((item: string, i: number) => (
                                         <span key={i} className="px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-semibold text-slate-500">
                                             {item}
                                         </span>
                                     ))}
+                                    {content.length > 10 && (
+                                        <span className="px-2 py-1 bg-slate-100 border border-slate-200 rounded-md text-xs font-semibold text-slate-500">
+                                            +{content.length - 10} more
+                                        </span>
+                                    )}
                                 </div>
                             ) : (
                                 content || <span className="text-slate-400 italic">No information available.</span>
@@ -396,8 +402,52 @@ export const KnowledgeData = () => {
         );
     };
 
+    const totalServices = Array.isArray(knowledgeData.services) ? knowledgeData.services.length : 0;
+    const totalLocations = Array.isArray(knowledgeData.locations) ? knowledgeData.locations.length : 0;
+    const totalKeywords = Array.isArray(knowledgeData.keywords) ? knowledgeData.keywords.length : 0;
+    const hiddenAdvancedCount = 3; // keywords, policies, locations
+
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-right-4 duration-500">
+        <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div>
+                        <h3 className="text-sm font-semibold text-slate-800">Knowledge Data Controls</h3>
+                        <p className="text-xs text-slate-500 mt-1">
+                            Start with rules, services, and contact. Open more controls only when needed.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => setShowAdvancedSections(prev => !prev)}
+                        className="inline-flex items-center gap-2 px-3 py-2 border border-slate-200 bg-white rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                        {showAdvancedSections ? 'Hide Extra Controls' : 'Show Extra Controls'}
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvancedSections ? 'rotate-180' : ''}`} />
+                    </button>
+                </div>
+                <div className="grid grid-cols-3 gap-3 mt-4">
+                    <div className="rounded-lg border border-slate-200 p-3 bg-slate-50">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Services</p>
+                        <p className="text-lg font-semibold text-slate-800 mt-1">{totalServices}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 p-3 bg-slate-50">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Locations</p>
+                        <p className="text-lg font-semibold text-slate-800 mt-1">{totalLocations}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 p-3 bg-slate-50">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Keywords</p>
+                        <p className="text-lg font-semibold text-slate-800 mt-1">{totalKeywords}</p>
+                    </div>
+                </div>
+                {!showAdvancedSections && (
+                    <p className="text-xs text-slate-500 mt-3">
+                        {hiddenAdvancedCount} advanced sections are hidden to keep this page focused.
+                    </p>
+                )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
                 <TopRulesSection />
 
@@ -408,17 +458,19 @@ export const KnowledgeData = () => {
                     content={knowledgeData.services}
                 />
 
-                <KeywordsSection />
+                {showAdvancedSections && (
+                    <>
+                        <KeywordsSection />
 
-                {/* Pricing Models Supported removed as requested */}
-
-                {/* Pricing moved to dedicated Services & Pricing tab */}
-                <RenderSection
-                    title="Business Policies"
-                    icon={<ShieldCheck className="w-5 h-5" />}
-                    field="policies"
-                    content={knowledgeData.policies}
-                />
+                        {/* Pricing moved to dedicated Services & Pricing tab */}
+                        <RenderSection
+                            title="Business Policies"
+                            icon={<ShieldCheck className="w-5 h-5" />}
+                            field="policies"
+                            content={knowledgeData.policies}
+                        />
+                    </>
+                )}
             </div>
 
             <div className="space-y-6">
@@ -429,8 +481,9 @@ export const KnowledgeData = () => {
                     content={knowledgeData.contactInfo}
                 />
 
-                <LocationsSection />
+                {showAdvancedSections && <LocationsSection />}
             </div>
+        </div>
         </div>
     );
 

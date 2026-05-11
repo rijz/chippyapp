@@ -27,9 +27,28 @@ export interface Lead {
   followUpStatus?: 'disabled' | 'scheduled' | 'sent' | 'skipped' | 'none';
   followUpScheduledAt?: Date;
   followUpSentAt?: Date;
+  treatmentInterest?: string;
+  leadTemperature?: 'hot' | 'warm' | 'cold';
+  pipelineStatus?: 'new' | 'contacted' | 'needs_approval' | 'booked' | 'lost' | 'do_not_contact';
+  lastContactedAt?: Date;
+  nextFollowupAt?: Date;
+  followupAttempts?: number;
+  estimatedValue?: number;
+  recoverySource?: 'web_chat' | 'form' | 'missed_call' | 'manual_import';
+  requiresApprovalReason?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export type BusinessType = 'storefront' | 'mobile' | 'online';
+export type ExperienceMode = 'simple' | 'advanced';
+
+export interface SetupChecklist {
+  businessInfo: boolean;
+  services: boolean;
+  calendar: boolean;
+  widgetInstall: boolean;
+  testConversation: boolean;
+}
 
 export interface TenantConfig {
   id: string;
@@ -39,6 +58,8 @@ export interface TenantConfig {
   industry: string;
   businessType?: BusinessType;
   locations?: BusinessLocation[];
+  experienceMode?: ExperienceMode;
+  setupChecklist?: SetupChecklist;
   bookingPlatform: 'GOOGLE_CALENDAR' | 'SQUARE_APPOINTMENTS' | 'ACUITY_SCHEDULING' | null;
   isConnected: boolean;
 }
@@ -341,6 +362,88 @@ export interface KnowledgeConflict {
   newValue: any;
   reason: string;
   ignored?: boolean;
+}
+
+export type AiSetupStatus = 'drafting' | 'needs_review' | 'approved' | 'launched' | 'failed';
+export type PlaybookStatus = 'draft' | 'active' | 'archived';
+export type OwnerCommandRole = 'owner' | 'assistant' | 'system' | 'tool';
+export type OwnerCommandActionStatus = 'draft' | 'needs_approval' | 'approved' | 'executed' | 'denied' | 'failed';
+export type OwnerCommandRiskLevel = 'low' | 'medium' | 'high';
+
+export interface AiSetupSession {
+  id: string;
+  tenantId: string;
+  status: AiSetupStatus;
+  businessUrl?: string | null;
+  detectedVertical?: string | null;
+  confidence?: number | null;
+  draftJson: Record<string, unknown>;
+  missingFieldsJson: unknown[];
+  approvedAt?: string | null;
+  launchedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BusinessPlaybook {
+  id: string;
+  tenantId: string;
+  vertical: string;
+  status: PlaybookStatus;
+  servicesJson: Service[];
+  pricingRulesJson: Record<string, unknown>;
+  bookingRulesJson: Record<string, unknown>;
+  followupRulesJson: Record<string, unknown>;
+  approvedClaimsJson: string[];
+  blockedClaimsJson: string[];
+  escalationRulesJson: string[];
+  playbookMarkdown: string;
+  sourceSetupSessionId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OwnerCommandThread {
+  id: string;
+  tenantId: string;
+  title: string;
+  status: 'open' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OwnerCommandMessage {
+  id: string;
+  threadId: string;
+  tenantId: string;
+  role: OwnerCommandRole;
+  content: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface OwnerCommandAction {
+  id: string;
+  tenantId: string;
+  threadId?: string | null;
+  messageId?: string | null;
+  actionType: string;
+  status: OwnerCommandActionStatus;
+  targetTable?: string | null;
+  targetId?: string | null;
+  patchJson: Record<string, unknown>;
+  previewMarkdown: string;
+  riskLevel: OwnerCommandRiskLevel;
+  executedAt?: string | null;
+  createdAt: string;
+}
+
+export interface OwnerCommandState {
+  thread: OwnerCommandThread | null;
+  messages: OwnerCommandMessage[];
+  actions: OwnerCommandAction[];
+  playbook: BusinessPlaybook | null;
+  playbookMarkdown: string;
 }
 
 export interface LogEntry {

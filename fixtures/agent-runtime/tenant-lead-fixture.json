@@ -1,0 +1,31 @@
+{
+  "tenantId": "tenant-demo-001",
+  "companyName": "Chippy HVAC",
+  "timezone": "America/New_York",
+  "leads": [
+    {
+      "id": "lead-001",
+      "name": "Alex Morgan",
+      "email": "alex@example.com",
+      "phone": "+1-555-0100",
+      "serviceInterest": "HVAC Tune-up"
+    },
+    {
+      "id": "lead-002",
+      "name": "Jamie Chen",
+      "email": "jamie@example.com",
+      "phone": "+1-555-0101",
+      "serviceInterest": "Emergency Repair"
+    }
+  ],
+  "slots": [
+    {
+      "start": "2026-02-16T09:00:00-05:00",
+      "end": "2026-02-16T09:30:00-05:00"
+    },
+    {
+      "start": "2026-02-16T10:00:00-05:00",
+      "end": "2026-02-16T10:30:00-05:00"
+    }
+  ]
+}

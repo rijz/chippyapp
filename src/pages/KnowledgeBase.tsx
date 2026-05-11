@@ -21,8 +21,10 @@ export const KnowledgeBase = () => {
     const [showWizard, setShowWizard] = useState(false);
     const [showRescanWarning, setShowRescanWarning] = useState(false);
     const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+    const [blockedAdvancedTab, setBlockedAdvancedTab] = useState<'data' | 'sources' | null>(null);
     const [searchParams, setSearchParams] = useSearchParams();
     const location = useLocation();
+    const isAdvancedMode = tenantConfig.experienceMode === 'advanced';
 
     const handleWizardComplete = (data: KnowledgeBaseData) => {
         setKnowledgeData(data);
@@ -46,12 +48,23 @@ export const KnowledgeBase = () => {
         { id: 'sources', label: 'Sources', icon: LinkIcon },
     ];
 
+    const visibleTabs = isAdvancedMode
+        ? tabs
+        : tabs.filter(tab => tab.id === 'overview' || tab.id === 'pricing');
+
     useEffect(() => {
         const tab = searchParams.get('tab') as Tab | null;
-        if (tab && tabs.some(t => t.id === tab)) {
-            setActiveTab(tab);
+        const resolvedTab: Tab = tab && tabs.some(t => t.id === tab) ? tab : 'overview';
+
+        if (!isAdvancedMode && (resolvedTab === 'data' || resolvedTab === 'sources')) {
+            setBlockedAdvancedTab(resolvedTab);
+            setActiveTab('overview');
+            return;
         }
-    }, [searchParams]);
+
+        setBlockedAdvancedTab(null);
+        setActiveTab(resolvedTab);
+    }, [searchParams, isAdvancedMode]);
 
     useEffect(() => {
         if (location.hash && (activeTab === 'data' || activeTab === 'pricing')) {
@@ -98,8 +111,8 @@ export const KnowledgeBase = () => {
                 title="Knowledge"
                 subtitle={
                     <div className="flex items-center gap-3">
-                        <span>Manage exactly what your assistant knows about your business.</span>
-                        {knowledgeData?.lastUpdated && (
+                        <span>{isAdvancedMode ? 'Manage exactly what your assistant knows about your business.' : 'Keep business info and services accurate for better booking conversations.'}</span>
+                        {isAdvancedMode && knowledgeData?.lastUpdated && (
                             <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
                                 <Clock className="w-3 h-3" />
                                 Updated {new Date(knowledgeData.lastUpdated).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
@@ -107,20 +120,38 @@ export const KnowledgeBase = () => {
                         )}
                     </div>
                 }
-                actions={(
+                actions={isAdvancedMode ? (
                     <button
                         onClick={() => setShowRescanWarning(true)}
                         className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg font-semibold text-xs hover:bg-slate-50 transition-colors"
                     >
                         <Zap className="w-4 h-4" /> Re-scan Website
                     </button>
-                )}
+                ) : undefined}
             />
+
+            {!isAdvancedMode && blockedAdvancedTab && (
+                <div className="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                    <p className="text-xs text-slate-600">
+                        {blockedAdvancedTab === 'data' ? 'Detailed knowledge data tools are available in Advanced mode.' : 'Knowledge sources and document training are available in Advanced mode.'}
+                    </p>
+                    <button
+                        onClick={() => {
+                            setTenantConfig(prev => ({ ...prev, experienceMode: 'advanced' }));
+                            setSearchParams({ tab: blockedAdvancedTab });
+                            setActiveTab(blockedAdvancedTab);
+                        }}
+                        className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition-colors"
+                    >
+                        Switch to Advanced
+                    </button>
+                </div>
+            )}
 
             {/* Navigation Tabs */}
             <div className="bg-white border border-slate-200 rounded-xl p-2 w-fit">
                 <div className="flex gap-2">
-                    {tabs.map((tab) => {
+                    {visibleTabs.map((tab) => {
                         const Icon = tab.icon;
                         const isActive = activeTab === tab.id;
                         const isLocked = tab.id === 'sources' && !isSourcesEnabled;

@@ -96,6 +96,8 @@ export const emailService = {
      */
     async sendOwnerNotification(ownerEmail, type, data) {
         if (!process.env.RESEND_API_KEY) return;
+        const resend = getResendClient();
+        if (!resend) return;
 
         try {
             const subject = type === 'booking' ? '🎉 New Booking Received!' : '🔔 New Lead Captured';

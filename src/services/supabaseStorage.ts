@@ -339,6 +339,16 @@ export const syncLeads = async (leads: Lead[], userId: string) => {
       followup_status: lead.followUpStatus || null,
       followup_scheduled_at: lead.followUpScheduledAt || null,
       followup_sent_at: lead.followUpSentAt || null,
+      treatment_interest: lead.treatmentInterest || null,
+      lead_temperature: lead.leadTemperature || null,
+      pipeline_status: lead.pipelineStatus || null,
+      last_contacted_at: lead.lastContactedAt ? (typeof lead.lastContactedAt === 'string' ? lead.lastContactedAt : lead.lastContactedAt.toISOString()) : null,
+      next_followup_at: lead.nextFollowupAt ? (typeof lead.nextFollowupAt === 'string' ? lead.nextFollowupAt : lead.nextFollowupAt.toISOString()) : null,
+      followup_attempts: lead.followupAttempts || 0,
+      estimated_value: lead.estimatedValue || null,
+      recovery_source: lead.recoverySource || null,
+      requires_approval_reason: lead.requiresApprovalReason || null,
+      metadata: lead.metadata || {},
       created_at: typeof lead.date === 'string' ? lead.date : lead.date.toISOString(),
       updated_at: new Date().toISOString()
     }));
@@ -379,7 +389,17 @@ export const fetchLeads = async (userId: string): Promise<Lead[] | null> => {
         nextAction: row.next_action || undefined,
         followUpStatus: row.followup_status || undefined,
         followUpScheduledAt: row.followup_scheduled_at ? new Date(row.followup_scheduled_at) : undefined,
-        followUpSentAt: row.followup_sent_at ? new Date(row.followup_sent_at) : undefined
+        followUpSentAt: row.followup_sent_at ? new Date(row.followup_sent_at) : undefined,
+        treatmentInterest: row.treatment_interest || undefined,
+        leadTemperature: row.lead_temperature || undefined,
+        pipelineStatus: row.pipeline_status || undefined,
+        lastContactedAt: row.last_contacted_at ? new Date(row.last_contacted_at) : undefined,
+        nextFollowupAt: row.next_followup_at ? new Date(row.next_followup_at) : undefined,
+        followupAttempts: row.followup_attempts ?? undefined,
+        estimatedValue: row.estimated_value ?? undefined,
+        recoverySource: row.recovery_source || undefined,
+        requiresApprovalReason: row.requires_approval_reason || undefined,
+        metadata: row.metadata || undefined
       }));
     }
     return null;

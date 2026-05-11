@@ -1,43 +1,33 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AnalyticsChart } from '../components/AnalyticsChart';
 import { PageHeader } from '../components/layout/PageHeader';
 import { useData } from '../contexts/DataContext';
 import { ChartDataPoint, OverviewMetricsResponse } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchOverviewMetrics } from '../services/overviewMetrics';
-
-// Skeleton component for loading state
-const StatSkeleton = () => (
-    <div className="bg-white p-6 rounded-xl border border-slate-200 animate-pulse">
-        <div className="h-4 w-24 bg-slate-200 rounded mb-3"></div>
-        <div className="h-10 w-20 bg-slate-200 rounded"></div>
-    </div>
-);
-
-const ChartSkeleton = () => (
-    <div className="bg-white p-8 rounded-xl border border-slate-200 animate-pulse">
-        <div className="h-6 w-48 bg-slate-200 rounded mb-6"></div>
-        <div className="h-64 bg-slate-100 rounded-xl flex items-end justify-around gap-4 p-4">
-            {[...Array(7)].map((_, i) => (
-                <div
-                    key={i}
-                    className="w-8 bg-slate-200 rounded-t"
-                    style={{ height: `${Math.random() * 60 + 20}%` }}
-                ></div>
-            ))}
-        </div>
-    </div>
-);
+import { OwnerCommandChat } from '../components/OwnerCommandChat';
 
 export const Dashboard = () => {
-    const { dashboardData } = useData();
+    const { dashboardData, leads, chatSessions, bookings, tenantConfig } = useData();
     const { session } = useAuth();
+    const navigate = useNavigate();
     const [isLoading, setIsLoading] = useState(true);
     const [metrics, setMetrics] = useState<OverviewMetricsResponse | null>(null);
 
-    // Load overview metrics
+    const isAdvancedMode = tenantConfig.experienceMode === 'advanced';
+
     useEffect(() => {
         let isActive = true;
+
+        if (!isAdvancedMode) {
+            setMetrics(null);
+            setIsLoading(false);
+            return () => {
+                isActive = false;
+            };
+        }
+
         const load = async () => {
             if (!session?.user?.id || !session?.access_token) {
                 setIsLoading(false);
@@ -54,7 +44,7 @@ export const Dashboard = () => {
         return () => {
             isActive = false;
         };
-    }, [session?.user?.id, session?.access_token]);
+    }, [isAdvancedMode, session?.user?.id, session?.access_token]);
 
     const chartData = useMemo<ChartDataPoint[]>(() => {
         if (dashboardData.length > 0) return dashboardData;
@@ -69,18 +59,46 @@ export const Dashboard = () => {
         ];
     }, [dashboardData]);
 
+    const todayStart = useMemo(() => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return today;
+    }, []);
+
+    const todayEnd = useMemo(() => {
+        const end = new Date(todayStart);
+        end.setDate(end.getDate() + 1);
+        return end;
+    }, [todayStart]);
+
+    const needsReply = useMemo(() => {
+        const openedSessions = chatSessions.filter(session => session.status === 'Opened').length;
+        const openLeads = leads.filter(lead => lead.status === 'New' || lead.status === 'Call Back').length;
+        return openedSessions + openLeads;
+    }, [chatSessions, leads]);
+
+    const todaysBookings = useMemo(() => {
+        const confirmed = bookings.filter(booking => booking.startTime >= todayStart && booking.startTime < todayEnd).length;
+        if (confirmed > 0) return confirmed;
+        return leads.filter(lead => lead.status === 'Booked').length;
+    }, [bookings, todayStart, todayEnd, leads]);
+
+    const callbacks = useMemo(() => leads.filter(lead => lead.status === 'Call Back').length, [leads]);
+
+    const checklist = tenantConfig.setupChecklist;
+    const coreSetupCompleted = [
+        checklist?.businessInfo && checklist?.services,
+        checklist?.calendar
+    ].filter(Boolean).length;
+    const setupIncomplete = coreSetupCompleted < 2;
+    const primaryAction = needsReply > 0 ? 'customers' : (setupIncomplete ? 'setup' : 'test-booking');
+
     const totalChats = metrics?.chats.total ?? 0;
-    const uniqueVisitors = metrics?.chats.uniqueVisitors ?? 0;
-    const totalBookings = metrics?.outcomes.bookingsCreated ?? 0;
-    const leadsCaptured = metrics?.outcomes.leadsCaptured ?? 0;
     const conversionRate = metrics?.outcomes.chatToBookingConversion !== undefined
         ? (metrics.outcomes.chatToBookingConversion * 100).toFixed(1)
         : '0';
     const avgResponseTime = metrics?.chats.avgResponseTimeMs
         ? `${(metrics.chats.avgResponseTimeMs / 1000).toFixed(1)}s`
-        : '—';
-    const avgRating = metrics?.quality.avgFeedbackRating !== null && metrics?.quality.avgFeedbackRating !== undefined
-        ? metrics.quality.avgFeedbackRating.toFixed(1)
         : '—';
     const topIntents = metrics?.insights.topIntents || [];
     const topTopics = metrics?.insights.topReviewTopics || [];
@@ -88,92 +106,140 @@ export const Dashboard = () => {
     return (
         <div className="w-full space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <PageHeader
-                title="Overview"
-                subtitle="A clear view of activity over the last 7 days."
+                title="Home"
+                subtitle="Run your day from one place."
             />
 
-            {isLoading ? (
-                <>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <StatSkeleton />
-                        <StatSkeleton />
-                        <StatSkeleton />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Needs Reply</p>
+                    <p className="text-3xl font-semibold text-chippy-navy mt-2">{needsReply}</p>
+                </div>
+                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Today's Bookings</p>
+                    <p className="text-3xl font-semibold text-chippy-navy mt-2">{todaysBookings}</p>
+                </div>
+                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Callbacks</p>
+                    <p className="text-3xl font-semibold text-chippy-navy mt-2">{callbacks}</p>
+                </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 className="text-sm font-semibold text-chippy-navy">Next Best Actions</h3>
+                        <p className="text-xs text-slate-500 mt-1">
+                            Core setup: {coreSetupCompleted}/2 complete
+                        </p>
                     </div>
-                    <ChartSkeleton />
-                </>
-            ) : (
-                <>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="bg-white p-6 rounded-xl border border-slate-200">
-                            <p className="text-xs font-semibold text-slate-500 uppercase">Total Chats</p>
-                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{totalChats}</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-xl border border-slate-200">
-                            <p className="text-xs font-semibold text-slate-500 uppercase">Unique Visitors</p>
-                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{uniqueVisitors}</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-xl border border-slate-200">
-                            <p className="text-xs font-semibold text-slate-500 uppercase">Bookings</p>
-                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{totalBookings}</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-xl border border-slate-200">
-                            <p className="text-xs font-semibold text-slate-500 uppercase">Leads Captured</p>
-                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{leadsCaptured}</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-xl border border-slate-200">
-                            <p className="text-xs font-semibold text-slate-500 uppercase">Conversion Rate</p>
-                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{conversionRate}%</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-xl border border-slate-200">
-                            <p className="text-xs font-semibold text-slate-500 uppercase">Avg Response Time</p>
-                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{avgResponseTime}</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-xl border border-slate-200">
-                            <p className="text-xs font-semibold text-slate-500 uppercase">Avg Rating</p>
-                            <p className="text-2xl font-semibold text-chippy-navy mt-2">{avgRating}</p>
-                        </div>
-                    </div>
-                    <div className="bg-white p-6 rounded-xl border border-slate-200">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-semibold text-sm text-slate-600 uppercase tracking-wider">Engagement Trends</h3>
-                            <span className="text-xs text-slate-400">Last 7 days</span>
-                        </div>
-                        <AnalyticsChart data={chartData} />
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                    <button
+                        onClick={() => navigate('/customers')}
+                        className={`rounded-lg text-sm font-semibold transition-colors ${
+                            primaryAction === 'customers'
+                                ? 'px-4 py-2.5 bg-slate-900 text-white hover:bg-slate-800'
+                                : 'text-slate-600 hover:text-slate-900 underline underline-offset-4'
+                        }`}
+                    >
+                        Open Customers
+                    </button>
+                    <button
+                        onClick={() => navigate('/setup')}
+                        className={`rounded-lg text-sm font-semibold transition-colors ${
+                            primaryAction === 'setup'
+                                ? 'px-4 py-2.5 bg-slate-900 text-white hover:bg-slate-800'
+                                : 'text-slate-600 hover:text-slate-900 underline underline-offset-4'
+                        }`}
+                    >
+                        Finish Setup
+                    </button>
+                    <button
+                        onClick={() => window.open('/book', '_blank', 'noopener,noreferrer')}
+                        className={`rounded-lg text-sm font-semibold transition-colors ${
+                            primaryAction === 'test-booking'
+                                ? 'px-4 py-2.5 bg-slate-900 text-white hover:bg-slate-800'
+                                : 'text-slate-600 hover:text-slate-900 underline underline-offset-4'
+                        }`}
+                    >
+                        Test Booking
+                    </button>
+                </div>
+            </div>
+
+            <OwnerCommandChat compact />
+
+            {isAdvancedMode && (
+                <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Advanced Analytics</h3>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {isLoading ? (
                         <div className="bg-white p-6 rounded-xl border border-slate-200">
-                            <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Top Intents</h3>
-                            {topIntents.length === 0 ? (
-                                <p className="text-sm text-slate-400">No intent data yet.</p>
-                            ) : (
-                                <div className="space-y-2">
-                                    {topIntents.map(item => (
-                                        <div key={item.name} className="flex items-center justify-between text-sm">
-                                            <span className="text-slate-600">{item.name}</span>
-                                            <span className="font-semibold text-chippy-navy">{item.value}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                            <p className="text-sm text-slate-500">Loading analytics...</p>
                         </div>
-                        <div className="bg-white p-6 rounded-xl border border-slate-200">
-                            <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Top Review Topics</h3>
-                            {topTopics.length === 0 ? (
-                                <p className="text-sm text-slate-400">No review topics yet.</p>
-                            ) : (
-                                <div className="space-y-2">
-                                    {topTopics.map(item => (
-                                        <div key={item.name} className="flex items-center justify-between text-sm">
-                                            <span className="text-slate-600">{item.name}</span>
-                                            <span className="font-semibold text-chippy-navy">{item.value}</span>
-                                        </div>
-                                    ))}
+                    ) : (
+                        <>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Total Chats</p>
+                                    <p className="text-2xl font-semibold text-chippy-navy mt-2">{totalChats}</p>
                                 </div>
-                            )}
-                        </div>
-                    </div>
-                </>
+                                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Conversion Rate</p>
+                                    <p className="text-2xl font-semibold text-chippy-navy mt-2">{conversionRate}%</p>
+                                </div>
+                                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Avg Response Time</p>
+                                    <p className="text-2xl font-semibold text-chippy-navy mt-2">{avgResponseTime}</p>
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-xl border border-slate-200">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="font-semibold text-sm text-slate-600 uppercase tracking-wider">Engagement Trends</h3>
+                                    <span className="text-xs text-slate-400">Last 7 days</span>
+                                </div>
+                                <AnalyticsChart data={chartData} />
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Top Intents</h3>
+                                    {topIntents.length === 0 ? (
+                                        <p className="text-sm text-slate-400">No intent data yet.</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {topIntents.map(item => (
+                                                <div key={item.name} className="flex items-center justify-between text-sm">
+                                                    <span className="text-slate-600">{item.name}</span>
+                                                    <span className="font-semibold text-chippy-navy">{item.value}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Top Review Topics</h3>
+                                    {topTopics.length === 0 ? (
+                                        <p className="text-sm text-slate-400">No review topics yet.</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {topTopics.map(item => (
+                                                <div key={item.name} className="flex items-center justify-between text-sm">
+                                                    <span className="text-slate-600">{item.name}</span>
+                                                    <span className="font-semibold text-chippy-navy">{item.value}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
             )}
         </div>
     );

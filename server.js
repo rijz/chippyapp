@@ -1,8 +1,12 @@
 import 'dotenv/config';
 import { emailService } from './emailService.js';
 import express from 'express';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'node:child_process';
 import cron from 'node-cron';
 import * as Sentry from "@sentry/node";
 import { nodeProfilingIntegration } from "@sentry/profiling-node";
@@ -26,14 +30,24 @@ import {
   refreshGoogleToken,
   getGoogleAvailableSlots
 } from './src/services/googleCalendarProvider.js';
+import { createDefaultAgentRuntime, createDefaultProviderRegistry } from './agent-runtime/index.js';
+import { createBdlProcessor } from './src/bdl/processor.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const AGENT_RUNTIME_RUN_DIR = process.env.CHIPPY_AGENT_RUN_DIR || path.join(__dirname, '.runs', 'agent-runtime');
+const AGENT_RUNTIME_DB_PATH = process.env.CHIPPY_STORAGE_DB_PATH || path.join(AGENT_RUNTIME_RUN_DIR, 'runtime.db');
+const AGENT_RUNTIME_STORAGE_BACKEND = process.env.CHIPPY_STORAGE_BACKEND || 'auto';
+const WHATSAPP_LINKED_BASE_DIR = process.env.CHIPPY_WHATSAPP_LINKED_DIR || path.join(__dirname, '.runs', 'whatsapp-gateway');
+const CHIPPY_GATEWAY_RUN_DIR = process.env.CHIPPY_GATEWAY_RUN_DIR || path.join(__dirname, '.runs', 'gateway');
+const CHIPPY_GATEWAY_PID_PATH = path.join(CHIPPY_GATEWAY_RUN_DIR, 'gateway.pid');
+const CHIPPY_GATEWAY_STATE_PATH = path.join(CHIPPY_GATEWAY_RUN_DIR, 'gateway-state.json');
+const CHIPPY_GATEWAY_LOG_PATH = path.join(CHIPPY_GATEWAY_RUN_DIR, 'gateway.log');
 
 // =====================
 // DDoS & Security Protection
 // =====================
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import helmet from 'helmet';
 import cors from 'cors';
 
@@ -43,6 +57,12 @@ const app = express();
 
 
 const PORT = process.env.PORT || 8080;
+
+const requestIpKey = (req) => {
+  const ip = String(req.ip || '').trim();
+  const normalized = ipKeyGenerator(ip, 56);
+  return normalized || 'unknown';
+};
 
 // Trust proxy for Cloud Run / load balancers
 app.set('trust proxy', 1);
@@ -84,7 +104,7 @@ const globalLimiter = rateLimit({
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+  keyGenerator: requestIpKey,
 });
 app.use(globalLimiter);
 
@@ -93,7 +113,7 @@ const expensiveApiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 20, // Only 20 requests per minute for expensive APIs
   message: { error: 'AI request limit reached. Please wait before sending more messages.' },
-  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+  keyGenerator: requestIpKey,
 });
 
 // Very strict limiter for the Gemini proxy (costs money per request!)
@@ -101,7 +121,7 @@ const geminiProxyLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: process.env.NODE_ENV === 'production' ? 30 : 100, // Higher limit for dev
   message: { error: 'Chat limit reached. Please wait a moment.' },
-  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+  keyGenerator: requestIpKey,
 });
 
 // Calendar endpoint limiter
@@ -109,7 +129,7 @@ const calendarLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: process.env.NODE_ENV === 'production' ? 30 : 200, // Higher limit for dev
   message: { error: 'Too many calendar requests. Please wait.' },
-  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+  keyGenerator: requestIpKey,
 });
 
 // Widget config limiter (semi-public endpoint)
@@ -117,7 +137,24 @@ const widgetConfigLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: process.env.NODE_ENV === 'production' ? 60 : 200, // Higher limit for dev
   message: { error: 'Widget rate limit exceeded.' },
-  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+  keyGenerator: requestIpKey,
+});
+
+// WhatsApp webhook limiter (Twilio retries on non-2xx responses)
+const whatsappWebhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 120 : 400,
+  message: { error: 'WhatsApp bridge rate limit exceeded.' },
+  keyGenerator: (req) => String(req.body?.From || '').trim() || requestIpKey(req),
+});
+
+// Gmail Pub/Sub webhook limiter (Google can retry aggressively on failures)
+const gmailWebhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 300 : 1200,
+  message: { error: 'Gmail webhook rate limit exceeded.' },
+  keyGenerator: (req) =>
+    String(req.body?.message?.messageId || req.body?.subscription || '').trim() || requestIpKey(req),
 });
 
 // Request size limit - prevent large payload attacks
@@ -1510,6 +1547,3976 @@ app.post('/api/create-checkout-session', async (req, res) => {
   } catch (error) {
     console.error('Stripe Error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// =====================
+// Agent Runtime APIs (in-app control plane)
+// =====================
+const agentRuntimeProviderRegistry = createDefaultProviderRegistry();
+const agentRuntime = createDefaultAgentRuntime({
+  providerRegistry: agentRuntimeProviderRegistry,
+  runDir: AGENT_RUNTIME_RUN_DIR,
+  dbPath: AGENT_RUNTIME_DB_PATH,
+  storageBackend: AGENT_RUNTIME_STORAGE_BACKEND,
+});
+
+const AGENT_APPROVAL_MODES = new Set(['AUTO', 'REVIEW_REQUIRED', 'BLOCKED']);
+const AGENT_ALLOWED_SCOPES = new Set(['none', 'read', 'write']);
+const AGENT_ACTION_STATUSES = new Set([
+  'all',
+  'pending_review',
+  'approved',
+  'denied',
+  'executing',
+  'executed',
+  'failed',
+]);
+const AGENT_RUN_STATUSES = new Set([
+  'all',
+  'completed',
+  'awaiting_approval',
+  'needs_revision',
+  'blocked_policy',
+  'failed',
+]);
+const AGENT_OBJECTIVE_STATUSES = new Set([
+  'all',
+  'pending',
+  'running',
+  'completed',
+  'awaiting_approval',
+  'needs_revision',
+  'blocked_policy',
+  'failed',
+  'archived',
+]);
+
+const clampInt = (value, min, max, fallback) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.round(parsed), min), max);
+};
+
+const agentNowIso = () => new Date().toISOString();
+
+const requireAuthenticatedUser = async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Authentication required' });
+    return null;
+  }
+
+  const token = authHeader.split(' ')[1];
+  const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+  if (authError || !user) {
+    res.status(401).json({ error: 'Invalid or expired token' });
+    return null;
+  }
+
+  return user;
+};
+
+const hashText = (value) => crypto.createHash('sha256').update(String(value || '')).digest('hex').slice(0, 24);
+
+const safeJsonObject = (value, fallback = {}) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback;
+  return value;
+};
+
+const safeJsonArray = (value, fallback = []) => Array.isArray(value) ? value : fallback;
+
+const formatPlaybookServicePrice = (service) => {
+  const pricing = service?.pricing || {};
+  if (pricing.hidePrice) return pricing.ctaText || 'Consultation required';
+  if (pricing.customText) return pricing.customText;
+  if (pricing.type === 'quote') return pricing.ctaText || 'Quote required';
+  if (pricing.type === 'negotiable') return 'Varies by consultation';
+  if (pricing.amount === undefined || pricing.amount === null) return 'Pricing not specified';
+  const amount = Number(pricing.amount);
+  const currency = pricing.currency || 'USD';
+  const formatted = Number.isFinite(amount)
+    ? new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount)
+    : String(pricing.amount);
+  if (pricing.maxAmount) {
+    const max = new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(pricing.maxAmount));
+    return `${formatted} - ${max}`;
+  }
+  if (pricing.type === 'starting_from') return `Starting at ${formatted}`;
+  return pricing.unitLabel ? `${formatted} ${pricing.unitLabel}` : formatted;
+};
+
+const generatePlaybookMarkdownServer = (playbook, knowledge = null) => {
+  const services = safeJsonArray(playbook.services_json).map(service => {
+    const details = [
+      formatPlaybookServicePrice(service),
+      service.duration ? `${service.duration} min` : '',
+      service.description || ''
+    ].filter(Boolean).join(' | ');
+    return `- ${service.name || 'Unnamed service'}${details ? `: ${details}` : ''}`;
+  });
+
+  const section = (title, body) => {
+    const content = Array.isArray(body) ? body.join('\n') : String(body || 'Not provided');
+    return `## ${title}\n${content || 'Not provided'}`;
+  };
+
+  return [
+    '# CHIPPY.md',
+    '',
+    section('Business Identity', [
+      `Business: ${knowledge?.companyName || 'Not provided'}`,
+      `Website: ${knowledge?.website || 'Not provided'}`,
+      `Phone: ${knowledge?.phoneNumber || knowledge?.contactInfo || 'Not provided'}`,
+      `Vertical: ${playbook.vertical || 'med_spa'}`,
+    ]),
+    '',
+    section('Services Chippy Can Discuss', services.length ? services : ['- Not provided']),
+    '',
+    section('Pricing Rules', `\`\`\`json\n${JSON.stringify(safeJsonObject(playbook.pricing_rules_json), null, 2)}\n\`\`\``),
+    '',
+    section('Booking Rules', `\`\`\`json\n${JSON.stringify(safeJsonObject(playbook.booking_rules_json), null, 2)}\n\`\`\``),
+    '',
+    section('Follow-Up Playbook', `\`\`\`json\n${JSON.stringify(safeJsonObject(playbook.followup_rules_json), null, 2)}\n\`\`\``),
+    '',
+    section('Approved Claims', safeJsonArray(playbook.approved_claims_json).map(item => `- ${item}`)),
+    '',
+    section('Blocked Claims', safeJsonArray(playbook.blocked_claims_json).map(item => `- ${item}`)),
+    '',
+    section('Escalation Rules', safeJsonArray(playbook.escalation_rules_json).map(item => `- ${item}`)),
+  ].join('\n');
+};
+
+const defaultPlaybookFromKnowledge = (tenantId, knowledge = null) => {
+  const topRules = String(knowledge?.topRules || '')
+    .split('\n')
+    .map(rule => rule.trim())
+    .filter(Boolean);
+  return {
+    tenant_id: tenantId,
+    vertical: 'med_spa',
+    status: 'active',
+    services_json: safeJsonArray(knowledge?.services),
+    pricing_rules_json: {
+      policy: knowledge?.pricingSettings?.hideAllPrices
+        ? 'Do not quote exact prices unless explicitly approved. Push toward consultation.'
+        : 'Only share pricing found in approved services or pricing notes.',
+      notes: knowledge?.pricing || null,
+      defaultCtaText: knowledge?.pricingSettings?.defaultCtaText || 'Book a consultation',
+    },
+    booking_rules_json: {
+      mode: 'booking_link_or_calendar',
+      instructions: 'Collect treatment interest, name, phone/email, and preferred time before booking.',
+      businessHours: knowledge?.businessHours || null,
+    },
+    followup_rules_json: {
+      defaultChannel: 'sms',
+      cadence: ['same day', 'next day', '3 days later'],
+      stopWhen: ['booked', 'declined', 'do_not_contact'],
+    },
+    approved_claims_json: [knowledge?.summary, ...topRules].filter(Boolean),
+    blocked_claims_json: [
+      'Do not diagnose medical conditions.',
+      'Do not promise treatment results.',
+      'Do not provide personalized medical advice.',
+      'Do not invent pricing, discounts, availability, or policies.',
+    ],
+    escalation_rules_json: [
+      'Escalate medical or contraindication questions.',
+      'Escalate uncertain pricing or policy questions.',
+      'Escalate angry customers and refund requests.',
+      'Ask owner approval before sending bulk messages.',
+    ],
+  };
+};
+
+const fetchTenantKnowledge = async (tenantId) => {
+  const { data, error } = await supabaseAdmin
+    .from('knowledge_bases')
+    .select('content')
+    .eq('user_id', tenantId)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.content || null;
+};
+
+const upsertBusinessMemoryFromPlaybook = async (tenantId, playbook) => {
+  const bmsText = [
+    'BMS',
+    `Tenant: ${tenantId}`,
+    `Vertical: ${playbook.vertical || 'med_spa'}`,
+    `Playbook Updated: ${playbook.updated_at || new Date().toISOString()}`,
+    '',
+    playbook.playbook_markdown || '',
+  ].join('\n');
+
+  const { error } = await supabaseAdmin
+    .from('business_memory')
+    .upsert({
+      tenant_id: tenantId,
+      version: 1,
+      compiled_at: new Date().toISOString(),
+      bms_text: bmsText,
+      source_hash: hashText(JSON.stringify(playbook)),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'tenant_id' });
+  if (error) throw error;
+};
+
+const ensureOwnerThread = async (tenantId, threadId = null) => {
+  if (threadId) {
+    const { data, error } = await supabaseAdmin
+      .from('owner_command_threads')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('id', threadId)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return data;
+  }
+
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from('owner_command_threads')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'open')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) return existing;
+
+  const { data, error } = await supabaseAdmin
+    .from('owner_command_threads')
+    .insert({
+      tenant_id: tenantId,
+      title: 'Owner command chat',
+      status: 'open',
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+const ensureBusinessPlaybook = async (tenantId) => {
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from('business_playbooks')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) return existing;
+
+  const knowledge = await fetchTenantKnowledge(tenantId);
+  const draft = defaultPlaybookFromKnowledge(tenantId, knowledge);
+  draft.playbook_markdown = generatePlaybookMarkdownServer(draft, knowledge);
+
+  const { data, error } = await supabaseAdmin
+    .from('business_playbooks')
+    .insert(draft)
+    .select('*')
+    .single();
+  if (error) throw error;
+  await upsertBusinessMemoryFromPlaybook(tenantId, data);
+  return data;
+};
+
+const fetchOwnerCommandState = async (tenantId, threadId = null) => {
+  const thread = await ensureOwnerThread(tenantId, threadId);
+  const playbook = await ensureBusinessPlaybook(tenantId);
+
+  const [{ data: messages, error: messagesError }, { data: actions, error: actionsError }] = await Promise.all([
+    supabaseAdmin
+      .from('owner_command_messages')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('thread_id', thread.id)
+      .order('created_at', { ascending: true })
+      .limit(80),
+    supabaseAdmin
+      .from('owner_command_actions')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .in('status', ['needs_approval', 'approved', 'executed', 'denied', 'failed'])
+      .order('created_at', { ascending: false })
+      .limit(20),
+  ]);
+  if (messagesError) throw messagesError;
+  if (actionsError) throw actionsError;
+
+  return {
+    thread,
+    messages: messages || [],
+    actions: actions || [],
+    playbook,
+    playbookMarkdown: playbook?.playbook_markdown || '',
+  };
+};
+
+const insertOwnerMessage = async ({ tenantId, threadId, role, content, metadata = {} }) => {
+  const { data, error } = await supabaseAdmin
+    .from('owner_command_messages')
+    .insert({
+      tenant_id: tenantId,
+      thread_id: threadId,
+      role,
+      content,
+      metadata,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+const normalizeCommandText = (value) => String(value || '').trim();
+
+const parseServiceNameFromCommand = (text) => {
+  const withoutPrefix = text
+    .replace(/^(please\s+)?(add|create)\s+(a\s+|an\s+|new\s+)?/i, '')
+    .replace(/\b(service|treatment|promo|promotion)\b/ig, '')
+    .replace(/\b(for\s+may|this\s+month|to\s+chippy)\b/ig, '')
+    .trim();
+  if (!withoutPrefix) return 'New med spa service';
+  return withoutPrefix
+    .split(/\s+/)
+    .slice(0, 8)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
+const classifyOwnerCommand = async ({ tenantId, threadId, ownerMessageId, message, playbook }) => {
+  const text = normalizeCommandText(message);
+  const lower = text.toLowerCase();
+  const pendingWords = ['approve', 'pending approval', 'queued'];
+
+  if (lower.includes('what needs attention') || lower.includes('summarize today') || lower.includes('today')) {
+    const [{ data: leads }, { data: actions }, { data: outcomes }] = await Promise.all([
+      supabaseAdmin
+        .from('leads')
+        .select('*')
+        .eq('user_id', tenantId)
+        .in('status', ['New', 'Call Back'])
+        .order('created_at', { ascending: false })
+        .limit(8),
+      supabaseAdmin
+        .from('owner_command_actions')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'needs_approval')
+        .order('created_at', { ascending: false })
+        .limit(8),
+      supabaseAdmin
+        .from('recovery_outcomes')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .limit(8),
+    ]);
+
+    const leadLines = (leads || []).map(lead => `- ${lead.name}: ${lead.service_type || lead.treatment_interest || lead.intent || 'unknown interest'} (${lead.status})`);
+    const value = (outcomes || []).reduce((sum, row) => sum + Number(row.estimated_value || 0), 0);
+    return {
+      type: 'answer',
+      content: [
+        `Here is what needs attention:`,
+        '',
+        `Open leads: ${(leads || []).length}`,
+        leadLines.length ? leadLines.join('\n') : '- No open leads found.',
+        '',
+        `Pending approvals: ${(actions || []).length}`,
+        `Recently attributed recovered value: $${value.toFixed(0)}`,
+      ].join('\n'),
+    };
+  }
+
+  if (lower.includes('hot lead') || lower.includes('hot leads')) {
+    const { data } = await supabaseAdmin
+      .from('leads')
+      .select('*')
+      .eq('user_id', tenantId)
+      .or('priority.eq.Hot,lead_temperature.eq.hot')
+      .order('created_at', { ascending: false })
+      .limit(12);
+    const lines = (data || []).map(lead => `- ${lead.name}: ${lead.phone || lead.email || 'no contact'} — ${lead.next_action || lead.notes || 'Review and follow up'}`);
+    return { type: 'answer', content: lines.length ? `Hot leads:\n${lines.join('\n')}` : 'No hot leads are marked right now.' };
+  }
+
+  if (lower.includes('allowed to say') || lower.includes('chippy.md') || lower.includes('pricing')) {
+    const excerpt = String(playbook.playbook_markdown || '')
+      .split('\n')
+      .filter(line => lower.includes('pricing') ? /pricing|consult|price|\$/i.test(line) : true)
+      .slice(0, 28)
+      .join('\n');
+    return {
+      type: 'answer',
+      content: excerpt || 'I do not have an approved playbook yet.',
+    };
+  }
+
+  const mutationWords = ['add', 'change', 'update', 'remove', 'delete', 'text', 'send', 'mark', 'pause', 'enable', 'disable', 'regenerate'];
+  const isMutation = mutationWords.some(word => lower.includes(word));
+  if (!isMutation) {
+    return {
+      type: 'answer',
+      content: 'I can help with today’s priorities, hot leads, approved pricing language, service changes, follow-up drafts, and approval-backed business updates.',
+    };
+  }
+
+  let actionType = 'owner_requested_change';
+  let riskLevel = 'medium';
+  let targetTable = 'business_playbooks';
+  let targetId = playbook.id;
+  let patch = { instruction: text };
+  let preview = `Requested change:\n\n${text}\n\nThis needs owner approval before Chippy changes business behavior.`;
+
+  if (lower.includes('add') && (lower.includes('service') || lower.includes('treatment') || lower.includes('botox') || lower.includes('filler'))) {
+    const serviceName = parseServiceNameFromCommand(text);
+    const service = {
+      id: `svc_${Date.now()}`,
+      name: serviceName,
+      description: 'Owner-requested service. Add details before customer-facing use if needed.',
+      pricing: {
+        type: 'quote',
+        currency: 'USD',
+        ctaText: 'Book a consultation',
+        requireLeadFirst: true,
+      },
+      category: 'Injectables',
+      isActive: true,
+      sortOrder: safeJsonArray(playbook.services_json).length + 1,
+    };
+    actionType = 'add_service';
+    patch = { service };
+    preview = [
+      `Add service to CHIPPY.md:`,
+      '',
+      `- Name: ${service.name}`,
+      `- Pricing: consultation required`,
+      `- Customer CTA: ${service.pricing.ctaText}`,
+      '',
+      'After approval, Chippy can discuss this service using conservative consultation-first language.',
+    ].join('\n');
+  } else if (lower.includes('text') || lower.includes('send')) {
+    actionType = 'draft_customer_message';
+    targetTable = 'lead_interactions';
+    targetId = null;
+    riskLevel = 'high';
+    patch = { instruction: text, channel: 'sms', status: 'draft' };
+    preview = [
+      'Draft/send customer message request:',
+      '',
+      text,
+      '',
+      'Chippy will not send this automatically. Approval is required, and the first implementation stores this as an auditable draft request.',
+    ].join('\n');
+  } else if (lower.includes('pricing') || lower.includes('policy') || lower.includes('consult')) {
+    actionType = lower.includes('pricing') ? 'update_pricing_rules' : 'update_policy_rules';
+    riskLevel = 'high';
+    patch = { instruction: text };
+    preview = [
+      'High-risk business rule change:',
+      '',
+      text,
+      '',
+      'Approval is required because this affects what Chippy may promise to customers.',
+    ].join('\n');
+  } else if (lower.includes('regenerate')) {
+    actionType = 'regenerate_playbook_markdown';
+    riskLevel = 'low';
+    patch = { regenerate: true };
+    preview = 'Regenerate CHIPPY.md from the approved structured playbook and refresh business memory.';
+  } else if (pendingWords.some(word => lower.includes(word))) {
+    actionType = 'review_pending_approvals';
+    targetTable = 'owner_command_actions';
+    targetId = null;
+    patch = { instruction: text };
+  }
+
+  const { data: action, error } = await supabaseAdmin
+    .from('owner_command_actions')
+    .insert({
+      tenant_id: tenantId,
+      thread_id: threadId,
+      message_id: ownerMessageId,
+      action_type: actionType,
+      status: 'needs_approval',
+      target_table: targetTable,
+      target_id: targetId,
+      patch_json: patch,
+      preview_markdown: preview,
+      risk_level: riskLevel,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+
+  return {
+    type: 'action',
+    action,
+    content: `I created an approval card for this ${riskLevel}-risk change. Review the preview, then approve or deny it.`,
+  };
+};
+
+const executeOwnerCommandAction = async (tenantId, action) => {
+  if (action.action_type === 'add_service') {
+    const playbook = await ensureBusinessPlaybook(tenantId);
+    const service = action.patch_json?.service;
+    if (!service?.name) throw new Error('Action is missing service details.');
+    const knowledge = await fetchTenantKnowledge(tenantId);
+    const services = [...safeJsonArray(playbook.services_json), service];
+    const next = {
+      ...playbook,
+      services_json: services,
+      updated_at: new Date().toISOString(),
+    };
+    next.playbook_markdown = generatePlaybookMarkdownServer(next, knowledge);
+
+    const { data: updated, error } = await supabaseAdmin
+      .from('business_playbooks')
+      .update({
+        services_json: services,
+        playbook_markdown: next.playbook_markdown,
+        updated_at: next.updated_at,
+      })
+      .eq('tenant_id', tenantId)
+      .eq('id', playbook.id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    await upsertBusinessMemoryFromPlaybook(tenantId, updated);
+    return `Approved and added ${service.name} to CHIPPY.md.`;
+  }
+
+  if (action.action_type === 'regenerate_playbook_markdown') {
+    const playbook = await ensureBusinessPlaybook(tenantId);
+    const knowledge = await fetchTenantKnowledge(tenantId);
+    const markdown = generatePlaybookMarkdownServer(playbook, knowledge);
+    const { data: updated, error } = await supabaseAdmin
+      .from('business_playbooks')
+      .update({ playbook_markdown: markdown, updated_at: new Date().toISOString() })
+      .eq('tenant_id', tenantId)
+      .eq('id', playbook.id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    await upsertBusinessMemoryFromPlaybook(tenantId, updated);
+    return 'Approved and regenerated CHIPPY.md from the structured playbook.';
+  }
+
+  return 'Approved. This action is recorded for audit and ready for the next workflow executor implementation.';
+};
+
+const parseAgentApprovalMode = (raw) => {
+  const mode = String(raw || 'REVIEW_REQUIRED').toUpperCase();
+  return AGENT_APPROVAL_MODES.has(mode) ? mode : 'REVIEW_REQUIRED';
+};
+
+const parseAgentAllowedScopes = (raw) => {
+  const values = Array.isArray(raw)
+    ? raw
+    : String(raw || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+  if (values.length === 0) {
+    return ['none', 'read', 'write'];
+  }
+
+  const normalized = values
+    .map((item) => String(item).toLowerCase())
+    .filter((item) => AGENT_ALLOWED_SCOPES.has(item));
+
+  if (normalized.length === 0) {
+    return ['none', 'read', 'write'];
+  }
+
+  return Array.from(new Set(normalized));
+};
+
+const parseAgentQuietHours = (raw, fallbackTimezone) => {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      enabled: false,
+      startHour: 22,
+      endHour: 7,
+      timezone: fallbackTimezone || null,
+    };
+  }
+
+  return {
+    enabled: raw.enabled === true,
+    startHour: clampInt(raw.startHour, 0, 23, 22),
+    endHour: clampInt(raw.endHour, 0, 23, 7),
+    timezone: sanitizeInput(raw.timezone || fallbackTimezone || '') || null,
+  };
+};
+
+const parseAgentPolicy = (body = {}, timezone = null) => {
+  const policyBody = body && typeof body.policy === 'object' ? body.policy : {};
+  const source = { ...policyBody, ...body };
+
+  return {
+    approvalMode: parseAgentApprovalMode(source.approvalMode),
+    fallbackMode: source.noFallback === true ? 'strict' : 'permissive',
+    maxToolCallsPerRun: clampInt(source.maxToolCalls, 1, 50, 12),
+    maxWriteActionsPerRun: clampInt(source.maxWriteActions, 1, 20, 3),
+    allowedToolScopes: parseAgentAllowedScopes(source.allowedScopes),
+    quietHours: parseAgentQuietHours(source.quietHours, timezone),
+  };
+};
+
+const parseEnvBoolean = (raw, fallback = false) => {
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const normalized = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+};
+
+const normalizeWhatsAppAddress = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  const withoutPrefix = raw.startsWith('whatsapp:') ? raw.slice('whatsapp:'.length) : raw;
+  const normalized = withoutPrefix.replace(/[^\d+]/g, '');
+  if (!normalized) return '';
+  return normalized.startsWith('+') ? normalized : `+${normalized}`;
+};
+
+const parseWhatsAppWorkspaceMap = (raw) => {
+  if (!raw || typeof raw !== 'string') return {};
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const map = {};
+    for (const [mapKey, mapValue] of Object.entries(parsed)) {
+      const workspaceId = sanitizeInput(mapValue);
+      const key = sanitizeInput(mapKey);
+      if (!workspaceId || !key) continue;
+
+      const lowered = String(key).toLowerCase();
+      map[lowered] = workspaceId;
+
+      const normalized = normalizeWhatsAppAddress(key);
+      if (normalized) {
+        map[normalized] = workspaceId;
+        map[`whatsapp:${normalized}`] = workspaceId;
+      }
+    }
+    return map;
+  } catch (error) {
+    console.warn('[WhatsApp] invalid WHATSAPP_NUMBER_WORKSPACE_MAP JSON:', error?.message || error);
+    return {};
+  }
+};
+
+const parseWhatsAppAddressSet = (raw) => {
+  if (!raw || typeof raw !== 'string') return new Set();
+  const values = raw
+    .split(',')
+    .map((value) => normalizeWhatsAppAddress(value))
+    .filter(Boolean);
+  return new Set(values);
+};
+
+const parseCommaValueSet = (raw) => {
+  if (!raw || typeof raw !== 'string') return new Set();
+  return new Set(
+    String(raw || '')
+      .split(/[,\n]/)
+      .map((item) => String(item || '').trim())
+      .filter(Boolean),
+  );
+};
+
+const parseGmailWorkspaceMap = (raw) => {
+  if (!raw || typeof raw !== 'string') return {};
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const map = {};
+    for (const [mapKey, mapValue] of Object.entries(parsed)) {
+      const workspaceId = sanitizeInput(mapValue);
+      const key = sanitizeInput(mapKey);
+      if (!workspaceId || !key) continue;
+      map[String(key).trim().toLowerCase()] = workspaceId;
+    }
+    return map;
+  } catch (error) {
+    console.warn('[Gmail] invalid GMAIL_PUBSUB_WORKSPACE_MAP JSON:', error?.message || error);
+    return {};
+  }
+};
+
+const decodeGmailPubsubData = (encodedData = '') => {
+  const raw = String(encodedData || '').trim();
+  if (!raw) return {};
+  try {
+    const decoded = Buffer.from(raw, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed;
+  } catch {
+    return {};
+  }
+};
+
+const escapeXml = (value = '') =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+
+const formatTwimlMessage = (message) =>
+  `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(message)}</Message></Response>`;
+
+const sendTwimlMessage = (res, message, status = 200) => {
+  res.status(status);
+  res.type('text/xml');
+  return res.send(formatTwimlMessage(message));
+};
+
+const truncateWhatsAppReply = (message, maxChars = 1400) => {
+  const normalized = String(message || '').replace(/\r\n/g, '\n').trim();
+  if (!normalized) return 'Run finished.';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
+};
+
+const timingSafeMatch = (a, b) => {
+  const left = Buffer.from(String(a || ''));
+  const right = Buffer.from(String(b || ''));
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+};
+
+const buildTwilioSignaturePayload = (url, body = {}) => {
+  const keys = Object.keys(body).sort();
+  let payload = String(url || '');
+  for (const key of keys) {
+    const value = body[key];
+    if (Array.isArray(value)) {
+      const items = value.map((item) => String(item ?? '')).sort();
+      for (const item of items) {
+        payload += `${key}${item}`;
+      }
+      continue;
+    }
+    payload += `${key}${String(value ?? '')}`;
+  }
+  return payload;
+};
+
+const buildTwilioCandidateUrls = (req) => {
+  const host = req.get('host');
+  const originalUrl = req.originalUrl || req.url || '';
+  if (!host || !originalUrl) return [];
+
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const runtimeProto = req.protocol || '';
+  const protos = Array.from(new Set([forwardedProto, runtimeProto, 'https', 'http'].filter(Boolean)));
+
+  return protos.map((proto) => `${proto}://${host}${originalUrl}`);
+};
+
+const signTwilioPayload = ({ url, body, authToken }) =>
+  crypto
+    .createHmac('sha1', authToken)
+    .update(buildTwilioSignaturePayload(url, body), 'utf8')
+    .digest('base64');
+
+const WHATSAPP_SIGNATURE_REQUIRED = parseEnvBoolean(
+  process.env.WHATSAPP_SIGNATURE_REQUIRED,
+  process.env.NODE_ENV === 'production'
+);
+const WHATSAPP_WEBHOOK_SECRET = sanitizeInput(process.env.WHATSAPP_WEBHOOK_SECRET || '') || '';
+const WHATSAPP_TWILIO_AUTH_TOKEN = sanitizeInput(process.env.WHATSAPP_TWILIO_AUTH_TOKEN || '') || '';
+const WHATSAPP_DEFAULT_WORKSPACE_ID = sanitizeInput(process.env.WHATSAPP_DEFAULT_WORKSPACE_ID || '') || '';
+const WHATSAPP_DEFAULT_PROVIDER_ID = sanitizeInput(process.env.WHATSAPP_DEFAULT_PROVIDER_ID || 'gemini.flash') || 'gemini.flash';
+const WHATSAPP_DEFAULT_MODEL = sanitizeInput(process.env.WHATSAPP_DEFAULT_MODEL || '') || undefined;
+const WHATSAPP_DEFAULT_TIMEZONE = sanitizeInput(process.env.WHATSAPP_DEFAULT_TIMEZONE || '') || null;
+const WHATSAPP_EXECUTE_WRITES = parseEnvBoolean(process.env.WHATSAPP_EXECUTE_WRITES, false);
+const WHATSAPP_APPROVAL_MODE = parseAgentApprovalMode(process.env.WHATSAPP_APPROVAL_MODE || 'REVIEW_REQUIRED');
+const WHATSAPP_MAX_TOOL_CALLS = clampInt(process.env.WHATSAPP_MAX_TOOL_CALLS, 1, 50, 10);
+const WHATSAPP_MAX_WRITE_ACTIONS = clampInt(process.env.WHATSAPP_MAX_WRITE_ACTIONS, 1, 20, 2);
+const WHATSAPP_ALLOWED_SCOPES = parseAgentAllowedScopes(process.env.WHATSAPP_ALLOWED_SCOPES || 'none,read,write');
+const WHATSAPP_NUMBER_WORKSPACE_MAP = parseWhatsAppWorkspaceMap(process.env.WHATSAPP_NUMBER_WORKSPACE_MAP || '{}');
+const WHATSAPP_OWNER_NUMBERS = parseWhatsAppAddressSet(process.env.WHATSAPP_OWNER_NUMBERS || '');
+const GMAIL_PUBSUB_WEBHOOK_SECRET = sanitizeInput(process.env.GMAIL_PUBSUB_WEBHOOK_SECRET || '') || '';
+const GMAIL_PUBSUB_DEFAULT_WORKSPACE_ID = sanitizeInput(
+  process.env.GMAIL_PUBSUB_DEFAULT_WORKSPACE_ID || WHATSAPP_DEFAULT_WORKSPACE_ID || ''
+) || '';
+const GMAIL_PUBSUB_PROVIDER_ID = sanitizeInput(process.env.GMAIL_PUBSUB_PROVIDER_ID || 'gemini.flash') || 'gemini.flash';
+const GMAIL_PUBSUB_MODEL = sanitizeInput(process.env.GMAIL_PUBSUB_MODEL || '') || undefined;
+const GMAIL_PUBSUB_TIMEZONE = sanitizeInput(process.env.GMAIL_PUBSUB_TIMEZONE || '') || null;
+const GMAIL_PUBSUB_EXECUTE_WRITES = parseEnvBoolean(process.env.GMAIL_PUBSUB_EXECUTE_WRITES, false);
+const GMAIL_PUBSUB_GOAL = sanitizeInput(
+  process.env.GMAIL_PUBSUB_GOAL || 'Manage unread customer emails and send concise, safe replies.'
+) || 'Manage unread customer emails and send concise, safe replies.';
+const GMAIL_PUBSUB_EMAIL_SOURCE = sanitizeInput(process.env.GMAIL_PUBSUB_EMAIL_SOURCE || 'gmail') || 'gmail';
+const GMAIL_PUBSUB_EMAIL_TRANSPORT = sanitizeInput(process.env.GMAIL_PUBSUB_EMAIL_TRANSPORT || 'gmail') || 'gmail';
+const GMAIL_PUBSUB_APPROVAL_MODE = parseAgentApprovalMode(
+  process.env.GMAIL_PUBSUB_APPROVAL_MODE || process.env.WHATSAPP_APPROVAL_MODE || 'REVIEW_REQUIRED'
+);
+const GMAIL_PUBSUB_MAX_TOOL_CALLS = clampInt(
+  process.env.GMAIL_PUBSUB_MAX_TOOL_CALLS || process.env.WHATSAPP_MAX_TOOL_CALLS,
+  1,
+  50,
+  10
+);
+const GMAIL_PUBSUB_MAX_WRITE_ACTIONS = clampInt(
+  process.env.GMAIL_PUBSUB_MAX_WRITE_ACTIONS || process.env.WHATSAPP_MAX_WRITE_ACTIONS,
+  1,
+  20,
+  2
+);
+const GMAIL_PUBSUB_ALLOWED_SCOPES = parseAgentAllowedScopes(
+  process.env.GMAIL_PUBSUB_ALLOWED_SCOPES || process.env.WHATSAPP_ALLOWED_SCOPES || 'none,read,write'
+);
+const GMAIL_PUBSUB_NO_FALLBACK = parseEnvBoolean(process.env.GMAIL_PUBSUB_NO_FALLBACK, false);
+const GMAIL_PUBSUB_ALLOWED_SUBSCRIPTIONS = parseCommaValueSet(process.env.GMAIL_PUBSUB_ALLOWED_SUBSCRIPTIONS || '');
+const GMAIL_PUBSUB_WORKSPACE_MAP = parseGmailWorkspaceMap(process.env.GMAIL_PUBSUB_WORKSPACE_MAP || '{}');
+const GMAIL_PUBSUB_RECENT_EVENT_TTL_MS = clampInt(process.env.GMAIL_PUBSUB_RECENT_EVENT_TTL_SECONDS, 30, 86400, 1800) * 1000;
+const GMAIL_PUBSUB_RECENT_EVENTS = new Map();
+
+const resolveWhatsAppWorkspaceId = ({ to, from } = {}) => {
+  const keys = [to, from].flatMap((value) => {
+    const raw = String(value || '').trim().toLowerCase();
+    const normalized = normalizeWhatsAppAddress(value);
+    return [raw, normalized, normalized ? `whatsapp:${normalized}` : ''].filter(Boolean);
+  });
+
+  for (const key of keys) {
+    const workspaceId = WHATSAPP_NUMBER_WORKSPACE_MAP[key];
+    if (workspaceId) return workspaceId;
+  }
+
+  return WHATSAPP_DEFAULT_WORKSPACE_ID || null;
+};
+
+const isWhatsAppOwnerNumber = (fromNumber) => {
+  if (WHATSAPP_OWNER_NUMBERS.size === 0) return true;
+  const normalized = normalizeWhatsAppAddress(fromNumber);
+  return normalized ? WHATSAPP_OWNER_NUMBERS.has(normalized) : false;
+};
+
+const normalizeGmailMapKey = (value) => String(value || '').trim().toLowerCase();
+
+const resolveGmailWorkspaceId = ({ emailAddress = '', subscription = '' } = {}) => {
+  const keys = [];
+  const emailKey = normalizeGmailMapKey(emailAddress);
+  const subscriptionKey = normalizeGmailMapKey(subscription);
+
+  if (emailKey) keys.push(emailKey);
+  if (subscriptionKey) {
+    keys.push(subscriptionKey);
+    keys.push(`subscription:${subscriptionKey}`);
+  }
+
+  for (const key of keys) {
+    const workspaceId = GMAIL_PUBSUB_WORKSPACE_MAP[key];
+    if (workspaceId) return workspaceId;
+  }
+
+  return GMAIL_PUBSUB_DEFAULT_WORKSPACE_ID || null;
+};
+
+const hasAllowedGmailSubscription = (subscription = '') => {
+  if (GMAIL_PUBSUB_ALLOWED_SUBSCRIPTIONS.size === 0) return true;
+  const normalized = String(subscription || '').trim();
+  if (!normalized) return false;
+  return (
+    GMAIL_PUBSUB_ALLOWED_SUBSCRIPTIONS.has(normalized)
+    || GMAIL_PUBSUB_ALLOWED_SUBSCRIPTIONS.has(normalized.toLowerCase())
+  );
+};
+
+const pruneRecentGmailEvents = (nowMs = Date.now()) => {
+  for (const [key, expiresAt] of GMAIL_PUBSUB_RECENT_EVENTS.entries()) {
+    if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) {
+      GMAIL_PUBSUB_RECENT_EVENTS.delete(key);
+    }
+  }
+};
+
+const rememberGmailEvent = (eventKey) => {
+  const normalizedKey = String(eventKey || '').trim();
+  if (!normalizedKey) return false;
+  const nowMs = Date.now();
+  pruneRecentGmailEvents(nowMs);
+  if (GMAIL_PUBSUB_RECENT_EVENTS.has(normalizedKey)) {
+    return false;
+  }
+  GMAIL_PUBSUB_RECENT_EVENTS.set(normalizedKey, nowMs + GMAIL_PUBSUB_RECENT_EVENT_TTL_MS);
+  return true;
+};
+
+const verifyTwilioWebhookSignature = (req) => {
+  if (!WHATSAPP_SIGNATURE_REQUIRED) return true;
+  if (!WHATSAPP_TWILIO_AUTH_TOKEN) {
+    console.warn('[WhatsApp] WHATSAPP_SIGNATURE_REQUIRED is enabled but WHATSAPP_TWILIO_AUTH_TOKEN is missing.');
+    return false;
+  }
+
+  const headerSignature = String(req.headers['x-twilio-signature'] || '').trim();
+  if (!headerSignature) return false;
+
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const candidateUrls = buildTwilioCandidateUrls(req);
+  if (candidateUrls.length === 0) return false;
+
+  return candidateUrls.some((url) => {
+    const expected = signTwilioPayload({
+      url,
+      body,
+      authToken: WHATSAPP_TWILIO_AUTH_TOKEN,
+    });
+    return timingSafeMatch(expected, headerSignature);
+  });
+};
+
+const buildWhatsAppPolicy = () =>
+  parseAgentPolicy(
+    {
+      approvalMode: WHATSAPP_APPROVAL_MODE,
+      maxToolCalls: WHATSAPP_MAX_TOOL_CALLS,
+      maxWriteActions: WHATSAPP_MAX_WRITE_ACTIONS,
+      allowedScopes: WHATSAPP_ALLOWED_SCOPES,
+    },
+    WHATSAPP_DEFAULT_TIMEZONE
+  );
+
+const buildGmailPubsubPolicy = () =>
+  parseAgentPolicy(
+    {
+      approvalMode: GMAIL_PUBSUB_APPROVAL_MODE,
+      maxToolCalls: GMAIL_PUBSUB_MAX_TOOL_CALLS,
+      maxWriteActions: GMAIL_PUBSUB_MAX_WRITE_ACTIONS,
+      allowedScopes: GMAIL_PUBSUB_ALLOWED_SCOPES,
+      noFallback: GMAIL_PUBSUB_NO_FALLBACK,
+    },
+    GMAIL_PUBSUB_TIMEZONE,
+  );
+
+const LINKED_WHATSAPP_PAIRING_TTL_MS = 60 * 60 * 1000;
+const LINKED_WHATSAPP_PENDING_LIMIT = clampInt(process.env.WHATSAPP_PAIRING_PENDING_LIMIT, 1, 100, 3);
+const LINKED_WHATSAPP_DM_POLICIES = new Set(['pairing', 'allowlist']);
+
+const sanitizeWorkspaceFileKey = (workspaceId = '') =>
+  String(workspaceId || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 128) || 'workspace';
+
+const normalizeLinkedAllowFrom = (raw = []) => {
+  const values = Array.isArray(raw)
+    ? raw
+    : String(raw || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+  return Array.from(new Set(values.map((item) => normalizeWhatsAppAddress(item)).filter(Boolean)));
+};
+
+const normalizeLinkedDmPolicy = (raw) => {
+  const value = String(raw || 'pairing').trim().toLowerCase();
+  return LINKED_WHATSAPP_DM_POLICIES.has(value) ? value : 'pairing';
+};
+
+const linkedWhatsappPaths = (workspaceId = '') => {
+  const key = sanitizeWorkspaceFileKey(workspaceId);
+  return {
+    workspaceKey: key,
+    statePath: path.join(WHATSAPP_LINKED_BASE_DIR, `${key}.json`),
+    authDir: path.join(WHATSAPP_LINKED_BASE_DIR, `${key}-auth`),
+    pidPath: path.join(WHATSAPP_LINKED_BASE_DIR, `${key}.pid`),
+    logPath: path.join(WHATSAPP_LINKED_BASE_DIR, `${key}.log`),
+    qrPngPath: path.join(WHATSAPP_LINKED_BASE_DIR, `${key}-qr.png`),
+    qrTextPath: path.join(WHATSAPP_LINKED_BASE_DIR, `${key}-qr.txt`),
+    pairingCodePath: path.join(WHATSAPP_LINKED_BASE_DIR, `${key}-pairing-code.txt`),
+  };
+};
+
+const readLinkedWhatsappState = async (workspaceId = '') => {
+  const paths = linkedWhatsappPaths(workspaceId);
+  await fs.mkdir(WHATSAPP_LINKED_BASE_DIR, { recursive: true });
+
+  let parsed = null;
+  try {
+    const raw = await fs.readFile(paths.statePath, 'utf8');
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+
+  const policy = parsed?.policy && typeof parsed.policy === 'object' ? parsed.policy : {};
+  const dmPolicy = normalizeLinkedDmPolicy(policy.dmPolicy);
+  const allowFrom = normalizeLinkedAllowFrom([...(policy.allowFrom || []), ...Array.from(WHATSAPP_OWNER_NUMBERS || [])]);
+  const pairingsRaw = Array.isArray(parsed?.pairings) ? parsed.pairings : [];
+  const nowMs = Date.now();
+
+  const pairings = pairingsRaw
+    .map((item) => {
+      const code = String(item?.code || '')
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+      const phone = normalizeWhatsAppAddress(item?.phone || '');
+      if (!code || !phone) return null;
+      const requestedAtMs = Number.isFinite(Date.parse(item?.requestedAt || ''))
+        ? Date.parse(item.requestedAt)
+        : nowMs;
+      const expiresAtMs = requestedAtMs + LINKED_WHATSAPP_PAIRING_TTL_MS;
+      const approved = item?.status === 'approved';
+      const expired = expiresAtMs <= nowMs;
+      return {
+        code,
+        phone,
+        requestedAt: new Date(requestedAtMs).toISOString(),
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        status: approved ? 'approved' : (expired ? 'expired' : 'pending'),
+        approvedAt: approved && item?.approvedAt ? String(item.approvedAt) : null,
+        approvedBy: approved && item?.approvedBy ? String(item.approvedBy) : null,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    workspaceId,
+    policy: {
+      dmPolicy,
+      allowFrom,
+    },
+    pairings,
+    updatedAt: parsed?.updatedAt || agentNowIso(),
+  };
+};
+
+const writeLinkedWhatsappState = async (workspaceId = '', state = {}) => {
+  const paths = linkedWhatsappPaths(workspaceId);
+  await fs.mkdir(WHATSAPP_LINKED_BASE_DIR, { recursive: true });
+  await fs.writeFile(paths.statePath, `${JSON.stringify({
+    workspaceId,
+    policy: {
+      dmPolicy: normalizeLinkedDmPolicy(state?.policy?.dmPolicy),
+      allowFrom: normalizeLinkedAllowFrom(state?.policy?.allowFrom || []),
+    },
+    pairings: Array.isArray(state?.pairings) ? state.pairings : [],
+    updatedAt: agentNowIso(),
+  }, null, 2)}\n`, 'utf8');
+};
+
+const listLinkedPendingPairings = async (workspaceId = '') => {
+  const state = await readLinkedWhatsappState(workspaceId);
+  const pending = state.pairings
+    .filter((item) => item.status === 'pending')
+    .sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt)))
+    .slice(0, LINKED_WHATSAPP_PENDING_LIMIT);
+  return pending.map((item) => ({
+    code: formatLinkedPairingCode(item.code),
+    phone: item.phone,
+    requestedAt: item.requestedAt,
+    expiresAt: item.expiresAt,
+    status: item.status,
+  }));
+};
+
+const parseLinkedPairingCode = (raw = '') =>
+  String(raw || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+const formatLinkedPairingCode = (raw = '') => {
+  const normalized = parseLinkedPairingCode(raw);
+  if (!normalized) return '';
+  return normalized.match(/.{1,4}/g)?.join('-') || normalized;
+};
+
+const randomLinkedPairingCode = () => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 8; i += 1) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+};
+
+const isLinkedSenderAllowlisted = ({ fromNumber, state }) => {
+  const normalizedFrom = normalizeWhatsAppAddress(fromNumber);
+  if (!normalizedFrom) return false;
+  const allowFrom = normalizeLinkedAllowFrom(state?.policy?.allowFrom || []);
+  return allowFrom.includes(normalizedFrom);
+};
+
+const upsertLinkedPairingRequest = async ({ workspaceId, fromNumber }) => {
+  const normalizedFrom = normalizeWhatsAppAddress(fromNumber);
+  if (!normalizedFrom) {
+    return {
+      state: await readLinkedWhatsappState(workspaceId),
+      request: null,
+      created: false,
+      reason: 'invalid_phone_number',
+    };
+  }
+
+  const state = await readLinkedWhatsappState(workspaceId);
+  const activePending = state.pairings
+    .filter((item) => item.status === 'pending')
+    .sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt)));
+
+  const existing = activePending.find((item) => item.phone === normalizedFrom);
+  if (existing) {
+    return {
+      state,
+      request: {
+        ...existing,
+        displayCode: formatLinkedPairingCode(existing.code),
+      },
+      created: false,
+      reason: 'existing_pending',
+    };
+  }
+
+  if (activePending.length >= LINKED_WHATSAPP_PENDING_LIMIT) {
+    return {
+      state,
+      request: null,
+      created: false,
+      reason: 'pending_limit_reached',
+    };
+  }
+
+  const rawCode = randomLinkedPairingCode();
+  const nowMs = Date.now();
+  const request = {
+    code: rawCode,
+    phone: normalizedFrom,
+    requestedAt: new Date(nowMs).toISOString(),
+    expiresAt: new Date(nowMs + LINKED_WHATSAPP_PAIRING_TTL_MS).toISOString(),
+    status: 'pending',
+    approvedAt: null,
+    approvedBy: null,
+  };
+
+  state.pairings = [...state.pairings, request];
+  state.updatedAt = agentNowIso();
+  await writeLinkedWhatsappState(workspaceId, state);
+
+  return {
+    state,
+    request: {
+      ...request,
+      displayCode: formatLinkedPairingCode(rawCode),
+    },
+    created: true,
+  };
+};
+
+const enforceWhatsAppDmPolicy = async ({ workspaceId, fromNumber }) => {
+  const state = await readLinkedWhatsappState(workspaceId);
+  if (isLinkedSenderAllowlisted({ fromNumber, state })) {
+    return {
+      allowed: true,
+      state,
+      reason: 'allowlisted',
+      responseMessage: '',
+    };
+  }
+
+  if (state.policy.dmPolicy === 'allowlist') {
+    return {
+      allowed: false,
+      state,
+      reason: 'allowlist_blocked',
+      responseMessage: 'Access denied. This WhatsApp number is not allowlisted.',
+    };
+  }
+
+  const pairing = await upsertLinkedPairingRequest({
+    workspaceId,
+    fromNumber,
+  });
+
+  if (pairing.reason === 'existing_pending') {
+    return {
+      allowed: false,
+      state: pairing.state,
+      reason: 'pairing_pending',
+      responseMessage: `Access request is pending approval.\nCode: ${pairing.request?.displayCode || 'N/A'}\nAsk the owner to approve in Integrations -> WhatsApp.`,
+    };
+  }
+
+  if (pairing.reason === 'pending_limit_reached') {
+    return {
+      allowed: false,
+      state: pairing.state,
+      reason: 'pairing_limit',
+      responseMessage: 'Pairing request limit reached. Ask the owner to review pending requests in Integrations -> WhatsApp.',
+    };
+  }
+
+  if (!pairing?.request?.displayCode) {
+    return {
+      allowed: false,
+      state: pairing?.state || state,
+      reason: pairing?.reason || 'pairing_failed',
+      responseMessage: 'Unable to create pairing request right now. Please try again shortly.',
+    };
+  }
+
+  return {
+    allowed: false,
+    state: pairing.state,
+    reason: 'pairing_requested',
+    responseMessage: `Access request created.\nCode: ${pairing.request.displayCode}\nAsk the owner to approve this code in Integrations -> WhatsApp.\nExpires in 1 hour.`,
+  };
+};
+
+const approveLinkedPairing = async ({ workspaceId, code, approvedBy }) => {
+  const normalizedCode = parseLinkedPairingCode(code);
+  if (!normalizedCode) {
+    throw new Error('Invalid pairing code');
+  }
+
+  const state = await readLinkedWhatsappState(workspaceId);
+  const now = agentNowIso();
+  let matched = null;
+
+  state.pairings = state.pairings.map((item) => {
+    if (item.code !== normalizedCode || item.status !== 'pending') return item;
+    matched = item;
+    return {
+      ...item,
+      status: 'approved',
+      approvedAt: now,
+      approvedBy: approvedBy || null,
+    };
+  });
+
+  if (!matched) {
+    throw new Error('Pairing request not found or expired');
+  }
+
+  const allowFrom = normalizeLinkedAllowFrom([...(state.policy.allowFrom || []), matched.phone]);
+  state.policy.allowFrom = allowFrom;
+  state.updatedAt = now;
+  await writeLinkedWhatsappState(workspaceId, state);
+
+  return {
+    code: formatLinkedPairingCode(normalizedCode),
+    phone: matched.phone,
+  };
+};
+
+const denyLinkedPairing = async ({ workspaceId, code, decidedBy }) => {
+  const normalizedCode = parseLinkedPairingCode(code);
+  if (!normalizedCode) {
+    throw new Error('Invalid pairing code');
+  }
+
+  const state = await readLinkedWhatsappState(workspaceId);
+  let changed = false;
+  state.pairings = state.pairings.map((item) => {
+    if (item.code !== normalizedCode || item.status !== 'pending') return item;
+    changed = true;
+    return {
+      ...item,
+      status: 'expired',
+      approvedAt: agentNowIso(),
+      approvedBy: decidedBy || null,
+    };
+  });
+  if (!changed) {
+    throw new Error('Pairing request not found or expired');
+  }
+  await writeLinkedWhatsappState(workspaceId, state);
+};
+
+const isProcessRunning = (pid) => {
+  const parsed = Number(pid);
+  if (!Number.isInteger(parsed) || parsed < 1) return false;
+  try {
+    process.kill(parsed, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const waitForProcessExit = async (pid, timeoutMs = 3500) => {
+  const parsed = Number(pid);
+  if (!Number.isInteger(parsed) || parsed < 1) return true;
+
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (!isProcessRunning(parsed)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+  return !isProcessRunning(parsed);
+};
+
+const parseGatewayWorkspaceIds = (raw = []) => {
+  const values = Array.isArray(raw)
+    ? raw
+    : [raw];
+  const set = new Set();
+  for (const value of values) {
+    String(value || '')
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .forEach((item) => set.add(item));
+  }
+  return Array.from(set);
+};
+
+const getGatewayWorkspaceIds = (state) => {
+  if (!state || typeof state !== 'object') return [];
+  return parseGatewayWorkspaceIds(state.workspaces || []);
+};
+
+const gatewayStateIncludesWorkspace = (state, workspaceId) => {
+  const target = String(workspaceId || '').trim();
+  if (!target) return false;
+  return getGatewayWorkspaceIds(state).includes(target);
+};
+
+const gatewayStateHasForeignWorkspace = (state, workspaceId) => {
+  const target = String(workspaceId || '').trim();
+  if (!target) return false;
+  const workspaceIds = getGatewayWorkspaceIds(state);
+  return workspaceIds.some((item) => item !== target);
+};
+
+const pickGatewayWorkerForWorkspace = (state, workspaceId) => {
+  const target = String(workspaceId || '').trim();
+  if (!target) return null;
+  const workers = Array.isArray(state?.workers) ? state.workers : [];
+  const found = workers.find((worker) => String(worker?.workspaceId || '').trim() === target);
+  return found || null;
+};
+
+const filterGatewayStateForWorkspaces = (state, workspaceIds = []) => {
+  if (!state || typeof state !== 'object') return null;
+  const selected = parseGatewayWorkspaceIds(workspaceIds);
+  if (selected.length === 0) return state;
+
+  const allowed = new Set(selected);
+  const filteredWorkspaces = getGatewayWorkspaceIds(state).filter((workspaceId) => allowed.has(workspaceId));
+  const workers = Array.isArray(state.workers)
+    ? state.workers.filter((worker) => allowed.has(String(worker?.workspaceId || '').trim()))
+    : [];
+
+  return {
+    ...state,
+    workspaces: filteredWorkspaces,
+    workers,
+  };
+};
+
+const readGatewayPid = async () => {
+  try {
+    const raw = await fs.readFile(CHIPPY_GATEWAY_PID_PATH, 'utf8');
+    const pid = Number(String(raw).trim());
+    return Number.isInteger(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+};
+
+const readGatewayStateFile = async () => {
+  try {
+    const raw = await fs.readFile(CHIPPY_GATEWAY_STATE_PATH, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const getGatewayDaemonSummary = async ({ workspaceIds = [] } = {}) => {
+  const pid = await readGatewayPid();
+  const running = isProcessRunning(pid);
+  const rawState = await readGatewayStateFile();
+  const selectedWorkspaces = parseGatewayWorkspaceIds(workspaceIds);
+  const state = filterGatewayStateForWorkspaces(rawState, selectedWorkspaces);
+  const stateWorkspaces = Array.isArray(state?.workspaces) ? state.workspaces : [];
+  const effectiveWorkspaces = selectedWorkspaces.length > 0 ? selectedWorkspaces : stateWorkspaces;
+
+  return {
+    gateway: {
+      running,
+      pid: running ? pid : null,
+      pidPath: CHIPPY_GATEWAY_PID_PATH,
+      statePath: CHIPPY_GATEWAY_STATE_PATH,
+      logPath: CHIPPY_GATEWAY_LOG_PATH,
+    },
+    workspaces: effectiveWorkspaces,
+    state,
+  };
+};
+
+const startGatewayDaemon = async ({ workspaceIds = [], relinkWorkspaceIds = [] } = {}) => {
+  const currentPid = await readGatewayPid();
+  if (isProcessRunning(currentPid)) {
+    return {
+      alreadyRunning: true,
+      pid: currentPid,
+      summary: await getGatewayDaemonSummary({ workspaceIds }),
+    };
+  }
+
+  const workspaceList = parseGatewayWorkspaceIds(workspaceIds);
+  const relinkList = parseGatewayWorkspaceIds(relinkWorkspaceIds);
+  await fs.mkdir(CHIPPY_GATEWAY_RUN_DIR, { recursive: true });
+  const args = ['scripts/chippy-gateway.js'];
+  if (workspaceList.length > 0) {
+    args.push('--workspace-ids', workspaceList.join(','));
+  }
+
+  const outFd = fsSync.openSync(CHIPPY_GATEWAY_LOG_PATH, 'a');
+  const child = spawn(process.execPath, args, {
+    cwd: __dirname,
+    detached: true,
+    stdio: ['ignore', outFd, outFd],
+    env: {
+      ...process.env,
+      ...(workspaceList.length > 0 ? { CHIPPY_GATEWAY_WORKSPACES: workspaceList.join(',') } : {}),
+      ...(relinkList.length > 0 ? { CHIPPY_GATEWAY_RELINK_WORKSPACES: relinkList.join(',') } : {}),
+    },
+  });
+
+  try {
+    fsSync.closeSync(outFd);
+  } catch {
+    // ignore fd close issues
+  }
+  child.unref();
+  await new Promise((resolve) => setTimeout(resolve, 350));
+
+  const summary = await getGatewayDaemonSummary({ workspaceIds: workspaceList });
+  return {
+    alreadyRunning: false,
+    pid: summary?.gateway?.pid || child.pid,
+    summary,
+  };
+};
+
+const stopGatewayDaemon = async () => {
+  const pid = await readGatewayPid();
+  if (!isProcessRunning(pid)) {
+    await fs.rm(CHIPPY_GATEWAY_PID_PATH, { force: true });
+    return {
+      stopped: false,
+      pid: null,
+      summary: await getGatewayDaemonSummary(),
+    };
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // ignore kill errors
+  }
+  let forced = false;
+  let exited = await waitForProcessExit(pid, 4000);
+  if (!exited) {
+    forced = true;
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // ignore kill errors
+    }
+    exited = await waitForProcessExit(pid, 1200);
+  }
+  await fs.rm(CHIPPY_GATEWAY_PID_PATH, { force: true });
+
+  return {
+    stopped: true,
+    pid,
+    forced,
+    exited,
+    summary: await getGatewayDaemonSummary(),
+  };
+};
+
+const runCommand = async (command, args = [], options = {}) => new Promise((resolve) => {
+  const child = spawn(command, args, {
+    cwd: options.cwd || __dirname,
+    env: {
+      ...process.env,
+      ...(options.env || {}),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout?.on('data', (chunk) => {
+    stdout += chunk.toString();
+  });
+  child.stderr?.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on('error', (error) => {
+    resolve({
+      ok: false,
+      code: -1,
+      stdout,
+      stderr: stderr || String(error?.message || error || ''),
+      command: [command, ...args].join(' '),
+    });
+  });
+  child.on('close', (code) => {
+    resolve({
+      ok: code === 0,
+      code: Number.isInteger(code) ? code : -1,
+      stdout,
+      stderr,
+      command: [command, ...args].join(' '),
+    });
+  });
+});
+
+const parseJsonFromCommandOutput = (raw = '') => {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      return JSON.parse(text.slice(start, end + 1));
+    }
+    return null;
+  }
+};
+
+const runGatewayCliJson = async ({ action, workspaceId = '' } = {}) => {
+  const args = [path.join('bin', 'chippy.js'), 'gateway', String(action || '').trim(), '--json'];
+  if (workspaceId) {
+    args.push('--workspace-id', String(workspaceId).trim());
+  }
+
+  const result = await runCommand(process.execPath, args, {
+    cwd: __dirname,
+    env: {
+      DOTENV_CONFIG_QUIET: 'true',
+    },
+  });
+
+  if (!result.ok) {
+    throw new Error((result.stderr || result.stdout || 'Gateway command failed').trim());
+  }
+
+  const payload = parseJsonFromCommandOutput(result.stdout);
+  if (!payload) {
+    throw new Error(`Invalid response from gateway ${action} command.`);
+  }
+  return payload;
+};
+
+const getGatewayServiceDescriptor = () => {
+  const home = process.env.HOME || '';
+  if (process.platform === 'darwin' && home) {
+    return {
+      supported: true,
+      manager: 'launchd',
+      filePath: path.join(home, 'Library', 'LaunchAgents', 'com.chippy.gateway.plist'),
+      unitName: 'com.chippy.gateway',
+    };
+  }
+  if (process.platform === 'linux' && home) {
+    return {
+      supported: true,
+      manager: 'systemd-user',
+      filePath: path.join(home, '.config', 'systemd', 'user', 'chippy-gateway.service'),
+      unitName: 'chippy-gateway.service',
+    };
+  }
+  return {
+    supported: false,
+    manager: null,
+    filePath: null,
+    unitName: null,
+  };
+};
+
+const getGatewayServiceStatus = async () => {
+  const descriptor = getGatewayServiceDescriptor();
+  const installed = descriptor.filePath ? fsSync.existsSync(descriptor.filePath) : false;
+
+  if (!descriptor.supported) {
+    return {
+      supported: false,
+      manager: null,
+      platform: process.platform,
+      filePath: null,
+      installed,
+      enabled: false,
+      active: false,
+      checks: [],
+    };
+  }
+
+  if (descriptor.manager === 'launchd') {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+    const checks = [];
+
+    if (uid !== null) {
+      checks.push(await runCommand('launchctl', ['print', `gui/${uid}/${descriptor.unitName}`]));
+      checks.push(await runCommand('launchctl', ['print-disabled', `gui/${uid}`]));
+    } else {
+      checks.push(await runCommand('launchctl', ['list', descriptor.unitName]));
+    }
+
+    const active = checks.some((item) => item.ok);
+    const enabledCheck = checks.find((item) => item.command.includes('print-disabled'));
+    const enabled = enabledCheck
+      ? !String(enabledCheck.stdout || '').includes(`"${descriptor.unitName}" => true`)
+      : active;
+
+    return {
+      supported: true,
+      manager: descriptor.manager,
+      platform: process.platform,
+      filePath: descriptor.filePath,
+      installed,
+      enabled,
+      active,
+      checks: checks.map((item) => ({
+        command: item.command,
+        ok: item.ok,
+        code: item.code,
+        stdout: String(item.stdout || '').trim() || null,
+        stderr: String(item.stderr || '').trim() || null,
+      })),
+    };
+  }
+
+  const enabledCheck = await runCommand('systemctl', ['--user', 'is-enabled', descriptor.unitName]);
+  const activeCheck = await runCommand('systemctl', ['--user', 'is-active', descriptor.unitName]);
+  const enabled = enabledCheck.ok && String(enabledCheck.stdout || '').trim() === 'enabled';
+  const active = activeCheck.ok && String(activeCheck.stdout || '').trim() === 'active';
+
+  return {
+    supported: true,
+    manager: descriptor.manager,
+    platform: process.platform,
+    filePath: descriptor.filePath,
+    installed,
+    enabled,
+    active,
+    checks: [enabledCheck, activeCheck].map((item) => ({
+      command: item.command,
+      ok: item.ok,
+      code: item.code,
+      stdout: String(item.stdout || '').trim() || null,
+      stderr: String(item.stderr || '').trim() || null,
+    })),
+  };
+};
+
+const assertGatewayAppControlAllowed = async ({ workspaceId } = {}) => {
+  const serviceStatus = await getGatewayServiceStatus();
+  if (serviceStatus.supported && serviceStatus.active) {
+    throw new Error('Gateway is supervised by an active 24/7 service. Remove the service first for manual daemon controls.');
+  }
+
+  const current = await getGatewayDaemonSummary();
+  if (current?.gateway?.running && gatewayStateHasForeignWorkspace(current?.state, workspaceId)) {
+    throw new Error('Gateway currently serves multiple workspaces. Use CLI gateway controls for multi-workspace lifecycle operations.');
+  }
+
+  return {
+    serviceStatus,
+    current,
+  };
+};
+
+const getGatewayControlHealth = async ({ workspaceId } = {}) => {
+  const workspaceSummary = await getGatewayDaemonSummary({
+    workspaceIds: [workspaceId],
+  });
+  const globalSummary = await getGatewayDaemonSummary();
+  const service = await getGatewayServiceStatus();
+  const whatsapp = await getLinkedWhatsappGatewaySummary({
+    workspaceId,
+  });
+
+  const paths = linkedWhatsappPaths(workspaceId);
+  const gatewayPid = await readGatewayPid();
+  const workerPid = await readWorkspacePid(workspaceId);
+  const gatewayPidFileExists = fsSync.existsSync(CHIPPY_GATEWAY_PID_PATH);
+  const workerPidFileExists = fsSync.existsSync(paths.pidPath);
+  const staleGatewayPid = gatewayPidFileExists && !isProcessRunning(gatewayPid);
+  const staleWorkerPid = workerPidFileExists && !isProcessRunning(workerPid);
+
+  const gatewayRunning = globalSummary?.gateway?.running === true;
+  const workspaceInGateway = gatewayStateIncludesWorkspace(globalSummary?.state, workspaceId);
+  const workerRunning = whatsapp?.gateway?.running === true;
+  const workerAutoRestarting = !workerRunning && Boolean(whatsapp?.gateway?.nextRestartAt);
+  const hasAuthSession = whatsapp?.gateway?.hasAuthSession === true;
+  const pendingPairings = Array.isArray(whatsapp?.pendingPairings) ? whatsapp.pendingPairings.length : 0;
+
+  const checks = [];
+
+  checks.push({
+    id: 'service.support',
+    status: service.supported ? 'ok' : 'warn',
+    title: 'Service Supervisor Support',
+    detail: service.supported
+      ? `Supported via ${service.manager || 'unknown'}.`
+      : `No automatic service supervisor integration for platform ${process.platform}.`,
+    recommendedAction: null,
+  });
+
+  checks.push({
+    id: 'service.runtime',
+    status: service.active && !gatewayRunning ? 'error' : 'ok',
+    title: 'Service vs Daemon Runtime',
+    detail: service.active && !gatewayRunning
+      ? 'Service is active but gateway daemon is not running.'
+      : (service.active ? 'Service supervision active and daemon running.' : 'Service supervision not active.'),
+    recommendedAction: service.active && !gatewayRunning ? 'install_service' : null,
+  });
+
+  checks.push({
+    id: 'gateway.scope',
+    status: gatewayRunning && !workspaceInGateway ? 'error' : 'ok',
+    title: 'Workspace Scope Alignment',
+    detail: gatewayRunning && !workspaceInGateway
+      ? 'Gateway is running but not scoped to this workspace.'
+      : 'Gateway scope includes this workspace.',
+    recommendedAction: gatewayRunning && !workspaceInGateway ? null : null,
+  });
+
+  checks.push({
+    id: 'gateway.pid',
+    status: staleGatewayPid ? 'warn' : 'ok',
+    title: 'Gateway PID File Integrity',
+    detail: staleGatewayPid
+      ? 'Gateway PID file exists without a running process.'
+      : 'Gateway PID file state is healthy.',
+    recommendedAction: staleGatewayPid ? 'clear_stale_pid_files' : null,
+  });
+
+  checks.push({
+    id: 'worker.pid',
+    status: staleWorkerPid ? 'warn' : 'ok',
+    title: 'Worker PID File Integrity',
+    detail: staleWorkerPid
+      ? 'Worker PID file exists without a running process.'
+      : 'Worker PID file state is healthy.',
+    recommendedAction: staleWorkerPid ? 'clear_stale_pid_files' : null,
+  });
+
+  checks.push({
+    id: 'worker.runtime',
+    status: gatewayRunning && !workerRunning && !workerAutoRestarting
+      ? 'error'
+      : (gatewayRunning && !workerRunning ? 'warn' : 'ok'),
+    title: 'Worker Runtime',
+    detail: gatewayRunning && !workerRunning
+      ? (workerAutoRestarting
+          ? `Worker is restarting (next restart at ${whatsapp?.gateway?.nextRestartAt || 'n/a'}).`
+          : 'Worker is not running while gateway is up.')
+      : (workerRunning ? 'Worker is running.' : 'Worker is stopped (gateway is not running).'),
+    recommendedAction: gatewayRunning && !workerRunning ? 'restart_gateway' : null,
+  });
+
+  checks.push({
+    id: 'worker.auth',
+    status: hasAuthSession ? 'ok' : 'warn',
+    title: 'WhatsApp Auth Session',
+    detail: hasAuthSession
+      ? 'WhatsApp auth session present.'
+      : 'No WhatsApp auth session found. Pairing or relink required.',
+    recommendedAction: hasAuthSession ? null : 'restart_gateway_relink',
+  });
+
+  checks.push({
+    id: 'pairing.queue',
+    status: pendingPairings > 0 ? 'warn' : 'ok',
+    title: 'Pairing Queue',
+    detail: pendingPairings > 0
+      ? `${pendingPairings} pairing request(s) pending approval.`
+      : 'No pending pairing requests.',
+    recommendedAction: null,
+  });
+
+  const summary = {
+    ok: checks.filter((item) => item.status === 'ok').length,
+    warn: checks.filter((item) => item.status === 'warn').length,
+    error: checks.filter((item) => item.status === 'error').length,
+  };
+
+  return {
+    generatedAt: agentNowIso(),
+    summary,
+    checks,
+    gateway: workspaceSummary,
+    service,
+    whatsapp,
+  };
+};
+
+const runGatewayRepairAction = async ({ workspaceId, action } = {}) => {
+  const normalizedAction = String(action || '').trim().toLowerCase();
+  const paths = linkedWhatsappPaths(workspaceId);
+
+  if (normalizedAction === 'clear_stale_pid_files') {
+    const gatewayPid = await readGatewayPid();
+    const workerPid = await readWorkspacePid(workspaceId);
+    const gatewayPidFileExists = fsSync.existsSync(CHIPPY_GATEWAY_PID_PATH);
+    const workerPidFileExists = fsSync.existsSync(paths.pidPath);
+
+    const cleared = {
+      gatewayPidFile: false,
+      workerPidFile: false,
+    };
+
+    if (gatewayPidFileExists && !isProcessRunning(gatewayPid)) {
+      await fs.rm(CHIPPY_GATEWAY_PID_PATH, { force: true });
+      cleared.gatewayPidFile = true;
+    }
+
+    if (workerPidFileExists && !isProcessRunning(workerPid)) {
+      await fs.rm(paths.pidPath, { force: true });
+      cleared.workerPidFile = true;
+    }
+
+    return {
+      action: normalizedAction,
+      cleared,
+    };
+  }
+
+  if (normalizedAction === 'start_gateway') {
+    await assertGatewayAppControlAllowed({ workspaceId });
+    return {
+      action: normalizedAction,
+      result: await startGatewayDaemon({
+        workspaceIds: [workspaceId],
+      }),
+    };
+  }
+
+  if (normalizedAction === 'restart_gateway') {
+    await assertGatewayAppControlAllowed({ workspaceId });
+    return {
+      action: normalizedAction,
+      result: await restartGatewayDaemon({
+        workspaceIds: [workspaceId],
+      }),
+    };
+  }
+
+  if (normalizedAction === 'restart_gateway_relink') {
+    await assertGatewayAppControlAllowed({ workspaceId });
+    return {
+      action: normalizedAction,
+      result: await restartGatewayDaemon({
+        workspaceIds: [workspaceId],
+        relinkWorkspaceIds: [workspaceId],
+      }),
+    };
+  }
+
+  if (normalizedAction === 'install_service') {
+    return {
+      action: normalizedAction,
+      result: await runGatewayCliJson({
+        action: 'install',
+        workspaceId,
+      }),
+    };
+  }
+
+  if (normalizedAction === 'uninstall_service') {
+    return {
+      action: normalizedAction,
+      result: await runGatewayCliJson({
+        action: 'uninstall',
+      }),
+    };
+  }
+
+  throw new Error(`Unsupported repair action: ${normalizedAction}`);
+};
+
+const restartGatewayDaemon = async ({ workspaceIds = [], relinkWorkspaceIds = [] } = {}) => {
+  await stopGatewayDaemon();
+  return startGatewayDaemon({
+    workspaceIds,
+    relinkWorkspaceIds,
+  });
+};
+
+const readWorkspacePid = async (workspaceId = '') => {
+  const paths = linkedWhatsappPaths(workspaceId);
+  try {
+    const raw = await fs.readFile(paths.pidPath, 'utf8');
+    const pid = Number(String(raw).trim());
+    return Number.isInteger(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+};
+
+const readQrDataUrl = async (filePath) => {
+  try {
+    const buffer = await fs.readFile(filePath);
+    return `data:image/png;base64,${buffer.toString('base64')}`;
+  } catch {
+    return null;
+  }
+};
+
+const readPairingCodeValue = async (filePath) => {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    const line = raw.split('\n').find((item) => item.startsWith('code='));
+    const value = line ? line.slice('code='.length).trim() : '';
+    return value || null;
+  } catch {
+    return null;
+  }
+};
+
+const readLogTail = async (filePath, maxChars = 2000) => {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    if (raw.length <= maxChars) return raw;
+    return raw.slice(raw.length - maxChars);
+  } catch {
+    return '';
+  }
+};
+
+const startLinkedWhatsappGateway = async ({ workspaceId, forceQr = true, resetAuth = false } = {}) => {
+  const paths = linkedWhatsappPaths(workspaceId);
+  const gatewayPid = await readGatewayPid();
+  if (isProcessRunning(gatewayPid)) {
+    return {
+      managedByGateway: true,
+      gatewayPid,
+      alreadyRunning: true,
+      pid: null,
+    };
+  }
+  const currentPid = await readWorkspacePid(workspaceId);
+  if (isProcessRunning(currentPid)) {
+    return {
+      alreadyRunning: true,
+      pid: currentPid,
+    };
+  }
+
+  await fs.mkdir(WHATSAPP_LINKED_BASE_DIR, { recursive: true });
+  const args = ['scripts/whatsapp-linked-device.js', '--workspace-id', workspaceId];
+  if (forceQr) args.push('--force-qr');
+  if (resetAuth) args.push('--reset-auth');
+
+  const outFd = fsSync.openSync(paths.logPath, 'a');
+  const child = spawn(process.execPath, args, {
+    cwd: __dirname,
+    detached: true,
+    stdio: ['ignore', outFd, outFd],
+    env: {
+      ...process.env,
+      WHATSAPP_DEFAULT_WORKSPACE_ID: workspaceId,
+      WHATSAPP_GATEWAY_STATE_PATH: paths.statePath,
+      WHATSAPP_AUTH_DIR: paths.authDir,
+      WHATSAPP_QR_PNG_PATH: paths.qrPngPath,
+      WHATSAPP_QR_TEXT_PATH: paths.qrTextPath,
+      WHATSAPP_PAIRING_CODE_PATH: paths.pairingCodePath,
+    },
+  });
+  try {
+    fsSync.closeSync(outFd);
+  } catch {
+    // ignore fd close issues
+  }
+  child.unref();
+  await fs.writeFile(paths.pidPath, `${child.pid}\n`, 'utf8');
+  return {
+    alreadyRunning: false,
+    pid: child.pid,
+  };
+};
+
+const stopLinkedWhatsappGateway = async ({ workspaceId } = {}) => {
+  const paths = linkedWhatsappPaths(workspaceId);
+  const gatewayPid = await readGatewayPid();
+  if (isProcessRunning(gatewayPid)) {
+    return { managedByGateway: true, gatewayPid, stopped: false, pid: null };
+  }
+  const pid = await readWorkspacePid(workspaceId);
+  if (!isProcessRunning(pid)) {
+    await fs.rm(paths.pidPath, { force: true });
+    return { stopped: false, pid: null };
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // ignore kill errors
+  }
+  let forced = false;
+  let exited = await waitForProcessExit(pid, 3000);
+  if (!exited) {
+    forced = true;
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // ignore kill errors
+    }
+    exited = await waitForProcessExit(pid, 1200);
+  }
+
+  await fs.rm(paths.pidPath, { force: true });
+  return { stopped: true, pid, forced, exited };
+};
+
+const getLinkedWhatsappGatewaySummary = async ({ workspaceId } = {}) => {
+  const paths = linkedWhatsappPaths(workspaceId);
+  const localPid = await readWorkspacePid(workspaceId);
+  const localRunning = isProcessRunning(localPid);
+  const daemonPid = await readGatewayPid();
+  const daemonRunning = isProcessRunning(daemonPid);
+  const daemonState = daemonRunning ? await readGatewayStateFile() : null;
+  const daemonWorker = daemonRunning ? pickGatewayWorkerForWorkspace(daemonState, workspaceId) : null;
+  const managedByGateway = daemonRunning && gatewayStateIncludesWorkspace(daemonState, workspaceId);
+  const running = managedByGateway ? daemonWorker?.running === true : localRunning;
+  const workerPid = managedByGateway ? (daemonWorker?.pid || null) : (running ? localPid : null);
+  const qrImageDataUrl = await readQrDataUrl(paths.qrPngPath);
+  const pairingCode = await readPairingCodeValue(paths.pairingCodePath);
+  const logTail = await readLogTail(paths.logPath, 2000);
+  const policyState = await readLinkedWhatsappState(workspaceId);
+  await writeLinkedWhatsappState(workspaceId, policyState);
+  const pendingPairings = await listLinkedPendingPairings(workspaceId);
+
+  return {
+    workspaceId,
+    gateway: {
+      running,
+      pid: workerPid,
+      managedByGateway,
+      gatewayPid: managedByGateway ? daemonPid : null,
+      qrImageDataUrl,
+      pairingCode,
+      hasAuthSession: fsSync.existsSync(paths.authDir),
+      logTail: logTail || '',
+      lastStartedAt: daemonWorker?.lastStartedAt || null,
+      nextRestartAt: daemonWorker?.nextRestartAt || null,
+      restartCount: Number(daemonWorker?.restartCount || 0),
+    },
+    policy: policyState.policy,
+    pendingPairings,
+  };
+};
+
+const pickAgentContext = (raw = {}) => {
+  if (!raw || typeof raw !== 'object') return {};
+  return {
+    leadId: sanitizeInput(raw.leadId || ''),
+    leadEmail: sanitizeInput(raw.leadEmail || ''),
+    requestedDate: sanitizeInput(raw.requestedDate || ''),
+    apiBaseUrl: sanitizeInput(raw.apiBaseUrl || ''),
+    serviceInterest: sanitizeInput(raw.serviceInterest || ''),
+    emailStatus: sanitizeInput(raw.emailStatus || ''),
+    timezone: sanitizeInput(raw.timezone || ''),
+    emailLimit: clampInt(raw.emailLimit, 1, 20, 3),
+  };
+};
+
+const summarizeRunForApi = (run) => {
+  const toolCalls = Array.isArray(run?.tooling?.toolCalls)
+    ? run.tooling.toolCalls.map((call) => ({
+        id: call.id,
+        name: call.name,
+        status: call.status,
+        reason: call.reason || null,
+        sideEffect: call.sideEffect || null,
+        dryRun: call.dryRun === true,
+        error: call.error || null,
+        actionId: call.actionId || undefined,
+      }))
+    : [];
+
+  return {
+    id: run.id,
+    status: run.status,
+    goal: run.goal,
+    provider: run.provider,
+    stepsUsed: run.stepsUsed,
+    review: {
+      status: run.review?.status || 'revise',
+      score: Number(run.review?.score || 0),
+    },
+    verification: {
+      passed: run.verification?.passed === true,
+      findings: Array.isArray(run.verification?.findings) ? run.verification.findings : [],
+    },
+    plan: Array.isArray(run.plan)
+      ? run.plan.map((task) => ({
+          id: task.id,
+          title: task.title,
+          objective: task.objective,
+          agentRole: task.agentRole,
+        }))
+      : [],
+    toolCalls,
+    startedAt: run.startedAt,
+    endedAt: run.endedAt,
+  };
+};
+
+const summarizeActionForApi = (action) => ({
+  id: action.id,
+  runId: action.runId,
+  toolCallId: action.toolCallId,
+  toolName: action.toolName,
+  status: action.status,
+  reason: action.reason || null,
+  decision: action.decision || null,
+  executionStatus: action.executionStatus || null,
+  createdAt: action.createdAt,
+});
+
+const summarizeRunListItemForApi = (run) => ({
+  id: run.id,
+  goal: run.goal,
+  status: run.status,
+  provider: run.provider,
+  stepsUsed: run.stepsUsed,
+  score: run.score,
+  reviewStatus: run.reviewStatus || null,
+  verificationPassed: run.verificationPassed === true,
+  startedAt: run.startedAt,
+  endedAt: run.endedAt,
+});
+
+const summarizeObjectiveForApi = (objective) => ({
+  id: objective.id,
+  workspaceId: objective.workspaceId,
+  title: objective.title || null,
+  goal: objective.goal,
+  status: objective.status,
+  priority: objective.priority || 'normal',
+  channel: objective.channel || null,
+  metadata: objective.metadata || {},
+  createdBy: objective.createdBy || null,
+  lastRunId: objective.lastRunId || null,
+  lastRunStatus: objective.lastRunStatus || null,
+  createdAt: objective.createdAt,
+  updatedAt: objective.updatedAt,
+});
+
+const summarizeSoulForApi = (soul) => ({
+  workspaceId: soul.workspaceId,
+  name: soul.name || 'Business Brain',
+  mission: soul.mission || 'Operate and improve business workflows safely.',
+  principles: Array.isArray(soul.principles) ? soul.principles : [],
+  guardrails: soul.guardrails && typeof soul.guardrails === 'object' ? soul.guardrails : {},
+  preferences: soul.preferences && typeof soul.preferences === 'object' ? soul.preferences : {},
+  updatedBy: soul.updatedBy || null,
+  createdAt: soul.createdAt,
+  updatedAt: soul.updatedAt,
+});
+
+const summarizeHeartbeatForApi = (summary = {}) => ({
+  workspaceId: summary.workspaceId || null,
+  latest: summary.latest ? {
+    id: summary.latest.id,
+    source: summary.latest.source,
+    status: summary.latest.status,
+    metrics: summary.latest.metrics || {},
+    note: summary.latest.note || null,
+    createdAt: summary.latest.createdAt,
+  } : null,
+  metrics: summary.metrics || {
+    objectivesPending: 0,
+    approvalsPending: 0,
+    runsLast24h: 0,
+  },
+});
+
+const parseSoulPatch = (body = {}) => {
+  const principles = Array.isArray(body.principles)
+    ? body.principles.map((item) => sanitizeInput(item)).filter(Boolean).slice(0, 20)
+    : undefined;
+  const guardrails = body.guardrails && typeof body.guardrails === 'object'
+    ? sanitizeObject(body.guardrails)
+    : undefined;
+  const preferences = body.preferences && typeof body.preferences === 'object'
+    ? sanitizeObject(body.preferences)
+    : undefined;
+
+  return {
+    ...(body.name !== undefined ? { name: sanitizeInput(body.name) } : {}),
+    ...(body.mission !== undefined ? { mission: sanitizeInput(body.mission) } : {}),
+    ...(principles ? { principles } : {}),
+    ...(guardrails ? { guardrails } : {}),
+    ...(preferences ? { preferences } : {}),
+  };
+};
+
+const recordWorkspaceHeartbeat = async ({ workspaceId, source, status = 'ok', note = null, extraMetrics = {} } = {}) => {
+  try {
+    const summary = await agentRuntime.runStore.getHeartbeatSummary({ workspaceId });
+    const metrics = {
+      ...(summary?.metrics || {}),
+      ...(extraMetrics || {}),
+    };
+    return agentRuntime.runStore.recordHeartbeat({
+      workspaceId,
+      source,
+      status,
+      metrics,
+      note,
+    });
+  } catch (error) {
+    console.warn('[AgentRuntime] heartbeat record skipped:', error?.message || error);
+    return null;
+  }
+};
+
+const getWorkspaceCompanyName = async ({ workspaceId, warnPrefix = 'AgentRuntime' } = {}) => {
+  let companyName = 'Chippy User';
+  try {
+    const { data: settings } = await supabaseAdmin
+      .from('settings')
+      .select('tenant_config')
+      .eq('user_id', workspaceId)
+      .maybeSingle();
+    companyName = settings?.tenant_config?.companyName || 'Chippy User';
+  } catch (error) {
+    console.warn(`[${warnPrefix}] failed to load workspace settings:`, error?.message || error);
+  }
+  return companyName;
+};
+
+const runWorkspaceMission = async ({
+  workspaceId,
+  goal,
+  providerId,
+  model,
+  executeWrites = false,
+  policy = {},
+  context = {},
+  warnPrefix = 'AgentRuntime',
+} = {}) => {
+  const companyName = await getWorkspaceCompanyName({
+    workspaceId,
+    warnPrefix,
+  });
+  const soul = await agentRuntime.runStore.getSoul({
+    workspaceId,
+  });
+
+  const run = await agentRuntime.run({
+    goal,
+    providerId,
+    model,
+    executeWrites,
+    context: {
+      userId: workspaceId,
+      tenantId: workspaceId,
+      workspaceId,
+      companyName,
+      soul,
+      ...(context && typeof context === 'object' ? context : {}),
+    },
+    policy,
+  });
+  const pendingActions = await listRunPendingActions(run.id, workspaceId);
+
+  return {
+    run,
+    pendingActions,
+    companyName,
+  };
+};
+
+const recordRunCompletionHeartbeat = async ({
+  workspaceId,
+  source,
+  run,
+  runLabel = 'Run',
+  channel = '',
+} = {}) =>
+  recordWorkspaceHeartbeat({
+    workspaceId,
+    source,
+    status: run?.status === 'failed' ? 'error' : 'ok',
+    note: `${runLabel} ${run?.id || 'unknown'} finished with status ${run?.status || 'unknown'}`,
+    extraMetrics: {
+      lastRunStatus: run?.status || 'unknown',
+      ...(channel ? { channel } : {}),
+    },
+  });
+
+const recordRunFailureHeartbeat = async ({
+  workspaceId,
+  source,
+  error,
+  runLabel = 'Run',
+  channel = '',
+} = {}) =>
+  recordWorkspaceHeartbeat({
+    workspaceId,
+    source,
+    status: 'error',
+    note: `${runLabel} failed: ${error?.message || 'unknown error'}`,
+    extraMetrics: {
+      ...(channel ? { channel } : {}),
+    },
+  });
+
+const mapRunStatusToObjectiveStatus = (runStatus) => {
+  if (runStatus === 'completed') return 'completed';
+  if (runStatus === 'awaiting_approval') return 'awaiting_approval';
+  if (runStatus === 'needs_revision') return 'needs_revision';
+  if (runStatus === 'blocked_policy') return 'blocked_policy';
+  return 'failed';
+};
+
+const buildAssistantMessageFromRun = (run) => {
+  const outputs = Array.isArray(run?.outputs) ? run.outputs : [];
+  const summaries = outputs
+    .map((item) => item?.parsed?.summary)
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => String(value).trim());
+
+  const deliverables = outputs
+    .flatMap((item) => (Array.isArray(item?.parsed?.deliverables) ? item.parsed.deliverables : []))
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => String(value).trim())
+    .slice(0, 3);
+
+  const findings = Array.isArray(run?.verification?.findings) ? run.verification.findings : [];
+  const lines = [];
+
+  if (summaries.length > 0) {
+    lines.push(summaries[summaries.length - 1]);
+  } else {
+    lines.push(`Run finished with status: ${run?.status || 'unknown'}.`);
+  }
+
+  if (deliverables.length > 0) {
+    lines.push(`Deliverables: ${deliverables.join(' | ')}`);
+  }
+
+  if (findings.length > 0) {
+    lines.push(`Reviewer findings: ${findings.join(' ')}`);
+  }
+
+  if (run?.status === 'awaiting_approval') {
+    lines.push('Write actions are waiting for approval before execution.');
+  }
+
+  return lines.join('\n\n');
+};
+
+const buildWhatsAppReplyFromRun = (run, pendingActionsCount = 0) => {
+  const lines = [buildAssistantMessageFromRun(run)];
+  if (pendingActionsCount > 0) {
+    lines.push(`${pendingActionsCount} action(s) are waiting for owner approval in the app.`);
+  }
+  return truncateWhatsAppReply(lines.join('\n\n'), 1400);
+};
+
+const runGmailPubsubAutomation = async ({
+  workspaceId,
+  emailAddress = '',
+  historyId = '',
+  pubsubMessageId = '',
+  subscription = '',
+  publishTime = '',
+  attributes = {},
+  apiBaseUrl = '',
+} = {}) => {
+  if (!workspaceId) return;
+
+  try {
+    const { run, pendingActions } = await runWorkspaceMission({
+      workspaceId,
+      goal: GMAIL_PUBSUB_GOAL,
+      providerId: GMAIL_PUBSUB_PROVIDER_ID,
+      model: GMAIL_PUBSUB_MODEL,
+      executeWrites: GMAIL_PUBSUB_EXECUTE_WRITES,
+      context: {
+        source: 'gmail.pubsub',
+        channel: 'gmail',
+        timezone: GMAIL_PUBSUB_TIMEZONE,
+        apiBaseUrl: apiBaseUrl || undefined,
+        emailSource: GMAIL_PUBSUB_EMAIL_SOURCE || 'gmail',
+        emailTransport: GMAIL_PUBSUB_EMAIL_TRANSPORT || 'gmail',
+        gmailEmailAddress: emailAddress || undefined,
+        gmailHistoryId: historyId || undefined,
+        pubsubMessageId: pubsubMessageId || undefined,
+        pubsubSubscription: subscription || undefined,
+        pubsubPublishTime: publishTime || undefined,
+        pubsubAttributes: attributes && typeof attributes === 'object' ? attributes : {},
+      },
+      policy: buildGmailPubsubPolicy(),
+    });
+
+    await recordRunCompletionHeartbeat({
+      workspaceId,
+      source: 'gmail.pubsub.run',
+      run,
+      runLabel: 'Gmail Pub/Sub run',
+      channel: 'gmail',
+    });
+
+    console.log(
+      `[Gmail PubSub] run=${run.id} workspace=${workspaceId} status=${run.status} pendingActions=${pendingActions.length}`,
+    );
+  } catch (error) {
+    await recordRunFailureHeartbeat({
+      workspaceId,
+      source: 'gmail.pubsub.run',
+      error,
+      runLabel: 'Gmail Pub/Sub run',
+      channel: 'gmail',
+    });
+    console.error('[Gmail PubSub] runtime error:', error);
+  }
+};
+
+const loadRunSummary = async (runId) => {
+  try {
+    const run = await agentRuntime.runStore.load(runId);
+    return summarizeRunForApi(run);
+  } catch {
+    return null;
+  }
+};
+
+const listRunPendingActions = async (runId, workspaceId) => {
+  const rows = await agentRuntime.runStore.listActions({
+    status: 'pending_review',
+    runId,
+    workspaceId,
+    limit: 20,
+  });
+  return rows.map(summarizeActionForApi);
+};
+
+const formatWhatsAppTimestamp = (value) => {
+  if (!value) return 'n/a';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toISOString().replace('T', ' ').slice(0, 16) + 'Z';
+};
+
+const WHATSAPP_COMMAND_SET = new Set(['help', 'status', 'actions', 'approve', 'deny']);
+const WHATSAPP_OWNER_COMMAND_SET = new Set(['status', 'actions', 'approve', 'deny']);
+
+const parseWhatsAppCommand = (text) => {
+  const normalized = String(text || '').trim();
+  if (!normalized) return null;
+
+  const parts = normalized.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return null;
+
+  const firstToken = parts[0].toLowerCase();
+  if (!firstToken.startsWith('/')) return null;
+  const command = firstToken.slice(1);
+  if (!WHATSAPP_COMMAND_SET.has(command)) return null;
+
+  return {
+    name: command,
+    args: parts.slice(1),
+  };
+};
+
+const WHATSAPP_HELP_TEXT = [
+  'Chippy WhatsApp commands:',
+  '/help',
+  '/status',
+  '/actions',
+  '/approve <action_id>',
+  '/deny <action_id>',
+  'Any non-command message runs a new agent mission.',
+].join('\n');
+
+const buildWhatsAppStatusReply = async ({ workspaceId }) => {
+  const [summary, pendingActions, recentRuns] = await Promise.all([
+    agentRuntime.runStore.getHeartbeatSummary({ workspaceId }),
+    agentRuntime.runStore.listActions({
+      status: 'pending_review',
+      workspaceId,
+      limit: 5,
+    }),
+    agentRuntime.runStore.listRuns({
+      workspaceId,
+      limit: 1,
+    }),
+  ]);
+
+  const latestRun = Array.isArray(recentRuns) && recentRuns.length > 0 ? recentRuns[0] : null;
+  const metrics = summary?.metrics || {};
+  const lines = [
+    `Workspace: ${workspaceId}`,
+    `Heartbeat: ${summary?.latest?.status || 'n/a'} at ${formatWhatsAppTimestamp(summary?.latest?.createdAt)}`,
+    `Queue: objectives=${Number(metrics.objectivesPending || 0)} approvals=${Number(metrics.approvalsPending || 0)} runs24h=${Number(metrics.runsLast24h || 0)}`,
+  ];
+
+  if (latestRun) {
+    lines.push(`Last run: ${latestRun.id} (${latestRun.status})`);
+  }
+
+  if (pendingActions.length > 0) {
+    lines.push(`Pending actions: ${pendingActions.map((item) => item.id).join(', ')}`);
+  } else {
+    lines.push('Pending actions: none');
+  }
+
+  return truncateWhatsAppReply(lines.join('\n'), 1400);
+};
+
+const buildWhatsAppActionsReply = async ({ workspaceId }) => {
+  const actions = await agentRuntime.runStore.listActions({
+    status: 'pending_review',
+    workspaceId,
+    limit: 10,
+  });
+
+  if (!actions || actions.length === 0) {
+    return 'No pending approval actions.';
+  }
+
+  const lines = ['Pending approval actions:'];
+  for (const action of actions) {
+    lines.push(`- ${action.id} | ${action.toolName}`);
+  }
+
+  return truncateWhatsAppReply(lines.join('\n'), 1400);
+};
+
+const processWorkspaceActionDecision = async ({ workspaceId, actionId, decision, decidedBy }) => {
+  const normalizedDecision = String(decision || '').toLowerCase();
+  if (!['approve', 'deny'].includes(normalizedDecision)) {
+    return {
+      status: 'invalid',
+      message: 'Invalid decision. Use approve or deny.',
+      action: null,
+      run: null,
+      pendingActions: [],
+    };
+  }
+
+  const targetActionId = sanitizeInput(actionId || '');
+  if (!targetActionId) {
+    return {
+      status: 'invalid',
+      message: 'Missing action ID.',
+      action: null,
+      run: null,
+      pendingActions: [],
+    };
+  }
+
+  const existing = await agentRuntime.runStore.getAction(targetActionId);
+  if (!existing || existing.workspaceId !== workspaceId) {
+    return {
+      status: 'not_found',
+      message: 'Action not found for this workspace.',
+      action: null,
+      run: null,
+      pendingActions: [],
+    };
+  }
+
+  const decided = await agentRuntime.runStore.decideAction({
+    actionId: targetActionId,
+    decision: normalizedDecision,
+    decidedBy,
+  });
+
+  if (normalizedDecision === 'deny') {
+    await agentRuntime.runStore.patchRunToolCall({
+      runId: decided.runId,
+      toolCallId: decided.toolCallId,
+      patch: {
+        status: 'denied',
+        error: `Action denied by ${decidedBy}`,
+        endedAt: agentNowIso(),
+      },
+    });
+
+    return {
+      status: 'denied',
+      message: 'Action denied.',
+      action: summarizeActionForApi(decided),
+      run: await loadRunSummary(decided.runId),
+      pendingActions: await listRunPendingActions(decided.runId, workspaceId),
+    };
+  }
+
+  if (decided.status === 'executed') {
+    return {
+      status: 'already_executed',
+      message: 'Action was already executed.',
+      action: summarizeActionForApi(decided),
+      run: await loadRunSummary(decided.runId),
+      pendingActions: await listRunPendingActions(decided.runId, workspaceId),
+    };
+  }
+
+  if (decided.status !== 'approved') {
+    return {
+      status: 'not_executable',
+      message: `Action status is ${decided.status}.`,
+      action: summarizeActionForApi(decided),
+      run: await loadRunSummary(decided.runId),
+      pendingActions: await listRunPendingActions(decided.runId, workspaceId),
+    };
+  }
+
+  try {
+    const claimed = await agentRuntime.runStore.claimActionExecution({
+      actionId: targetActionId,
+      claimedBy: decidedBy,
+    });
+
+    if (claimed.status === 'executed') {
+      return {
+        status: 'already_executed',
+        message: 'Action was already executed.',
+        action: summarizeActionForApi(claimed),
+        run: await loadRunSummary(claimed.runId),
+        pendingActions: await listRunPendingActions(claimed.runId, workspaceId),
+      };
+    }
+
+    const execution = await agentRuntime.toolRegistry.execute(claimed.toolName, {
+      input: claimed.input || {},
+      context: {
+        ...(claimed.context || {}),
+        userId: workspaceId,
+        tenantId: workspaceId,
+      },
+      dryRun: false,
+    });
+
+    const executedAction = await agentRuntime.runStore.finalizeActionExecution({
+      actionId: targetActionId,
+      executionStatus: 'executed',
+      result: execution.result,
+    });
+
+    await agentRuntime.runStore.patchRunToolCall({
+      runId: decided.runId,
+      toolCallId: decided.toolCallId,
+      patch: {
+        status: 'completed',
+        dryRun: false,
+        result: execution.result,
+        idempotencyKey: execution.idempotencyKey,
+        attempts: 1,
+        error: null,
+        endedAt: agentNowIso(),
+      },
+    });
+
+    return {
+      status: 'executed',
+      message: 'Action approved and executed.',
+      action: summarizeActionForApi(executedAction),
+      run: await loadRunSummary(decided.runId),
+      pendingActions: await listRunPendingActions(decided.runId, workspaceId),
+    };
+  } catch (error) {
+    const failedAction = await agentRuntime.runStore.finalizeActionExecution({
+      actionId: targetActionId,
+      executionStatus: 'failed',
+      error: error.message || 'Action execution failed',
+    });
+
+    await agentRuntime.runStore.patchRunToolCall({
+      runId: decided.runId,
+      toolCallId: decided.toolCallId,
+      patch: {
+        status: 'failed',
+        dryRun: false,
+        error: error.message || 'Action execution failed',
+        endedAt: agentNowIso(),
+      },
+    });
+
+    return {
+      status: 'failed',
+      message: error.message || 'Action execution failed',
+      action: summarizeActionForApi(failedAction),
+      run: await loadRunSummary(decided.runId),
+      pendingActions: await listRunPendingActions(decided.runId, workspaceId),
+    };
+  }
+};
+
+const handleWhatsAppCommand = async ({ workspaceId, fromNumber, rawText }) => {
+  const command = parseWhatsAppCommand(rawText);
+  if (!command) return null;
+
+  if (WHATSAPP_OWNER_COMMAND_SET.has(command.name) && !isWhatsAppOwnerNumber(fromNumber)) {
+    return {
+      handled: true,
+      message: 'This command is restricted to owner numbers.',
+      source: `whatsapp.command.${command.name}`,
+    };
+  }
+
+  if (command.name === 'help') {
+    return {
+      handled: true,
+      message: WHATSAPP_HELP_TEXT,
+      source: 'whatsapp.command.help',
+    };
+  }
+
+  if (command.name === 'status') {
+    return {
+      handled: true,
+      message: await buildWhatsAppStatusReply({ workspaceId }),
+      source: 'whatsapp.command.status',
+    };
+  }
+
+  if (command.name === 'actions') {
+    return {
+      handled: true,
+      message: await buildWhatsAppActionsReply({ workspaceId }),
+      source: 'whatsapp.command.actions',
+    };
+  }
+
+  if (command.name === 'approve' || command.name === 'deny') {
+    const actionId = sanitizeInput(command.args[0] || '');
+    if (!actionId) {
+      return {
+        handled: true,
+        message: `Usage: /${command.name} <action_id>`,
+        source: `whatsapp.command.${command.name}`,
+      };
+    }
+
+    const actor = normalizeWhatsAppAddress(fromNumber) || 'unknown';
+    const result = await processWorkspaceActionDecision({
+      workspaceId,
+      actionId,
+      decision: command.name,
+      decidedBy: `whatsapp:${actor}`,
+    });
+
+    const lines = [result.message];
+    if (result.action?.id) {
+      lines.push(`Action: ${result.action.id} (${result.action.status})`);
+    }
+    if (result.run?.id) {
+      lines.push(`Run: ${result.run.id} (${result.run.status})`);
+    }
+    if (Array.isArray(result.pendingActions)) {
+      lines.push(`Pending approvals: ${result.pendingActions.length}`);
+    }
+
+    return {
+      handled: true,
+      message: truncateWhatsAppReply(lines.join('\n'), 1400),
+      source: `whatsapp.command.${command.name}`,
+    };
+  }
+
+  return {
+    handled: true,
+    message: WHATSAPP_HELP_TEXT,
+    source: 'whatsapp.command.unknown',
+  };
+};
+
+app.get('/api/agent-runtime/providers', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const providers = agentRuntimeProviderRegistry.list();
+    res.json({ providers });
+  } catch (error) {
+    console.error('[AgentRuntime] provider list error:', error);
+    res.status(500).json({ error: 'Failed to list providers' });
+  }
+});
+
+app.get('/api/agent-runtime/soul', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const soul = await agentRuntime.runStore.getSoul({
+      workspaceId: user.id,
+    });
+
+    res.json({
+      soul: summarizeSoulForApi(soul || {
+        workspaceId: user.id,
+        name: 'Business Brain',
+        mission: 'Operate and improve business workflows safely.',
+        principles: [],
+        guardrails: {},
+        preferences: {},
+        createdAt: agentNowIso(),
+        updatedAt: agentNowIso(),
+      }),
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] soul fetch error:', error);
+    res.status(500).json({ error: error.message || 'Failed to load soul' });
+  }
+});
+
+app.put('/api/agent-runtime/soul', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const patch = parseSoulPatch(req.body || {});
+    const soul = await agentRuntime.runStore.upsertSoul({
+      workspaceId: user.id,
+      patch,
+      updatedBy: user.email || user.id,
+    });
+
+    await recordWorkspaceHeartbeat({
+      workspaceId: user.id,
+      source: 'soul.update',
+      status: 'ok',
+      note: 'Soul profile updated',
+    });
+
+    res.json({
+      soul: summarizeSoulForApi(soul),
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] soul update error:', error);
+    res.status(500).json({ error: error.message || 'Failed to update soul' });
+  }
+});
+
+app.get('/api/agent-runtime/heartbeat', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const summary = await agentRuntime.runStore.getHeartbeatSummary({
+      workspaceId: user.id,
+    });
+
+    res.json({
+      heartbeat: summarizeHeartbeatForApi(summary),
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] heartbeat fetch error:', error);
+    res.status(500).json({ error: error.message || 'Failed to load heartbeat' });
+  }
+});
+
+app.post('/api/agent-runtime/heartbeat/tick', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const source = sanitizeInput(req.body?.source || 'manual.tick') || 'manual.tick';
+    const status = sanitizeInput(req.body?.status || 'ok') || 'ok';
+    const note = sanitizeInput(req.body?.note || '') || null;
+    const metrics = req.body?.metrics && typeof req.body.metrics === 'object'
+      ? sanitizeObject(req.body.metrics)
+      : {};
+
+    const summary = await agentRuntime.runStore.getHeartbeatSummary({
+      workspaceId: user.id,
+    });
+    const heartbeat = await agentRuntime.runStore.recordHeartbeat({
+      workspaceId: user.id,
+      source,
+      status,
+      note,
+      metrics: {
+        ...(summary?.metrics || {}),
+        ...(metrics || {}),
+      },
+    });
+
+    const updatedSummary = await agentRuntime.runStore.getHeartbeatSummary({
+      workspaceId: user.id,
+    });
+
+    res.json({
+      heartbeat: summarizeHeartbeatForApi({
+        ...updatedSummary,
+        latest: heartbeat || updatedSummary?.latest || null,
+      }),
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] heartbeat tick error:', error);
+    res.status(500).json({ error: error.message || 'Failed to record heartbeat' });
+  }
+});
+
+app.get('/api/agent-runtime/runs', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const statusRaw = sanitizeInput(req.query.status || 'all');
+    const status = AGENT_RUN_STATUSES.has(statusRaw) ? statusRaw : 'all';
+    const limit = clampInt(req.query.limit, 1, 100, 25);
+
+    const runs = await agentRuntime.runStore.listRuns({
+      workspaceId: user.id,
+      status,
+      limit,
+    });
+
+    res.json({
+      runs: runs.map(summarizeRunListItemForApi),
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] run list error:', error);
+    res.status(500).json({ error: error.message || 'Failed to list runs' });
+  }
+});
+
+app.get('/api/agent-runtime/runs/:runId', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const runId = sanitizeInput(req.params.runId || '');
+    if (!runId) {
+      return res.status(400).json({ error: 'Missing runId' });
+    }
+
+    const run = await agentRuntime.runStore.load(runId);
+    const ownerId = run?.context?.userId
+      || run?.context?.tenantId
+      || run?.context?.workspaceId
+      || run?.context?.fixture?.tenantId
+      || null;
+
+    if (!ownerId || ownerId !== user.id) {
+      return res.status(403).json({ error: 'Not authorized for this run' });
+    }
+
+    res.json({
+      run: summarizeRunForApi(run),
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] run detail error:', error);
+    res.status(500).json({ error: error.message || 'Failed to load run' });
+  }
+});
+
+app.get('/api/agent-runtime/objectives', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const statusRaw = sanitizeInput(req.query.status || 'all');
+    const status = AGENT_OBJECTIVE_STATUSES.has(statusRaw) ? statusRaw : 'all';
+    const limit = clampInt(req.query.limit, 1, 100, 25);
+
+    const objectives = await agentRuntime.runStore.listObjectives({
+      workspaceId: user.id,
+      status,
+      limit,
+    });
+
+    res.json({
+      objectives: objectives.map(summarizeObjectiveForApi),
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] objective list error:', error);
+    res.status(500).json({ error: error.message || 'Failed to list objectives' });
+  }
+});
+
+app.post('/api/agent-runtime/objectives', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const goal = sanitizeInput(req.body?.goal || '');
+    if (!goal) {
+      return res.status(400).json({ error: 'Missing goal' });
+    }
+
+    const objective = await agentRuntime.runStore.createObjective({
+      workspaceId: user.id,
+      title: sanitizeInput(req.body?.title || ''),
+      goal,
+      priority: sanitizeInput(req.body?.priority || 'normal'),
+      channel: sanitizeInput(req.body?.channel || 'manual'),
+      metadata: sanitizeObject(req.body?.metadata || {}),
+      createdBy: user.email || user.id,
+    });
+
+    res.status(201).json({
+      objective: summarizeObjectiveForApi(objective),
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] objective create error:', error);
+    res.status(500).json({ error: error.message || 'Failed to create objective' });
+  }
+});
+
+app.post('/api/agent-runtime/objectives/:objectiveId/run', expensiveApiLimiter, async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const objectiveId = sanitizeInput(req.params.objectiveId || '');
+    if (!objectiveId) {
+      return res.status(400).json({ error: 'Missing objectiveId' });
+    }
+
+    const objective = await agentRuntime.runStore.getObjective({
+      objectiveId,
+      workspaceId: user.id,
+    });
+
+    if (!objective) {
+      return res.status(404).json({ error: 'Objective not found' });
+    }
+
+    const providerId = sanitizeInput(req.body?.providerId || 'gemini.flash');
+    const model = sanitizeInput(req.body?.model || '') || undefined;
+    const executeWrites = req.body?.executeWrites === true;
+    const timezone = sanitizeInput(req.body?.timezone || '') || null;
+    const policy = parseAgentPolicy(req.body || {}, timezone);
+    const requestContext = pickAgentContext(req.body?.context || {});
+
+    const { data: settings } = await supabaseAdmin
+      .from('settings')
+      .select('tenant_config')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    const soul = await agentRuntime.runStore.getSoul({
+      workspaceId: user.id,
+    });
+
+    const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+
+    await agentRuntime.runStore.updateObjective({
+      objectiveId,
+      workspaceId: user.id,
+      patch: {
+        status: 'running',
+        metadataMerge: {
+          lastRequestedAt: agentNowIso(),
+        },
+      },
+    });
+
+    try {
+      const run = await agentRuntime.run({
+        goal: objective.goal,
+        providerId,
+        model,
+        executeWrites,
+        context: {
+          source: 'objective',
+          objectiveId,
+          userId: user.id,
+          tenantId: user.id,
+          ownerEmail: user.email || undefined,
+          companyName,
+          timezone,
+          apiBaseUrl,
+          soul,
+          ...requestContext,
+        },
+        policy,
+      });
+
+      const pendingActions = await listRunPendingActions(run.id, user.id);
+      const objectiveStatus = mapRunStatusToObjectiveStatus(run.status);
+      const updatedObjective = await agentRuntime.runStore.updateObjective({
+        objectiveId,
+        workspaceId: user.id,
+        patch: {
+          status: objectiveStatus,
+          lastRunId: run.id,
+          lastRunStatus: run.status,
+          metadataMerge: {
+            lastRunAt: agentNowIso(),
+            lastProviderId: providerId,
+          },
+        },
+      });
+
+      await recordWorkspaceHeartbeat({
+        workspaceId: user.id,
+        source: 'objective.run',
+        status: run.status === 'failed' ? 'error' : 'ok',
+        note: `Objective ${objectiveId} run status ${run.status}`,
+        extraMetrics: {
+          lastRunStatus: run.status,
+        },
+      });
+
+      res.json({
+        objective: summarizeObjectiveForApi(updatedObjective || objective),
+        assistantMessage: buildAssistantMessageFromRun(run),
+        run: summarizeRunForApi(run),
+        pendingActions,
+      });
+    } catch (error) {
+      const failedObjective = await agentRuntime.runStore.updateObjective({
+        objectiveId,
+        workspaceId: user.id,
+        patch: {
+          status: 'failed',
+          metadataMerge: {
+            lastRunError: error.message || 'Objective run failed',
+            lastRunAt: agentNowIso(),
+          },
+        },
+      });
+
+      await recordWorkspaceHeartbeat({
+        workspaceId: user.id,
+        source: 'objective.run',
+        status: 'error',
+        note: `Objective ${objectiveId} failed: ${error.message || 'run failed'}`,
+      });
+
+      res.status(500).json({
+        error: error.message || 'Objective run failed',
+        objective: summarizeObjectiveForApi(failedObjective || objective),
+      });
+    }
+  } catch (error) {
+    console.error('[AgentRuntime] objective run error:', error);
+    res.status(500).json({ error: error.message || 'Failed to run objective' });
+  }
+});
+
+app.post('/api/agent-runtime/chat', expensiveApiLimiter, async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const message = sanitizeInput(req.body?.message || req.body?.goal || '');
+    if (!message) {
+      return res.status(400).json({ error: 'Missing message' });
+    }
+
+    const providerId = sanitizeInput(req.body?.providerId || 'gemini.flash');
+    const model = sanitizeInput(req.body?.model || '') || undefined;
+    const executeWrites = req.body?.executeWrites === true;
+    const timezone = sanitizeInput(req.body?.timezone || req.body?.context?.timezone || '') || null;
+    const policy = parseAgentPolicy(req.body || {}, timezone);
+    const requestContext = pickAgentContext(req.body?.context || {});
+
+    const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+
+    const { run, pendingActions } = await runWorkspaceMission({
+      workspaceId: user.id,
+      goal: message,
+      providerId,
+      model,
+      executeWrites,
+      policy,
+      context: {
+        source: 'app-chat',
+        ownerEmail: user.email || undefined,
+        timezone,
+        apiBaseUrl,
+        ...requestContext,
+      },
+    });
+
+    await recordRunCompletionHeartbeat({
+      workspaceId: user.id,
+      source: 'chat.run',
+      run,
+    });
+
+    res.json({
+      assistantMessage: buildAssistantMessageFromRun(run),
+      run: summarizeRunForApi(run),
+      pendingActions,
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] run error:', error);
+    res.status(500).json({ error: error.message || 'Agent run failed' });
+  }
+});
+
+app.post('/api/integrations/whatsapp/twilio/webhook', whatsappWebhookLimiter, async (req, res) => {
+  try {
+    const providedSecret = sanitizeInput(req.query?.token || req.headers['x-chippy-whatsapp-token'] || '') || '';
+    if (WHATSAPP_WEBHOOK_SECRET && providedSecret !== WHATSAPP_WEBHOOK_SECRET) {
+      return res.status(401).json({ error: 'Invalid webhook token' });
+    }
+
+    if (!verifyTwilioWebhookSignature(req)) {
+      return res.status(401).json({ error: 'Invalid Twilio signature' });
+    }
+
+    const inboundText = sanitizeInput(req.body?.Body || '');
+    const from = sanitizeInput(req.body?.From || '');
+    const to = sanitizeInput(req.body?.To || '');
+    const profileName = sanitizeInput(req.body?.ProfileName || '');
+    const messageSid = sanitizeInput(req.body?.MessageSid || '');
+    const workspaceId = resolveWhatsAppWorkspaceId({ to, from });
+
+    if (!workspaceId) {
+      return sendTwimlMessage(res, 'This WhatsApp number is not linked to a workspace yet.');
+    }
+    if (!inboundText) {
+      return sendTwimlMessage(res, 'Send a text request and I will run it through your business brain.');
+    }
+
+    const dmPolicy = await enforceWhatsAppDmPolicy({
+      workspaceId,
+      fromNumber: from,
+    });
+    if (!dmPolicy.allowed) {
+      await recordWorkspaceHeartbeat({
+        workspaceId,
+        source: 'whatsapp.dm_policy.blocked',
+        status: 'ok',
+        note: `Blocked WhatsApp sender by DM policy (${dmPolicy.reason})`,
+        extraMetrics: {
+          channel: 'whatsapp',
+        },
+      });
+      return sendTwimlMessage(res, dmPolicy.responseMessage || 'Access denied.');
+    }
+
+    const commandResult = await handleWhatsAppCommand({
+      workspaceId,
+      fromNumber: from,
+      rawText: inboundText,
+    });
+    if (commandResult?.handled) {
+      await recordWorkspaceHeartbeat({
+        workspaceId,
+        source: commandResult.source || 'whatsapp.command',
+        status: 'ok',
+        note: `WhatsApp command handled (${commandResult.source || 'unknown'})`,
+        extraMetrics: {
+          channel: 'whatsapp',
+        },
+      });
+      return sendTwimlMessage(res, commandResult.message);
+    }
+
+    const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+
+    const { run, pendingActions } = await runWorkspaceMission({
+      workspaceId,
+      goal: inboundText,
+      providerId: WHATSAPP_DEFAULT_PROVIDER_ID,
+      model: WHATSAPP_DEFAULT_MODEL,
+      executeWrites: WHATSAPP_EXECUTE_WRITES,
+      policy: buildWhatsAppPolicy(),
+      context: {
+        source: 'whatsapp-chat',
+        channel: 'whatsapp',
+        timezone: WHATSAPP_DEFAULT_TIMEZONE,
+        apiBaseUrl,
+        contactPhone: normalizeWhatsAppAddress(from),
+        contactName: profileName || undefined,
+        inboundMessageId: messageSid || undefined,
+      },
+    });
+
+    await recordRunCompletionHeartbeat({
+      workspaceId,
+      source: 'whatsapp.run',
+      run,
+      runLabel: 'WhatsApp run',
+      channel: 'whatsapp',
+    });
+
+    return sendTwimlMessage(res, buildWhatsAppReplyFromRun(run, pendingActions.length));
+  } catch (error) {
+    console.error('[WhatsApp] webhook error:', error);
+    return sendTwimlMessage(res, 'I could not process that right now. Please retry in a moment.');
+  }
+});
+
+app.post('/api/integrations/gmail/pubsub/webhook', gmailWebhookLimiter, async (req, res) => {
+  try {
+    const providedSecret = sanitizeInput(req.query?.token || req.headers['x-chippy-gmail-token'] || '') || '';
+    if (GMAIL_PUBSUB_WEBHOOK_SECRET && providedSecret !== GMAIL_PUBSUB_WEBHOOK_SECRET) {
+      return res.status(401).json({ error: 'Invalid webhook token' });
+    }
+
+    const envelope = req.body && typeof req.body === 'object' ? req.body : {};
+    const message = envelope.message && typeof envelope.message === 'object' ? envelope.message : {};
+    const subscription = sanitizeInput(envelope.subscription || '') || '';
+
+    if (!hasAllowedGmailSubscription(subscription)) {
+      return res.status(403).json({ error: 'Subscription is not allowlisted' });
+    }
+
+    const attributes = message.attributes && typeof message.attributes === 'object'
+      ? sanitizeObject(message.attributes)
+      : {};
+    const pubsubPayload = decodeGmailPubsubData(message.data || '');
+    const pubsubMessageId = sanitizeInput(message.messageId || message.message_id || '') || '';
+    const publishTime = sanitizeInput(message.publishTime || message.publish_time || '') || '';
+    const emailAddress = sanitizeInput(
+      pubsubPayload.emailAddress
+      || pubsubPayload.email
+      || pubsubPayload.address
+      || attributes.emailAddress
+      || ''
+    ) || '';
+    const historyId = sanitizeInput(pubsubPayload.historyId || attributes.historyId || '') || '';
+
+    if (!emailAddress && !subscription && !pubsubMessageId) {
+      return res.status(400).json({ error: 'Invalid Gmail Pub/Sub payload' });
+    }
+
+    const workspaceId = resolveGmailWorkspaceId({
+      emailAddress,
+      subscription,
+    });
+    if (!workspaceId) {
+      return res.status(202).json({
+        received: true,
+        ignored: true,
+        reason: 'workspace_not_resolved',
+      });
+    }
+
+    const dedupeKey = pubsubMessageId
+      ? `msg:${pubsubMessageId}`
+      : [
+          workspaceId,
+          emailAddress || 'unknown',
+          historyId || publishTime || 'event',
+        ].join(':');
+    if (!rememberGmailEvent(dedupeKey)) {
+      return res.status(202).json({
+        received: true,
+        duplicate: true,
+        workspaceId,
+      });
+    }
+
+    const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+    res.status(202).json({
+      received: true,
+      accepted: true,
+      workspaceId,
+      emailAddress: emailAddress || null,
+      historyId: historyId || null,
+      messageId: pubsubMessageId || null,
+    });
+
+    void runGmailPubsubAutomation({
+      workspaceId,
+      emailAddress,
+      historyId,
+      pubsubMessageId,
+      subscription,
+      publishTime,
+      attributes,
+      apiBaseUrl,
+    });
+  } catch (error) {
+    console.error('[Gmail PubSub] webhook error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to process Gmail Pub/Sub webhook' });
+  }
+});
+
+app.get('/api/integrations/gateway/status', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const summary = await getGatewayDaemonSummary({
+      workspaceIds: [user.id],
+    });
+    return res.json(summary);
+  } catch (error) {
+    console.error('[Gateway] status error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to load gateway status' });
+  }
+});
+
+app.post('/api/integrations/gateway/start', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const workspaceIds = [user.id];
+    const relinkWorkspaceIds = req.body?.relink === true ? [user.id] : [];
+
+    const started = await startGatewayDaemon({
+      workspaceIds,
+      relinkWorkspaceIds,
+    });
+    if (started?.alreadyRunning && !gatewayStateIncludesWorkspace(started?.summary?.state, user.id)) {
+      return res.status(409).json({
+        error: 'Gateway is already running for a different workspace scope. Restart from CLI with the required workspace ids.',
+      });
+    }
+    return res.json(started);
+  } catch (error) {
+    console.error('[Gateway] start error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to start gateway' });
+  }
+});
+
+app.post('/api/integrations/gateway/stop', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    try {
+      await assertGatewayAppControlAllowed({
+        workspaceId: user.id,
+      });
+    } catch (error) {
+      return res.status(409).json({
+        error: error.message || 'Gateway lifecycle is currently controlled outside this workspace.',
+      });
+    }
+
+    const stopped = await stopGatewayDaemon();
+    return res.json(stopped);
+  } catch (error) {
+    console.error('[Gateway] stop error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to stop gateway' });
+  }
+});
+
+app.post('/api/integrations/gateway/restart', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    try {
+      await assertGatewayAppControlAllowed({
+        workspaceId: user.id,
+      });
+    } catch (error) {
+      return res.status(409).json({
+        error: error.message || 'Gateway lifecycle is currently controlled outside this workspace.',
+      });
+    }
+
+    const workspaceIds = [user.id];
+    const relinkWorkspaceIds = req.body?.relink === true ? [user.id] : [];
+
+    const restarted = await restartGatewayDaemon({
+      workspaceIds,
+      relinkWorkspaceIds,
+    });
+    return res.json(restarted);
+  } catch (error) {
+    console.error('[Gateway] restart error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to restart gateway' });
+  }
+});
+
+app.get('/api/integrations/gateway/service/status', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const serviceStatus = await getGatewayServiceStatus();
+    const gatewaySummary = await getGatewayDaemonSummary({
+      workspaceIds: [user.id],
+    });
+    return res.json({
+      service: serviceStatus,
+      gateway: gatewaySummary.gateway,
+    });
+  } catch (error) {
+    console.error('[Gateway] service status error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to load gateway service status' });
+  }
+});
+
+app.post('/api/integrations/gateway/service/install', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const installResult = await runGatewayCliJson({
+      action: 'install',
+      workspaceId: user.id,
+    });
+    const serviceStatus = await getGatewayServiceStatus();
+    const gatewaySummary = await getGatewayDaemonSummary({
+      workspaceIds: [user.id],
+    });
+    return res.json({
+      installResult,
+      service: serviceStatus,
+      gateway: gatewaySummary.gateway,
+    });
+  } catch (error) {
+    console.error('[Gateway] service install error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to install gateway service' });
+  }
+});
+
+app.post('/api/integrations/gateway/service/uninstall', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const uninstallResult = await runGatewayCliJson({
+      action: 'uninstall',
+    });
+    const serviceStatus = await getGatewayServiceStatus();
+    const gatewaySummary = await getGatewayDaemonSummary({
+      workspaceIds: [user.id],
+    });
+    return res.json({
+      uninstallResult,
+      service: serviceStatus,
+      gateway: gatewaySummary.gateway,
+    });
+  } catch (error) {
+    console.error('[Gateway] service uninstall error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to uninstall gateway service' });
+  }
+});
+
+app.get('/api/integrations/gateway/control/health', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const health = await getGatewayControlHealth({
+      workspaceId: user.id,
+    });
+    return res.json(health);
+  } catch (error) {
+    console.error('[Gateway] control health error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to load gateway control health' });
+  }
+});
+
+app.get('/api/integrations/gateway/control/logs', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const target = String(req.query?.target || 'gateway').trim().toLowerCase();
+    const maxChars = clampInt(req.query?.maxChars, 500, 20000, 4000);
+    const paths = linkedWhatsappPaths(user.id);
+
+    let filePath = CHIPPY_GATEWAY_LOG_PATH;
+    if (target === 'worker' || target === 'whatsapp') {
+      filePath = paths.logPath;
+    } else if (target !== 'gateway') {
+      return res.status(400).json({ error: 'Invalid target. Use gateway or worker.' });
+    }
+
+    const logTail = await readLogTail(filePath, maxChars);
+    return res.json({
+      target: target === 'worker' || target === 'whatsapp' ? 'worker' : 'gateway',
+      maxChars,
+      logPath: filePath,
+      logTail: logTail || '',
+      generatedAt: agentNowIso(),
+    });
+  } catch (error) {
+    console.error('[Gateway] control logs error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to load gateway logs' });
+  }
+});
+
+app.post('/api/integrations/gateway/control/repair', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const action = sanitizeInput(req.body?.action || '');
+    if (!action) {
+      return res.status(400).json({ error: 'Missing repair action' });
+    }
+
+    const result = await runGatewayRepairAction({
+      workspaceId: user.id,
+      action,
+    });
+    const health = await getGatewayControlHealth({
+      workspaceId: user.id,
+    });
+    return res.json({
+      action,
+      result,
+      health,
+    });
+  } catch (error) {
+    const message = error.message || 'Failed to run gateway repair action';
+    if (message.includes('Unsupported repair action')) {
+      return res.status(400).json({ error: message });
+    }
+    if (message.includes('controlled') || message.includes('supervised') || message.includes('multiple workspaces')) {
+      return res.status(409).json({ error: message });
+    }
+    console.error('[Gateway] control repair error:', error);
+    return res.status(500).json({ error: message });
+  }
+});
+
+app.get('/api/integrations/whatsapp/linked', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const summary = await getLinkedWhatsappGatewaySummary({
+      workspaceId: user.id,
+    });
+    return res.json(summary);
+  } catch (error) {
+    console.error('[WhatsApp Linked] status error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to load WhatsApp linked status' });
+  }
+});
+
+app.put('/api/integrations/whatsapp/linked/policy', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const dmPolicy = normalizeLinkedDmPolicy(req.body?.dmPolicy);
+    const allowFrom = normalizeLinkedAllowFrom(
+      Array.isArray(req.body?.allowFrom)
+        ? req.body.allowFrom
+        : String(req.body?.allowFrom || '')
+            .split('\n')
+            .map((item) => item.trim())
+            .filter(Boolean)
+    );
+
+    const state = await readLinkedWhatsappState(user.id);
+    state.policy = {
+      dmPolicy,
+      allowFrom,
+    };
+    state.updatedAt = agentNowIso();
+    await writeLinkedWhatsappState(user.id, state);
+
+    const summary = await getLinkedWhatsappGatewaySummary({
+      workspaceId: user.id,
+    });
+    return res.json(summary);
+  } catch (error) {
+    console.error('[WhatsApp Linked] policy update error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to update WhatsApp policy' });
+  }
+});
+
+app.post('/api/integrations/whatsapp/linked/gateway/start', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    await readLinkedWhatsappState(user.id);
+    const forceQr = req.body?.forceQr !== false;
+    const resetAuth = req.body?.resetAuth === true;
+    await startLinkedWhatsappGateway({
+      workspaceId: user.id,
+      forceQr,
+      resetAuth,
+    });
+
+    const summary = await getLinkedWhatsappGatewaySummary({
+      workspaceId: user.id,
+    });
+    return res.json(summary);
+  } catch (error) {
+    console.error('[WhatsApp Linked] gateway start error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to start WhatsApp linked gateway' });
+  }
+});
+
+app.post('/api/integrations/whatsapp/linked/gateway/stop', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    await stopLinkedWhatsappGateway({
+      workspaceId: user.id,
+    });
+
+    const summary = await getLinkedWhatsappGatewaySummary({
+      workspaceId: user.id,
+    });
+    return res.json(summary);
+  } catch (error) {
+    console.error('[WhatsApp Linked] gateway stop error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to stop WhatsApp linked gateway' });
+  }
+});
+
+app.post('/api/integrations/whatsapp/linked/pairings/:code/approve', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const code = sanitizeInput(req.params.code || '');
+    await approveLinkedPairing({
+      workspaceId: user.id,
+      code,
+      approvedBy: user.email || user.id,
+    });
+
+    const summary = await getLinkedWhatsappGatewaySummary({
+      workspaceId: user.id,
+    });
+    return res.json(summary);
+  } catch (error) {
+    console.error('[WhatsApp Linked] pairing approve error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to approve pairing request' });
+  }
+});
+
+app.post('/api/integrations/whatsapp/linked/pairings/:code/deny', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const code = sanitizeInput(req.params.code || '');
+    await denyLinkedPairing({
+      workspaceId: user.id,
+      code,
+      decidedBy: user.email || user.id,
+    });
+
+    const summary = await getLinkedWhatsappGatewaySummary({
+      workspaceId: user.id,
+    });
+    return res.json(summary);
+  } catch (error) {
+    console.error('[WhatsApp Linked] pairing deny error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to deny pairing request' });
+  }
+});
+
+app.get('/api/agent-runtime/actions', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const statusRaw = sanitizeInput(req.query.status || 'pending_review');
+    const status = AGENT_ACTION_STATUSES.has(statusRaw) ? statusRaw : 'pending_review';
+    const runId = sanitizeInput(req.query.runId || '') || undefined;
+    const limit = clampInt(req.query.limit, 1, 200, 50);
+
+    const actions = await agentRuntime.runStore.listActions({
+      status,
+      runId,
+      workspaceId: user.id,
+      limit,
+    });
+
+    res.json({
+      actions: actions.map(summarizeActionForApi),
+    });
+  } catch (error) {
+    console.error('[AgentRuntime] action list error:', error);
+    res.status(500).json({ error: error.message || 'Failed to list actions' });
+  }
+});
+
+app.post('/api/agent-runtime/actions/:actionId', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const actionId = sanitizeInput(req.params.actionId || '');
+    const decision = String(req.body?.decision || '').toLowerCase();
+    if (!actionId) {
+      return res.status(400).json({ error: 'Missing actionId' });
+    }
+    if (!['approve', 'deny'].includes(decision)) {
+      return res.status(400).json({ error: 'Invalid decision. Use approve or deny.' });
+    }
+
+    const existing = await agentRuntime.runStore.getAction(actionId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Action not found' });
+    }
+    if (existing.workspaceId !== user.id) {
+      return res.status(403).json({ error: 'Not authorized for this action' });
+    }
+
+    const decidedBy = user.email || user.id;
+    const decided = await agentRuntime.runStore.decideAction({
+      actionId,
+      decision,
+      decidedBy,
+    });
+
+    if (decision === 'deny') {
+      await agentRuntime.runStore.patchRunToolCall({
+        runId: decided.runId,
+        toolCallId: decided.toolCallId,
+        patch: {
+          status: 'denied',
+          error: `Action denied by ${decidedBy}`,
+          endedAt: agentNowIso(),
+        },
+      });
+
+      const run = await loadRunSummary(decided.runId);
+      const pendingActions = await listRunPendingActions(decided.runId, user.id);
+      return res.json({
+        status: 'denied',
+        message: 'Action denied and run updated.',
+        action: summarizeActionForApi(decided),
+        run,
+        pendingActions,
+      });
+    }
+
+    if (decided.status === 'executed') {
+      const run = await loadRunSummary(decided.runId);
+      const pendingActions = await listRunPendingActions(decided.runId, user.id);
+      return res.json({
+        status: 'already_executed',
+        message: 'Action was already executed.',
+        action: summarizeActionForApi(decided),
+        run,
+        pendingActions,
+      });
+    }
+
+    if (decided.status !== 'approved') {
+      const run = await loadRunSummary(decided.runId);
+      const pendingActions = await listRunPendingActions(decided.runId, user.id);
+      return res.status(409).json({
+        status: 'not_executable',
+        error: `Action status is ${decided.status}`,
+        action: summarizeActionForApi(decided),
+        run,
+        pendingActions,
+      });
+    }
+
+    try {
+      const claimed = await agentRuntime.runStore.claimActionExecution({
+        actionId,
+        claimedBy: decidedBy,
+      });
+
+      if (claimed.status === 'executed') {
+        const run = await loadRunSummary(claimed.runId);
+        const pendingActions = await listRunPendingActions(claimed.runId, user.id);
+        return res.json({
+          status: 'already_executed',
+          message: 'Action was already executed.',
+          action: summarizeActionForApi(claimed),
+          run,
+          pendingActions,
+        });
+      }
+
+      const execution = await agentRuntime.toolRegistry.execute(claimed.toolName, {
+        input: claimed.input || {},
+        context: {
+          ...(claimed.context || {}),
+          userId: user.id,
+          tenantId: user.id,
+        },
+        dryRun: false,
+      });
+
+      const executedAction = await agentRuntime.runStore.finalizeActionExecution({
+        actionId,
+        executionStatus: 'executed',
+        result: execution.result,
+      });
+
+      await agentRuntime.runStore.patchRunToolCall({
+        runId: decided.runId,
+        toolCallId: decided.toolCallId,
+        patch: {
+          status: 'completed',
+          dryRun: false,
+          result: execution.result,
+          idempotencyKey: execution.idempotencyKey,
+          attempts: 1,
+          error: null,
+          endedAt: agentNowIso(),
+        },
+      });
+
+      const run = await loadRunSummary(decided.runId);
+      const pendingActions = await listRunPendingActions(decided.runId, user.id);
+      return res.json({
+        status: 'executed',
+        message: 'Action approved and executed.',
+        action: summarizeActionForApi(executedAction),
+        run,
+        pendingActions,
+      });
+    } catch (error) {
+      const failedAction = await agentRuntime.runStore.finalizeActionExecution({
+        actionId,
+        executionStatus: 'failed',
+        error: error.message || 'Action execution failed',
+      });
+
+      await agentRuntime.runStore.patchRunToolCall({
+        runId: decided.runId,
+        toolCallId: decided.toolCallId,
+        patch: {
+          status: 'failed',
+          dryRun: false,
+          error: error.message || 'Action execution failed',
+          endedAt: agentNowIso(),
+        },
+      });
+
+      const run = await loadRunSummary(decided.runId);
+      const pendingActions = await listRunPendingActions(decided.runId, user.id);
+      return res.status(500).json({
+        status: 'failed',
+        error: error.message || 'Action execution failed',
+        action: summarizeActionForApi(failedAction),
+        run,
+        pendingActions,
+      });
+    }
+  } catch (error) {
+    console.error('[AgentRuntime] action process error:', error);
+    res.status(500).json({ error: error.message || 'Failed to process action' });
   }
 });
 
@@ -3694,6 +7701,126 @@ app.post('/api/memory/memorize', async (req, res) => {
 });
 
 // =====================
+// Owner Command Chat Endpoints
+// =====================
+
+app.get('/api/owner-command/state', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const state = await fetchOwnerCommandState(user.id, req.query.threadId || null);
+    res.json(state);
+  } catch (error) {
+    console.error('[OwnerCommand] state error:', error);
+    res.status(500).json({ error: 'Failed to load owner command state' });
+  }
+});
+
+app.post('/api/owner-command/message', expensiveApiLimiter, async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const message = normalizeCommandText(req.body?.message);
+    if (!message) return res.status(400).json({ error: 'Missing message' });
+
+    const thread = await ensureOwnerThread(user.id, req.body?.threadId || null);
+    const playbook = await ensureBusinessPlaybook(user.id);
+    const ownerMessage = await insertOwnerMessage({
+      tenantId: user.id,
+      threadId: thread.id,
+      role: 'owner',
+      content: message,
+    });
+
+    const result = await classifyOwnerCommand({
+      tenantId: user.id,
+      threadId: thread.id,
+      ownerMessageId: ownerMessage.id,
+      message,
+      playbook,
+    });
+
+    await insertOwnerMessage({
+      tenantId: user.id,
+      threadId: thread.id,
+      role: 'assistant',
+      content: result.content,
+      metadata: result.action ? { actionId: result.action.id, actionType: result.action.action_type } : {},
+    });
+
+    const state = await fetchOwnerCommandState(user.id, thread.id);
+    res.json(state);
+  } catch (error) {
+    console.error('[OwnerCommand] message error:', error);
+    res.status(500).json({ error: 'Failed to process owner command' });
+  }
+});
+
+app.post('/api/owner-command/actions/:actionId', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const decision = String(req.body?.decision || '').toLowerCase();
+    if (!['approve', 'deny'].includes(decision)) {
+      return res.status(400).json({ error: 'Decision must be approve or deny' });
+    }
+
+    const { data: action, error: fetchError } = await supabaseAdmin
+      .from('owner_command_actions')
+      .select('*')
+      .eq('tenant_id', user.id)
+      .eq('id', req.params.actionId)
+      .maybeSingle();
+    if (fetchError) throw fetchError;
+    if (!action) return res.status(404).json({ error: 'Action not found' });
+    if (action.status !== 'needs_approval') {
+      return res.status(409).json({ error: `Action is already ${action.status}` });
+    }
+
+    let assistantContent = '';
+    if (decision === 'deny') {
+      const { error } = await supabaseAdmin
+        .from('owner_command_actions')
+        .update({ status: 'denied' })
+        .eq('tenant_id', user.id)
+        .eq('id', action.id);
+      if (error) throw error;
+      assistantContent = `Denied ${action.action_type.replace(/_/g, ' ')}. Nothing changed.`;
+    } else {
+      assistantContent = await executeOwnerCommandAction(user.id, action);
+      const { error } = await supabaseAdmin
+        .from('owner_command_actions')
+        .update({
+          status: 'executed',
+          executed_at: new Date().toISOString(),
+        })
+        .eq('tenant_id', user.id)
+        .eq('id', action.id);
+      if (error) throw error;
+    }
+
+    if (action.thread_id) {
+      await insertOwnerMessage({
+        tenantId: user.id,
+        threadId: action.thread_id,
+        role: 'assistant',
+        content: assistantContent,
+        metadata: { actionId: action.id, decision },
+      });
+    }
+
+    const state = await fetchOwnerCommandState(user.id, action.thread_id || null);
+    res.json(state);
+  } catch (error) {
+    console.error('[OwnerCommand] action decision error:', error);
+    res.status(500).json({ error: 'Failed to process owner command action' });
+  }
+});
+
+// =====================
 // Business Decision Layer (BDL) Endpoints
 // =====================
 
@@ -4027,346 +8154,22 @@ cron.schedule('*/5 * * * *', async () => {
 // =====================
 // BDL Event + Job Processor (v0.2)
 // =====================
-const BDL_DEFAULT_ON_SKILLS = new Set(['appointment-reminders', 'daily-admin-report', 'weekly-admin-report']);
-
-const BDL_JOB_DEFINITIONS = {
-  'appointment-reminder': {
-    skillId: 'appointment-reminders',
-    requiredData: ['customer.email', 'start_at'],
-    guardrails: ['quiet_hours']
-  },
-  'daily-admin-report': {
-    skillId: 'daily-admin-report',
-    requiredData: [],
-    guardrails: []
-  },
-  'weekly-admin-report': {
-    skillId: 'weekly-admin-report',
-    requiredData: [],
-    guardrails: []
-  }
-};
-
-const isSkillActive = async (tenantId, skillId) => {
-  const { data, error } = await supabaseAdmin
-    .from('skill_subscriptions')
-    .select('status')
-    .eq('tenant_id', tenantId)
-    .eq('skill_id', skillId)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    console.error('[BDL] Skill lookup error:', error);
-    return false;
-  }
-
-  if (!data) return BDL_DEFAULT_ON_SKILLS.has(skillId);
-  return data.status === 'active';
-};
-
-const getValueAtPath = (payload, path) => {
-  if (!payload || !path) return undefined;
-  return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), payload);
-};
-
-const hasRequiredData = (payload, requiredData = []) => {
-  return requiredData.every(path => {
-    const value = getValueAtPath(payload, path);
-    return value !== undefined && value !== null && value !== '';
-  });
-};
-
-const getHoursTextForDate = (knowledge, date) => {
-  if (knowledge?.businessHoursByDay) {
-    return getBusinessHoursForDate(date, knowledge.businessHoursByDay);
-  }
-  return knowledge?.businessHours || null;
-};
-
-const getNextBusinessOpenTime = (fromDate, knowledge) => {
-  if (!fromDate) return null;
-  for (let offset = 0; offset < 7; offset += 1) {
-    const candidate = new Date(fromDate);
-    candidate.setDate(candidate.getDate() + offset);
-    const hoursText = getHoursTextForDate(knowledge, candidate);
-    if (!hoursText) continue;
-    const range = parseHoursRange(hoursText);
-    if (!range) continue;
-
-    const candidateMinutes = candidate.getHours() * 60 + candidate.getMinutes();
-    if (offset === 0 && candidateMinutes >= range.start && candidateMinutes <= range.end) {
-      return candidate;
-    }
-
-    if (offset === 0 && candidateMinutes < range.start) {
-      const nextOpen = new Date(candidate);
-      nextOpen.setHours(Math.floor(range.start / 60), range.start % 60, 0, 0);
-      return nextOpen;
-    }
-
-    if (offset > 0) {
-      const nextOpen = new Date(candidate);
-      nextOpen.setHours(Math.floor(range.start / 60), range.start % 60, 0, 0);
-      return nextOpen;
-    }
-  }
-  return null;
-};
-
-const deferJobForQuietHours = async (job, knowledge) => {
-  const executeAt = job.execute_at ? new Date(job.execute_at) : new Date();
-  const hoursText = getHoursTextForDate(knowledge, executeAt);
-  if (!hoursText) return false;
-  if (isWithinBusinessHours(executeAt, hoursText)) return false;
-
-  const nextOpen = getNextBusinessOpenTime(executeAt, knowledge);
-  if (!nextOpen) return false;
-
-  await supabaseAdmin
-    .from('bdl_jobs')
-    .update({ status: 'queued', execute_at: nextOpen.toISOString() })
-    .eq('id', job.id);
-  return true;
-};
-
-const enqueueBdlJob = async (tenantId, type, executeAt, payload, idempotencyKey) => {
-  const { error } = await supabaseAdmin
-    .from('bdl_jobs')
-    .insert({
-      tenant_id: tenantId,
-      type,
-      execute_at: executeAt,
-      status: 'queued',
-      payload,
-      idempotency_key: idempotencyKey
-    });
-
-  if (error && error.code !== '23505') {
-    console.error('[BDL] Job enqueue error:', error);
-  }
-};
-
-const processBdlEvents = async () => {
-  try {
-    const since = new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString();
-    const { data: events, error } = await supabaseAdmin
-      .from('bdl_events')
-      .select('id, tenant_id, type, occurred_at, payload')
-      .gte('occurred_at', since)
-      .order('occurred_at', { ascending: false })
-      .limit(200);
-
-    if (error) throw error;
-    if (!events || events.length === 0) return;
-
-    for (const event of events) {
-      if (event.type === 'booking.created') {
-        const active = await isSkillActive(event.tenant_id, 'appointment-reminders');
-        if (!active) continue;
-
-        const startAt = event.payload?.start_at || event.payload?.startAt;
-        if (!startAt) continue;
-
-        const startTime = new Date(startAt);
-        const offsets = [
-          { label: '24h', ms: 24 * 60 * 60 * 1000 },
-          { label: '2h', ms: 2 * 60 * 60 * 1000 }
-        ];
-
-        for (const offset of offsets) {
-          const executeAt = new Date(startTime.getTime() - offset.ms).toISOString();
-          if (new Date(executeAt) < new Date()) continue;
-
-          await enqueueBdlJob(
-            event.tenant_id,
-            'appointment-reminder',
-            executeAt,
-            {
-              booking_id: event.payload?.booking_id,
-              customer: event.payload?.customer,
-              service: event.payload?.service,
-              location_id: event.payload?.location_id,
-              start_at: startAt
-            },
-            `${event.id}:appointment-reminder:${offset.label}`
-          );
-        }
-      }
-
-      if (event.type === 'report.daily') {
-        const active = await isSkillActive(event.tenant_id, 'daily-admin-report');
-        if (!active) continue;
-
-        await enqueueBdlJob(
-          event.tenant_id,
-          'daily-admin-report',
-          event.occurred_at,
-          { date: event.payload?.date || event.occurred_at },
-          `${event.id}:daily-admin-report`
-        );
-      }
-
-      if (event.type === 'report.weekly') {
-        const active = await isSkillActive(event.tenant_id, 'weekly-admin-report');
-        if (!active) continue;
-
-        await enqueueBdlJob(
-          event.tenant_id,
-          'weekly-admin-report',
-          event.occurred_at,
-          { date: event.payload?.date || event.occurred_at },
-          `${event.id}:weekly-admin-report`
-        );
-      }
-    }
-  } catch (error) {
-    console.error('[BDL] Event processor error:', error);
-  }
-};
-
-const processBdlJobs = async () => {
-  try {
-    const { data: jobs, error } = await supabaseAdmin
-      .from('bdl_jobs')
-      .select('*')
-      .eq('status', 'queued')
-      .lte('execute_at', new Date().toISOString())
-      .order('execute_at', { ascending: true })
-      .limit(20);
-
-    if (error) throw error;
-    if (!jobs || jobs.length === 0) return;
-
-    for (const job of jobs) {
-      await supabaseAdmin
-        .from('bdl_jobs')
-        .update({ status: 'running' })
-        .eq('id', job.id);
-
-      try {
-        const definition = BDL_JOB_DEFINITIONS[job.type];
-        if (!definition) {
-          await supabaseAdmin
-            .from('bdl_jobs')
-            .update({ status: 'failed' })
-            .eq('id', job.id);
-          continue;
-        }
-
-        const active = await isSkillActive(job.tenant_id, definition.skillId);
-        if (!active) {
-          await supabaseAdmin
-            .from('bdl_jobs')
-            .update({ status: 'completed' })
-            .eq('id', job.id);
-          continue;
-        }
-
-        if (!hasRequiredData(job.payload || {}, definition.requiredData)) {
-          await supabaseAdmin
-            .from('bdl_jobs')
-            .update({ status: 'failed' })
-            .eq('id', job.id);
-          continue;
-        }
-
-        const knowledge = await fetchKnowledgeBase(job.tenant_id);
-        if (definition.guardrails.includes('quiet_hours')) {
-          const deferred = await deferJobForQuietHours(job, knowledge);
-          if (deferred) continue;
-        }
-
-        if (job.type === 'appointment-reminder') {
-          const customerEmail = job.payload?.customer?.email;
-          if (customerEmail) {
-            const customerName = job.payload?.customer?.name || 'Customer';
-            await emailService.sendAppointmentReminder(customerEmail, customerName, {
-              startTime: job.payload?.start_at,
-              service: job.payload?.service
-            });
-          }
-        }
-
-        if (job.type === 'daily-admin-report') {
-          const { data: { user } } = await supabaseAdmin.auth.admin.getUserById(job.tenant_id);
-          if (user?.email) {
-            const since = new Date();
-            since.setDate(since.getDate() - 1);
-
-            const { count: bookingCount } = await supabaseAdmin
-              .from('bookings')
-              .select('*', { count: 'exact', head: true })
-              .eq('user_id', job.tenant_id)
-              .gte('created_at', since.toISOString());
-
-            const { count: leadCount } = await supabaseAdmin
-              .from('leads')
-              .select('*', { count: 'exact', head: true })
-              .eq('user_id', job.tenant_id)
-              .gte('created_at', since.toISOString());
-
-            const { count: chatCount } = await supabaseAdmin
-              .from('chat_sessions')
-              .select('*', { count: 'exact', head: true })
-              .eq('user_id', job.tenant_id)
-              .gte('created_at', since.toISOString());
-
-            await emailService.sendDailyReport(user.email, {
-              bookings: bookingCount || 0,
-              leads: leadCount || 0,
-              chats: chatCount || 0
-            });
-          }
-        }
-
-        if (job.type === 'weekly-admin-report') {
-          const { data: { user } } = await supabaseAdmin.auth.admin.getUserById(job.tenant_id);
-          if (user?.email) {
-            const since = new Date();
-            since.setDate(since.getDate() - 7);
-
-            const { count: bookingCount } = await supabaseAdmin
-              .from('bookings')
-              .select('*', { count: 'exact', head: true })
-              .eq('user_id', job.tenant_id)
-              .gte('created_at', since.toISOString());
-
-            const { count: leadCount } = await supabaseAdmin
-              .from('leads')
-              .select('*', { count: 'exact', head: true })
-              .eq('user_id', job.tenant_id)
-              .gte('created_at', since.toISOString());
-
-            await emailService.sendWeeklyReport(user.email, {
-              bookings: bookingCount || 0,
-              leads: leadCount || 0
-            });
-          }
-        }
-
-        await supabaseAdmin
-          .from('bdl_jobs')
-          .update({ status: 'completed' })
-          .eq('id', job.id);
-      } catch (jobErr) {
-        console.error('[BDL] Job execution error:', jobErr);
-        await supabaseAdmin
-          .from('bdl_jobs')
-          .update({ status: 'failed' })
-          .eq('id', job.id);
-      }
-    }
-  } catch (error) {
-    console.error('[BDL] Job processor error:', error);
-  }
-};
+const bdlProcessor = createBdlProcessor({
+  supabaseAdmin,
+  emailService,
+  fetchKnowledgeBase,
+  getBusinessHoursForDate,
+  parseHoursRange,
+  isWithinBusinessHours,
+  logger: console
+});
 
 cron.schedule('*/2 * * * *', async () => {
-  await processBdlEvents();
+  await bdlProcessor.processBdlEvents();
 });
 
 cron.schedule('* * * * *', async () => {
-  await processBdlJobs();
+  await bdlProcessor.processBdlJobs();
 });
 
 // Daily report events at 7:00 AM server time
@@ -4394,7 +8197,7 @@ cron.schedule('0 7 * * *', async () => {
     const today = new Date().toISOString().split('T')[0];
     for (const tenantId of combinedTenantIds) {
       const status = statusByTenant.get(tenantId);
-      const shouldSend = status === 'active' || (status === undefined && BDL_DEFAULT_ON_SKILLS.has('daily-admin-report'));
+      const shouldSend = status === 'active' || (status === undefined && bdlProcessor.isSkillDefaultOn('daily-admin-report'));
       if (!shouldSend) continue;
 
       await supabaseAdmin.from('bdl_events').insert({
@@ -4521,7 +8324,7 @@ cron.schedule('0 9 * * 1', async () => {
     const today = new Date().toISOString().split('T')[0];
     for (const userId of uniqueUserIds) {
       try {
-        const active = await isSkillActive(userId, 'weekly-admin-report');
+        const active = await bdlProcessor.isSkillActive(userId, 'weekly-admin-report');
         if (!active) continue;
 
         await supabaseAdmin.from('bdl_events').insert({

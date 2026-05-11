@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useMemo } from '
 import { useAuth } from './AuthContext';
 import {
     TenantConfig,
+    SetupChecklist,
     WidgetConfig,
     CalendarSettings,
     KnowledgeBaseData,
@@ -34,12 +35,22 @@ import { compileBusinessMemory } from '../bdl/compiler';
 import { bdlService } from '../services/bdlService';
 
 // Default Configs (Copied from App.tsx)
+const DEFAULT_SETUP_CHECKLIST: SetupChecklist = {
+    businessInfo: false,
+    services: false,
+    calendar: false,
+    widgetInstall: false,
+    testConversation: false
+};
+
 const DEFAULT_TENANT_CONFIG: TenantConfig = {
     id: 'tenant-123',
     userId: '', // Will be set from session
     companyName: 'Chippy User',
     companyUrl: '',
     industry: 'Service',
+    experienceMode: 'simple',
+    setupChecklist: DEFAULT_SETUP_CHECKLIST,
     bookingPlatform: null,
     isConnected: false
 };
@@ -104,6 +115,21 @@ const generateBlankDashboardData = (): ChartDataPoint[] => {
     return data;
 };
 
+const hasValidConversation = (sessions: ChatSessionRecord[]) => {
+    return sessions.some(session => {
+        if (!session.messages) return false;
+        let messages: unknown = session.messages;
+        if (typeof messages === 'string') {
+            try {
+                messages = JSON.parse(messages);
+            } catch {
+                return false;
+            }
+        }
+        return Array.isArray(messages) && messages.length >= 2;
+    });
+};
+
 interface DataContextType {
     tenantConfig: TenantConfig;
     setTenantConfig: React.Dispatch<React.SetStateAction<TenantConfig>>;
@@ -155,10 +181,21 @@ const DEFAULT_SUBSCRIPTION: Subscription = {
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
+const normalizeTenantConfig = (tenantConfig: TenantConfig): TenantConfig => ({
+    ...DEFAULT_TENANT_CONFIG,
+    ...tenantConfig,
+    setupChecklist: {
+        ...DEFAULT_SETUP_CHECKLIST,
+        ...(tenantConfig.setupChecklist || {})
+    }
+});
+
 export function DataProvider({ children }: { children: React.ReactNode }) {
     const { session } = useAuth();
 
-    const [tenantConfig, setTenantConfig] = useState<TenantConfig>(() => storage.getTenantConfig(DEFAULT_TENANT_CONFIG));
+    const [tenantConfig, setTenantConfig] = useState<TenantConfig>(() =>
+        normalizeTenantConfig(storage.getTenantConfig(DEFAULT_TENANT_CONFIG))
+    );
     const [widgetConfig, setWidgetConfig] = useState<WidgetConfig>(() => {
         const saved = storage.getWidgetConfig(DEFAULT_WIDGET_CONFIG);
         return {
@@ -239,13 +276,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         const settings = await fetchSettings(userId);
         if (settings) {
             if (settings.tenant_config) {
-                setTenantConfig({
+                setTenantConfig(normalizeTenantConfig({
                     ...settings.tenant_config,
                     userId // Always ensure userId is set from session
-                });
+                }));
             } else {
                 // If no tenant_config in settings, ensure userId is set
-                setTenantConfig(prev => ({ ...prev, userId }));
+                setTenantConfig(prev => normalizeTenantConfig({ ...prev, userId }));
             }
             if (settings.widget_config) {
                 setWidgetConfig(prev => ({
@@ -268,7 +305,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             }
         } else {
             // No settings found, ensure userId is set
-            setTenantConfig(prev => ({ ...prev, userId }));
+            setTenantConfig(prev => normalizeTenantConfig({ ...prev, userId }));
         }
 
         const remoteSessions = await fetchChatSessions(userId);
@@ -304,6 +341,51 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         };
         loadData();
     }, [session?.user?.id]);
+
+    useEffect(() => {
+        const companyNameReady = !!tenantConfig.companyName && tenantConfig.companyName !== 'Chippy User';
+        const websiteReady = !!tenantConfig.companyUrl || !!knowledgeData?.website;
+        const contactReady = !!knowledgeData?.phoneNumber || !!knowledgeData?.contactInfo;
+        const hasServices = (knowledgeData?.services?.length || 0) > 0;
+        const hasPricingText = Array.isArray(knowledgeData?.pricing)
+            ? knowledgeData.pricing.length > 0
+            : !!knowledgeData?.pricing && String(knowledgeData.pricing).trim().length > 0;
+        const hasServicePricing = !!knowledgeData?.services?.some(service => {
+            if (!service.pricing?.type) return false;
+            if (service.pricing.amount !== undefined) return true;
+            return ['quote', 'free', 'negotiable'].includes(service.pricing.type);
+        });
+
+        const checklist: SetupChecklist = {
+            businessInfo: companyNameReady && websiteReady && contactReady,
+            services: hasServices && (hasServicePricing || hasPricingText),
+            calendar: calendarConnections.some(connection => connection.isActive),
+            widgetInstall: tenantConfig.setupChecklist?.widgetInstall === true,
+            testConversation: tenantConfig.setupChecklist?.testConversation === true || hasValidConversation(chatSessions)
+        };
+
+        const currentChecklist = tenantConfig.setupChecklist || DEFAULT_SETUP_CHECKLIST;
+        const changed =
+            currentChecklist.businessInfo !== checklist.businessInfo ||
+            currentChecklist.services !== checklist.services ||
+            currentChecklist.calendar !== checklist.calendar ||
+            currentChecklist.widgetInstall !== checklist.widgetInstall ||
+            currentChecklist.testConversation !== checklist.testConversation;
+
+        if (!changed) return;
+
+        setTenantConfig(prev => ({
+            ...prev,
+            setupChecklist: checklist
+        }));
+    }, [
+        tenantConfig.companyName,
+        tenantConfig.companyUrl,
+        tenantConfig.setupChecklist,
+        knowledgeData,
+        calendarConnections,
+        chatSessions
+    ]);
 
     // Sync Effects - Persist to localStorage AND Supabase
     useEffect(() => {
