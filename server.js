@@ -426,6 +426,13 @@ app.get('/api/widget-config/:userId', widgetConfigLimiter, async (req, res) => {
       console.error('[API] Knowledge fetch error:', knowledgeError);
     }
 
+    let activePlaybook = null;
+    try {
+      activePlaybook = await fetchActivePlaybook(userId);
+    } catch (playbookError) {
+      console.warn('[API] Playbook fetch error:', playbookError?.message || playbookError);
+    }
+
     // Fetch calendar connections (for booking availability)
     const { data: calendarConnections, error: calendarError } = await supabaseAdmin
       .from('calendar_connections')
@@ -454,7 +461,8 @@ app.get('/api/widget-config/:userId', widgetConfigLimiter, async (req, res) => {
     res.json({
       tenantConfig: settings?.tenant_config || null,
       widgetConfig: settings?.widget_config || null,
-      knowledgeData: knowledge?.content || null,
+      knowledgeData: mergeKnowledgeWithPlaybook(knowledge?.content || null, activePlaybook),
+      playbookMarkdown: activePlaybook?.playbook_markdown || '',
       calendarConnections: safeCalendarConnections
     });
 
@@ -1740,6 +1748,34 @@ const fetchTenantKnowledge = async (tenantId) => {
   return data?.content || null;
 };
 
+const fetchActivePlaybook = async (tenantId) => {
+  const { data, error } = await supabaseAdmin
+    .from('business_playbooks')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+};
+
+const mergeKnowledgeWithPlaybook = (knowledge, playbook) => {
+  if (!playbook) return knowledge || null;
+  return {
+    ...(knowledge || {}),
+    businessCategory: knowledge?.businessCategory || 'Med Spa',
+    services: safeJsonArray(playbook.services_json, knowledge?.services || []),
+    pricing: knowledge?.pricing || playbook.pricing_rules_json?.notes || null,
+    topRules: [
+      knowledge?.topRules,
+      'BEGIN CHIPPY.md',
+      playbook.playbook_markdown,
+      'END CHIPPY.md'
+    ].filter(Boolean).join('\n'),
+    lastUpdated: playbook.updated_at || knowledge?.lastUpdated || new Date().toISOString()
+  };
+};
+
 const upsertBusinessMemoryFromPlaybook = async (tenantId, playbook) => {
   const bmsText = [
     'BMS',
@@ -1999,6 +2035,38 @@ const classifyOwnerCommand = async ({ tenantId, threadId, ownerMessageId, messag
       '',
       'After approval, Chippy can discuss this service using conservative consultation-first language.',
     ].join('\n');
+  } else if (lower.includes('mark') && (lower.includes('lost') || lower.includes('booked'))) {
+    const nextStatus = lower.includes('booked') ? 'Booked' : 'Contacted';
+    const pipelineStatus = lower.includes('booked') ? 'booked' : 'lost';
+    const { data: candidateLeads } = await supabaseAdmin
+      .from('leads')
+      .select('*')
+      .eq('user_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    const match = (candidateLeads || []).find(lead => {
+      const name = String(lead.name || '').toLowerCase();
+      return name && lower.includes(name);
+    }) || (candidateLeads || [])[0];
+    actionType = 'update_lead_status';
+    targetTable = 'leads';
+    targetId = match?.id || null;
+    riskLevel = 'medium';
+    patch = {
+      status: nextStatus,
+      pipelineStatus,
+      leadName: match?.name || null,
+      instruction: text,
+    };
+    preview = [
+      'Update lead status:',
+      '',
+      `Lead: ${match?.name || 'No exact lead matched; newest open lead will be used only if approved with target.'}`,
+      `New status: ${nextStatus}`,
+      `Pipeline status: ${pipelineStatus}`,
+      '',
+      'Approval is required because this changes lead reporting and recovery metrics.',
+    ].join('\n');
   } else if (lower.includes('text') || lower.includes('send')) {
     actionType = 'draft_customer_message';
     targetTable = 'lead_interactions';
@@ -2104,6 +2172,109 @@ const executeOwnerCommandAction = async (tenantId, action) => {
     if (error) throw error;
     await upsertBusinessMemoryFromPlaybook(tenantId, updated);
     return 'Approved and regenerated CHIPPY.md from the structured playbook.';
+  }
+
+  if (action.action_type === 'update_pricing_rules' || action.action_type === 'update_policy_rules') {
+    const playbook = await ensureBusinessPlaybook(tenantId);
+    const knowledge = await fetchTenantKnowledge(tenantId);
+    const instruction = String(action.patch_json?.instruction || '').trim();
+    const updatedAt = new Date().toISOString();
+    const updates = { updated_at: updatedAt };
+
+    if (action.action_type === 'update_pricing_rules') {
+      updates.pricing_rules_json = {
+        ...safeJsonObject(playbook.pricing_rules_json),
+        ownerInstructions: [
+          ...safeJsonArray(playbook.pricing_rules_json?.ownerInstructions),
+          instruction,
+        ].filter(Boolean),
+        lastOwnerUpdate: updatedAt,
+      };
+    } else {
+      updates.escalation_rules_json = [
+        ...safeJsonArray(playbook.escalation_rules_json),
+        instruction,
+      ].filter(Boolean);
+      updates.booking_rules_json = {
+        ...safeJsonObject(playbook.booking_rules_json),
+        ownerPolicyInstructions: [
+          ...safeJsonArray(playbook.booking_rules_json?.ownerPolicyInstructions),
+          instruction,
+        ].filter(Boolean),
+        lastOwnerUpdate: updatedAt,
+      };
+    }
+
+    const next = {
+      ...playbook,
+      ...updates,
+    };
+    updates.playbook_markdown = generatePlaybookMarkdownServer(next, knowledge);
+
+    const { data: updated, error } = await supabaseAdmin
+      .from('business_playbooks')
+      .update(updates)
+      .eq('tenant_id', tenantId)
+      .eq('id', playbook.id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    await upsertBusinessMemoryFromPlaybook(tenantId, updated);
+    return `Approved and updated ${action.action_type === 'update_pricing_rules' ? 'pricing' : 'policy'} rules in CHIPPY.md.`;
+  }
+
+  if (action.action_type === 'draft_customer_message') {
+    const body = [
+      'Owner requested customer outreach:',
+      '',
+      String(action.patch_json?.instruction || '').trim(),
+      '',
+      'Transport is not configured in this workflow yet, so Chippy saved this as an approved draft/audit item instead of sending.'
+    ].join('\n');
+    const { error } = await supabaseAdmin
+      .from('lead_interactions')
+      .insert({
+        tenant_id: tenantId,
+        lead_id: null,
+        channel: action.patch_json?.channel || 'sms',
+        direction: 'outbound',
+        body,
+        ai_generated: true,
+        status: 'draft',
+        approval_action_id: action.id,
+      });
+    if (error) throw error;
+    return 'Approved and saved the customer message request as an auditable draft. SMS transport still needs to be connected before live sending.';
+  }
+
+  if (action.action_type === 'update_lead_status') {
+    if (!action.target_id) throw new Error('No lead target was resolved for this action.');
+    const status = action.patch_json?.status || 'Contacted';
+    const pipelineStatus = action.patch_json?.pipelineStatus || null;
+    const { data: updatedLead, error } = await supabaseAdmin
+      .from('leads')
+      .update({
+        status,
+        pipeline_status: pipelineStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', tenantId)
+      .eq('id', action.target_id)
+      .select('*')
+      .single();
+    if (error) throw error;
+
+    if (pipelineStatus === 'booked' || pipelineStatus === 'lost') {
+      await supabaseAdmin.from('recovery_outcomes').insert({
+        tenant_id: tenantId,
+        lead_id: action.target_id,
+        outcome_type: pipelineStatus === 'booked' ? 'booked' : 'lost',
+        estimated_value: pipelineStatus === 'booked' ? Number(updatedLead.estimated_value || 0) : null,
+        attributed_to: 'owner_command',
+      });
+    }
+
+    return `Approved and marked ${updatedLead.name || 'the lead'} as ${pipelineStatus || status}.`;
   }
 
   return 'Approved. This action is recorded for audit and ready for the next workflow executor implementation.';
@@ -5980,7 +6151,13 @@ const fetchKnowledgeBase = async (tenantId) => {
     console.error('[KB] Fetch error:', error);
     return null;
   }
-  return data?.content || null;
+  try {
+    const playbook = await fetchActivePlaybook(tenantId);
+    return mergeKnowledgeWithPlaybook(data?.content || null, playbook);
+  } catch (playbookError) {
+    console.warn('[KB] Playbook merge failed:', playbookError?.message || playbookError);
+    return data?.content || null;
+  }
 };
 
 const fetchWidgetConfig = async (tenantId) => {
@@ -7817,6 +7994,221 @@ app.post('/api/owner-command/actions/:actionId', async (req, res) => {
   } catch (error) {
     console.error('[OwnerCommand] action decision error:', error);
     res.status(500).json({ error: 'Failed to process owner command action' });
+  }
+});
+
+// =====================
+// AI Setup + Playbook Endpoints
+// =====================
+
+app.get('/api/ai-setup/state', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const [{ data: setup, error: setupError }, { data: outcomes, error: outcomesError }] = await Promise.all([
+      supabaseAdmin
+        .from('ai_setup_sessions')
+        .select('*')
+        .eq('tenant_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabaseAdmin
+        .from('recovery_outcomes')
+        .select('*')
+        .eq('tenant_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(25),
+    ]);
+    if (setupError) throw setupError;
+    if (outcomesError) throw outcomesError;
+
+    const playbook = await fetchActivePlaybook(user.id);
+    res.json({
+      setup: setup || null,
+      playbook,
+      playbookMarkdown: playbook?.playbook_markdown || '',
+      recovery: summarizeRecoveryRows(outcomes || []),
+    });
+  } catch (error) {
+    console.error('[AISetup] state error:', error);
+    res.status(500).json({ error: 'Failed to load setup state' });
+  }
+});
+
+app.post('/api/ai-setup/draft', expensiveApiLimiter, async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const businessUrl = String(req.body?.businessUrl || '').trim();
+    const draft = safeJsonObject(req.body?.knowledgeData);
+    if (!businessUrl && !draft.website) {
+      return res.status(400).json({ error: 'Missing business URL or scanned knowledge data' });
+    }
+    if (!draft || Object.keys(draft).length === 0) {
+      return res.status(400).json({ error: 'Missing scanned knowledge data' });
+    }
+
+    const services = safeJsonArray(draft.services);
+    const missing = [
+      !draft.companyName ? 'business name' : null,
+      !draft.phoneNumber && !draft.contactInfo ? 'phone/contact' : null,
+      services.length === 0 ? 'services' : null,
+      !draft.businessHours || draft.businessHours === 'Not specified' ? 'business hours' : null,
+    ].filter(Boolean);
+
+    const { data: setup, error } = await supabaseAdmin
+      .from('ai_setup_sessions')
+      .insert({
+        tenant_id: user.id,
+        status: missing.length > 0 ? 'needs_review' : 'needs_review',
+        business_url: businessUrl || draft.website || null,
+        detected_vertical: 'med_spa',
+        confidence: services.length > 0 ? 0.82 : 0.58,
+        draft_json: draft,
+        missing_fields_json: missing,
+      })
+      .select('*')
+      .single();
+    if (error) throw error;
+
+    const preview = defaultPlaybookFromKnowledge(user.id, draft);
+    preview.playbook_markdown = generatePlaybookMarkdownServer(preview, draft);
+
+    res.json({
+      setup,
+      draft,
+      playbookPreview: preview,
+      playbookMarkdown: preview.playbook_markdown,
+      missingFields: missing,
+    });
+  } catch (error) {
+    console.error('[AISetup] draft error:', error);
+    res.status(500).json({ error: 'Failed to create setup draft' });
+  }
+});
+
+app.post('/api/ai-setup/approve', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const setupId = String(req.body?.setupId || '').trim();
+    const knowledgeData = safeJsonObject(req.body?.knowledgeData);
+    const bookingLink = String(req.body?.bookingLink || '').trim();
+    const phoneNumber = String(req.body?.phoneNumber || '').trim();
+    if (!setupId || Object.keys(knowledgeData).length === 0) {
+      return res.status(400).json({ error: 'Missing setup ID or approved knowledge data' });
+    }
+
+    const approvedKnowledge = {
+      ...knowledgeData,
+      phoneNumber: phoneNumber || knowledgeData.phoneNumber || null,
+      lastUpdated: new Date().toISOString(),
+    };
+
+    const { error: kbError } = await supabaseAdmin
+      .from('knowledge_bases')
+      .upsert({
+        user_id: user.id,
+        content: approvedKnowledge,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    if (kbError) throw kbError;
+
+    const playbookDraft = defaultPlaybookFromKnowledge(user.id, approvedKnowledge);
+    playbookDraft.booking_rules_json = {
+      ...playbookDraft.booking_rules_json,
+      bookingLink: bookingLink || null,
+      mode: bookingLink ? 'booking_link' : playbookDraft.booking_rules_json.mode,
+    };
+    playbookDraft.playbook_markdown = generatePlaybookMarkdownServer(playbookDraft, approvedKnowledge);
+
+    await supabaseAdmin
+      .from('business_playbooks')
+      .update({ status: 'archived', updated_at: new Date().toISOString() })
+      .eq('tenant_id', user.id)
+      .eq('status', 'active');
+
+    const { data: playbook, error: playbookError } = await supabaseAdmin
+      .from('business_playbooks')
+      .insert({
+        ...playbookDraft,
+        source_setup_session_id: setupId,
+      })
+      .select('*')
+      .single();
+    if (playbookError) throw playbookError;
+
+    const { error: setupError } = await supabaseAdmin
+      .from('ai_setup_sessions')
+      .update({
+        status: 'launched',
+        approved_at: new Date().toISOString(),
+        launched_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('tenant_id', user.id)
+      .eq('id', setupId);
+    if (setupError) throw setupError;
+
+    await upsertBusinessMemoryFromPlaybook(user.id, playbook);
+
+    const state = await fetchOwnerCommandState(user.id, null);
+    res.json({
+      success: true,
+      knowledgeData: approvedKnowledge,
+      playbook,
+      playbookMarkdown: playbook.playbook_markdown,
+      ownerCommand: state,
+    });
+  } catch (error) {
+    console.error('[AISetup] approve error:', error);
+    res.status(500).json({ error: 'Failed to approve and launch setup' });
+  }
+});
+
+app.get('/api/playbook/current', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+    const playbook = await ensureBusinessPlaybook(user.id);
+    res.json({ playbook, playbookMarkdown: playbook?.playbook_markdown || '' });
+  } catch (error) {
+    console.error('[Playbook] current error:', error);
+    res.status(500).json({ error: 'Failed to fetch playbook' });
+  }
+});
+
+const summarizeRecoveryRows = (rows) => {
+  const outcomes = Array.isArray(rows) ? rows : [];
+  const recoveredRevenue = outcomes.reduce((sum, row) => sum + Number(row.estimated_value || 0), 0);
+  return {
+    recoveredBookings: outcomes.filter(row => row.outcome_type === 'booked').length,
+    reactivatedLeads: outcomes.filter(row => row.outcome_type === 'reactivated').length,
+    needsOwner: outcomes.filter(row => row.outcome_type === 'needs_owner').length,
+    recoveredRevenue,
+    recent: outcomes,
+  };
+};
+
+app.get('/api/recovery/metrics', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+    const { data, error } = await supabaseAdmin
+      .from('recovery_outcomes')
+      .select('*')
+      .eq('tenant_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    res.json(summarizeRecoveryRows(data || []));
+  } catch (error) {
+    console.error('[Recovery] metrics error:', error);
+    res.status(500).json({ error: 'Failed to fetch recovery metrics' });
   }
 });
 

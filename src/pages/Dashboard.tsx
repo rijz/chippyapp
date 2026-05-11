@@ -7,6 +7,7 @@ import { ChartDataPoint, OverviewMetricsResponse } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchOverviewMetrics } from '../services/overviewMetrics';
 import { OwnerCommandChat } from '../components/OwnerCommandChat';
+import { fetchRecoveryMetrics, AiSetupStateResponse } from '../services/aiSetupService';
 
 export const Dashboard = () => {
     const { dashboardData, leads, chatSessions, bookings, tenantConfig } = useData();
@@ -14,11 +15,23 @@ export const Dashboard = () => {
     const navigate = useNavigate();
     const [isLoading, setIsLoading] = useState(true);
     const [metrics, setMetrics] = useState<OverviewMetricsResponse | null>(null);
+    const [recovery, setRecovery] = useState<AiSetupStateResponse['recovery'] | null>(null);
 
     const isAdvancedMode = tenantConfig.experienceMode === 'advanced';
 
     useEffect(() => {
         let isActive = true;
+
+        const loadRecovery = async () => {
+            if (!session?.access_token) return;
+            try {
+                const response = await fetchRecoveryMetrics(session.access_token);
+                if (isActive) setRecovery(response);
+            } catch {
+                if (isActive) setRecovery(null);
+            }
+        };
+        loadRecovery();
 
         if (!isAdvancedMode) {
             setMetrics(null);
@@ -122,6 +135,21 @@ export const Dashboard = () => {
                 <div className="bg-white p-5 rounded-xl border border-slate-200">
                     <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Callbacks</p>
                     <p className="text-3xl font-semibold text-chippy-navy mt-2">{callbacks}</p>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Recovered Revenue</p>
+                    <p className="text-3xl font-semibold text-chippy-navy mt-2">${(recovery?.recoveredRevenue || 0).toLocaleString()}</p>
+                </div>
+                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Recovered Bookings</p>
+                    <p className="text-3xl font-semibold text-chippy-navy mt-2">{recovery?.recoveredBookings || 0}</p>
+                </div>
+                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                    <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Reactivated Leads</p>
+                    <p className="text-3xl font-semibold text-chippy-navy mt-2">{recovery?.reactivatedLeads || 0}</p>
                 </div>
             </div>
 

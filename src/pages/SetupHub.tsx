@@ -1,319 +1,262 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Circle, ExternalLink, MessageCircle, CalendarDays, BookOpen, Settings, Wrench } from 'lucide-react';
+import { ArrowRight, BookOpen, CheckCircle2, ExternalLink, Loader2, Sparkles, Wand2 } from 'lucide-react';
 import { PageHeader } from '../components/layout/PageHeader';
 import { useData } from '../contexts/DataContext';
-import { SetupChecklist } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { KnowledgeBaseData } from '../types';
+import { analyzeCompanyContent } from '../services/geminiService';
+import { approveAiSetup, createAiSetupDraft, fetchAiSetupState } from '../services/aiSetupService';
 
-const OPTIONAL_ITEMS: Array<{
-    key: 'widgetInstall' | 'testConversation';
-    title: string;
-    description: string;
-    ctaLabel: string;
-    ctaPath: string;
-    advancedLabel?: string;
-    advancedPath?: string;
-}> = [
-        {
-            key: 'widgetInstall',
-            title: 'Install widget',
-            description: 'Add the chat script to your website and mark this complete.',
-            ctaLabel: 'Open Embed Setup',
-            ctaPath: '/integrations#embed'
-        },
-        {
-            key: 'testConversation',
-            title: 'Run a test conversation',
-            description: 'Send one test chat to confirm booking and lead capture work end to end.',
-            ctaLabel: 'Open Customers',
-            ctaPath: '/customers',
-            advancedLabel: 'Widget preview',
-            advancedPath: '/widget'
-        }
-    ];
+type SetupStep = 'start' | 'review' | 'launched';
 
 export const SetupHub = () => {
     const navigate = useNavigate();
-    const {
-        tenantConfig,
-        setTenantConfig,
-        knowledgeData,
-        calendarConnections,
-        chatSessions
-    } = useData();
-
-    const isAdvancedMode = tenantConfig.experienceMode === 'advanced';
-
-    const hasValidTestConversation = useMemo(() => {
-        return chatSessions.some(session => {
-            if (!session.messages) return false;
-            let messages = session.messages as unknown;
-            if (typeof messages === 'string') {
-                try {
-                    messages = JSON.parse(messages);
-                } catch {
-                    return false;
-                }
-            }
-            return Array.isArray(messages) && messages.length >= 2;
-        });
-    }, [chatSessions]);
-
-    const computedChecklist = useMemo<SetupChecklist>(() => {
-        const companyNameReady = !!tenantConfig.companyName && tenantConfig.companyName !== 'Chippy User';
-        const websiteReady = !!tenantConfig.companyUrl || !!knowledgeData?.website;
-        const contactReady = !!knowledgeData?.phoneNumber || !!knowledgeData?.contactInfo;
-        const hasServices = (knowledgeData?.services?.length || 0) > 0;
-        const hasPricingText = Array.isArray(knowledgeData?.pricing)
-            ? knowledgeData.pricing.length > 0
-            : !!knowledgeData?.pricing && String(knowledgeData.pricing).trim().length > 0;
-        const hasServicePricing = !!knowledgeData?.services?.some(service => {
-            if (!service.pricing?.type) return false;
-            if (service.pricing.amount !== undefined) return true;
-            return ['quote', 'free', 'negotiable'].includes(service.pricing.type);
-        });
-
-        return {
-            businessInfo: companyNameReady && websiteReady && contactReady,
-            services: hasServices && (hasServicePricing || hasPricingText),
-            calendar: calendarConnections.some(connection => connection.isActive),
-            widgetInstall: tenantConfig.setupChecklist?.widgetInstall === true,
-            testConversation: (tenantConfig.setupChecklist?.testConversation === true) || hasValidTestConversation
-        };
-    }, [tenantConfig.companyName, tenantConfig.companyUrl, tenantConfig.setupChecklist, knowledgeData, calendarConnections, hasValidTestConversation]);
+    const { session } = useAuth();
+    const { tenantConfig, setTenantConfig, knowledgeData, setKnowledgeData } = useData();
+    const [businessUrl, setBusinessUrl] = useState(tenantConfig.companyUrl || knowledgeData?.website || '');
+    const [phoneNumber, setPhoneNumber] = useState(knowledgeData?.phoneNumber || '');
+    const [bookingLink, setBookingLink] = useState('');
+    const [step, setStep] = useState<SetupStep>('start');
+    const [isLoadingState, setIsLoadingState] = useState(true);
+    const [isScanning, setIsScanning] = useState(false);
+    const [isLaunching, setIsLaunching] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [setupId, setSetupId] = useState<string | null>(null);
+    const [draft, setDraft] = useState<KnowledgeBaseData | null>(knowledgeData);
+    const [playbookMarkdown, setPlaybookMarkdown] = useState('');
+    const [missingFields, setMissingFields] = useState<string[]>([]);
 
     useEffect(() => {
-        const currentChecklist = tenantConfig.setupChecklist;
-        const mergedChecklist: SetupChecklist = {
-            businessInfo: computedChecklist.businessInfo,
-            services: computedChecklist.services,
-            calendar: computedChecklist.calendar,
-            widgetInstall: (currentChecklist?.widgetInstall === true) || computedChecklist.widgetInstall,
-            testConversation: (currentChecklist?.testConversation === true) || computedChecklist.testConversation
+        const load = async () => {
+            if (!session?.access_token) return;
+            setIsLoadingState(true);
+            try {
+                const state = await fetchAiSetupState(session.access_token);
+                if (state.setup?.id) {
+                    setSetupId(state.setup.id);
+                    if (state.setup.status === 'launched') setStep('launched');
+                }
+                if (state.playbookMarkdown) {
+                    setPlaybookMarkdown(state.playbookMarkdown);
+                    setStep(state.setup?.status === 'launched' ? 'launched' : 'review');
+                }
+            } catch {
+                // Setup should still be usable if state load fails.
+            } finally {
+                setIsLoadingState(false);
+            }
         };
+        load();
+    }, [session?.access_token]);
 
-        const changed =
-            !currentChecklist ||
-            currentChecklist.businessInfo !== mergedChecklist.businessInfo ||
-            currentChecklist.services !== mergedChecklist.services ||
-            currentChecklist.calendar !== mergedChecklist.calendar ||
-            currentChecklist.widgetInstall !== mergedChecklist.widgetInstall ||
-            currentChecklist.testConversation !== mergedChecklist.testConversation;
+    const serviceCount = draft?.services?.length || 0;
+    const canLaunch = !!setupId && !!draft && serviceCount > 0 && !!session?.access_token;
 
-        if (changed) {
+    const normalizedUrl = useMemo(() => {
+        const trimmed = businessUrl.trim();
+        if (!trimmed) return '';
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+        return `https://${trimmed}`;
+    }, [businessUrl]);
+
+    const runSetup = async () => {
+        if (!session?.access_token || !normalizedUrl || isScanning) return;
+        setIsScanning(true);
+        setError(null);
+        try {
+            const scanned = await analyzeCompanyContent(normalizedUrl);
+            if (!scanned) throw new Error('Chippy could not scan enough business data. Try another page or add details in Advanced Knowledge.');
+            const enriched = {
+                ...scanned,
+                website: scanned.website || normalizedUrl,
+                phoneNumber: phoneNumber || scanned.phoneNumber,
+            };
+            const response = await createAiSetupDraft({
+                accessToken: session.access_token,
+                businessUrl: normalizedUrl,
+                knowledgeData: enriched,
+            });
+            setDraft(response.draft);
+            setSetupId(response.setup.id);
+            setPlaybookMarkdown(response.playbookMarkdown);
+            setMissingFields(response.missingFields || []);
+            setStep('review');
+        } catch (err: any) {
+            setError(err?.message || 'Setup scan failed.');
+        } finally {
+            setIsScanning(false);
+        }
+    };
+
+    const launchSetup = async () => {
+        if (!canLaunch || !setupId || !draft || !session?.access_token || isLaunching) return;
+        setIsLaunching(true);
+        setError(null);
+        try {
+            const response = await approveAiSetup({
+                accessToken: session.access_token,
+                setupId,
+                knowledgeData: draft,
+                phoneNumber,
+                bookingLink,
+            });
+            setKnowledgeData(response.knowledgeData);
             setTenantConfig(prev => ({
                 ...prev,
-                setupChecklist: mergedChecklist
+                companyName: response.knowledgeData.companyName || prev.companyName,
+                companyUrl: response.knowledgeData.website || normalizedUrl,
+                industry: response.knowledgeData.businessCategory || 'Med Spa',
+                setupChecklist: {
+                    businessInfo: true,
+                    services: true,
+                    calendar: prev.setupChecklist?.calendar || !!bookingLink,
+                    widgetInstall: prev.setupChecklist?.widgetInstall || false,
+                    testConversation: prev.setupChecklist?.testConversation || false,
+                }
             }));
+            setPlaybookMarkdown(response.playbookMarkdown);
+            setStep('launched');
+        } catch (err: any) {
+            setError(err?.message || 'Failed to launch Chippy.');
+        } finally {
+            setIsLaunching(false);
         }
-    }, [computedChecklist, tenantConfig.setupChecklist, setTenantConfig]);
-
-    const checklist = tenantConfig.setupChecklist || computedChecklist;
-
-    const knowledgeReady = checklist.businessInfo && checklist.services;
-    const appointmentsReady = checklist.calendar;
-    const coreCompleted = [knowledgeReady, appointmentsReady].filter(Boolean).length;
-    const coreProgressPercent = Math.round((coreCompleted / 2) * 100);
-
-    const knowledgePrimaryAction = knowledgeReady
-        ? { label: 'Edit Knowledge', path: '/knowledge?tab=overview' }
-        : (knowledgeData
-            ? { label: 'Finish Knowledge Setup', path: '/knowledge?tab=overview' }
-            : { label: 'Start Knowledge Setup', path: '/onboarding' });
-
-    const appointmentPrimaryAction = appointmentsReady
-        ? { label: 'Manage Calendar', path: '/integrations' }
-        : { label: 'Connect Calendar', path: '/integrations' };
-
-    const markItemComplete = (key: 'widgetInstall' | 'testConversation') => {
-        setTenantConfig(prev => ({
-            ...prev,
-            setupChecklist: {
-                businessInfo: prev.setupChecklist?.businessInfo || false,
-                services: prev.setupChecklist?.services || false,
-                calendar: prev.setupChecklist?.calendar || false,
-                widgetInstall: key === 'widgetInstall' ? true : (prev.setupChecklist?.widgetInstall || false),
-                testConversation: key === 'testConversation' ? true : (prev.setupChecklist?.testConversation || false)
-            }
-        }));
     };
 
     return (
         <div className="w-full space-y-6 animate-in fade-in duration-500 pb-20">
             <PageHeader
-                title="Setup"
-                subtitle="Two simple steps for SMBs: set up knowledge, then set up appointments."
+                title="AI Setup"
+                subtitle="Give Chippy a website. It drafts the business playbook, asks for approval, then launches recovery."
             />
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <div>
-                        <p className="text-sm font-semibold text-chippy-navy">Core Setup Progress</p>
-                        <p className="text-xs text-slate-500">{coreCompleted} of 2 essential tasks complete</p>
-                    </div>
-                    <span className="text-sm font-bold text-chippy-navy">{coreProgressPercent}%</span>
-                </div>
-                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-chippy-coral transition-all duration-500" style={{ width: `${coreProgressPercent}%` }} />
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <div className="bg-white border border-slate-200 rounded-2xl p-5">
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-start gap-3">
-                            <div className="mt-0.5">
-                                {knowledgeReady ? (
-                                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                ) : (
-                                    <Circle className="w-5 h-5 text-slate-300" />
-                                )}
-                            </div>
-                            <div>
-                                <h3 className="text-sm font-semibold text-chippy-navy">1. Knowledge Base</h3>
-                                <p className="text-sm text-slate-500 mt-1">Add business details, services, and pricing so the assistant answers correctly.</p>
-                            </div>
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-slate-100 flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-chippy-coral/10 text-chippy-coral flex items-center justify-center">
+                            <Wand2 className="w-5 h-5" />
                         </div>
-                        <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${knowledgeReady ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {knowledgeReady ? 'Done' : 'Pending'}
-                        </span>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                        <button
-                            onClick={() => navigate(knowledgePrimaryAction.path)}
-                            className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition-colors"
-                        >
-                            {knowledgePrimaryAction.label}
-                        </button>
-                        {isAdvancedMode && (
-                            <button
-                                onClick={() => navigate('/knowledge?tab=data')}
-                                className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors flex items-center gap-1"
-                            >
-                                Advanced data <ExternalLink className="w-3 h-3" />
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                <div className="bg-white border border-slate-200 rounded-2xl p-5">
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-start gap-3">
-                            <div className="mt-0.5">
-                                {appointmentsReady ? (
-                                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                ) : (
-                                    <Circle className="w-5 h-5 text-slate-300" />
-                                )}
-                            </div>
-                            <div>
-                                <h3 className="text-sm font-semibold text-chippy-navy">2. Appointments</h3>
-                                <p className="text-sm text-slate-500 mt-1">Connect your calendar so Chippy can check availability and book real slots.</p>
-                            </div>
+                        <div>
+                            <h2 className="text-lg font-bold text-chippy-navy">Launch Chippy in a few clicks</h2>
+                            <p className="text-sm text-slate-500 mt-1">The approved playbook becomes the generated CHIPPY.md instruction file.</p>
                         </div>
-                        <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${appointmentsReady ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {appointmentsReady ? 'Done' : 'Pending'}
+                    </div>
+                    {step === 'launched' && (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Launched
                         </span>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                        <button
-                            onClick={() => navigate(appointmentPrimaryAction.path)}
-                            className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition-colors"
-                        >
-                            {appointmentPrimaryAction.label}
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-                <h3 className="text-sm font-semibold text-chippy-navy mb-1">Optional Next Steps</h3>
-                <p className="text-xs text-slate-500 mb-4">Helpful after core setup is done.</p>
-
-                <div className="grid grid-cols-1 gap-3">
-                    {OPTIONAL_ITEMS.map(item => {
-                        const isDone = checklist[item.key];
-                        return (
-                            <div key={item.key} className="border border-slate-200 rounded-xl p-4">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div>
-                                        <p className="text-sm font-semibold text-chippy-navy">{item.title}</p>
-                                        <p className="text-xs text-slate-500 mt-1">{item.description}</p>
-                                    </div>
-                                    <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                                        {isDone ? 'Done' : 'Optional'}
-                                    </span>
-                                </div>
-
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <button
-                                        onClick={() => navigate(item.ctaPath)}
-                                        className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition-colors"
-                                    >
-                                        {item.ctaLabel}
-                                    </button>
-                                    {isAdvancedMode && item.advancedPath && item.advancedLabel && (
-                                        <button
-                                            onClick={() => navigate(item.advancedPath)}
-                                            className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors flex items-center gap-1"
-                                        >
-                                            {item.advancedLabel} <ExternalLink className="w-3 h-3" />
-                                        </button>
-                                    )}
-                                    {!isDone && (
-                                        <button
-                                            onClick={() => markItemComplete(item.key)}
-                                            className="px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-semibold hover:bg-emerald-100 transition-colors"
-                                        >
-                                            Mark Complete
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-                <h3 className="text-sm font-semibold text-chippy-navy mb-2">Quick Actions</h3>
-                <div className="flex flex-wrap gap-2">
-                    <button
-                        onClick={() => navigate('/knowledge')}
-                        className="px-3 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors flex items-center gap-1"
-                    >
-                        <BookOpen className="w-3.5 h-3.5" /> Knowledge
-                    </button>
-                    <button
-                        onClick={() => navigate('/integrations')}
-                        className="px-3 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors flex items-center gap-1"
-                    >
-                        <CalendarDays className="w-3.5 h-3.5" /> Calendar
-                    </button>
-                    <button
-                        onClick={() => navigate('/customers')}
-                        className="px-3 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors flex items-center gap-1"
-                    >
-                        <MessageCircle className="w-3.5 h-3.5" /> Customers
-                    </button>
-                    <button
-                        onClick={() => navigate('/widget')}
-                        className="px-3 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors flex items-center gap-1"
-                    >
-                        <Settings className="w-3.5 h-3.5" /> Widget
-                    </button>
-                    {isAdvancedMode && (
-                        <button
-                            onClick={() => navigate('/gateway')}
-                            className="px-3 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors flex items-center gap-1"
-                        >
-                            <Wrench className="w-3.5 h-3.5" /> Advanced Ops
-                        </button>
                     )}
                 </div>
+
+                {isLoadingState ? (
+                    <div className="p-10 text-center text-slate-500">
+                        <Loader2 className="w-5 h-5 animate-spin mx-auto mb-3" />
+                        Loading setup...
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-[0.85fr_1.15fr] gap-0">
+                        <div className="p-6 border-b lg:border-b-0 lg:border-r border-slate-100 space-y-5">
+                            <div>
+                                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Business website</label>
+                                <input
+                                    value={businessUrl}
+                                    onChange={(event) => setBusinessUrl(event.target.value)}
+                                    placeholder="https://yourmedspa.com"
+                                    className="mt-2 w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-chippy-coral bg-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Phone number</label>
+                                <input
+                                    value={phoneNumber}
+                                    onChange={(event) => setPhoneNumber(event.target.value)}
+                                    placeholder="(555) 555-5555"
+                                    className="mt-2 w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-chippy-coral bg-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Booking link</label>
+                                <input
+                                    value={bookingLink}
+                                    onChange={(event) => setBookingLink(event.target.value)}
+                                    placeholder="Optional Calendly, booking page, or website booking URL"
+                                    className="mt-2 w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-chippy-coral bg-white"
+                                />
+                            </div>
+
+                            {error && <div className="text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-xl p-3">{error}</div>}
+
+                            <div className="flex flex-wrap gap-3 pt-2">
+                                <button
+                                    onClick={runSetup}
+                                    disabled={!normalizedUrl || isScanning}
+                                    className="inline-flex items-center gap-2 px-4 py-3 bg-slate-900 text-white rounded-xl text-sm font-semibold hover:bg-slate-800 disabled:opacity-50"
+                                >
+                                    {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                                    {isScanning ? 'Building playbook...' : 'Analyze my business'}
+                                </button>
+                                {step === 'review' && (
+                                    <button
+                                        onClick={launchSetup}
+                                        disabled={!canLaunch || isLaunching}
+                                        className="inline-flex items-center gap-2 px-4 py-3 bg-chippy-coral text-white rounded-xl text-sm font-semibold hover:bg-chippy-coral/90 disabled:opacity-50"
+                                    >
+                                        {isLaunching ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                                        Launch follow-up
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="pt-4 border-t border-slate-100 space-y-3">
+                                <StatusRow done={!!draft?.companyName} label="Business profile" />
+                                <StatusRow done={serviceCount > 0} label={`${serviceCount} approved service${serviceCount === 1 ? '' : 's'}`} />
+                                <StatusRow done={!!playbookMarkdown} label="Generated CHIPPY.md" />
+                                <StatusRow done={!!bookingLink || step === 'launched'} label={bookingLink ? 'Booking link ready' : 'Booking link optional'} />
+                            </div>
+
+                            {missingFields.length > 0 && (
+                                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                                    <p className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2">Needs owner review</p>
+                                    <p className="text-sm text-amber-900">{missingFields.join(', ')}</p>
+                                </div>
+                            )}
+
+                            <button
+                                onClick={() => navigate('/knowledge')}
+                                className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900"
+                            >
+                                Advanced Knowledge <ExternalLink className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 bg-slate-50">
+                            <div className="flex items-center gap-2 mb-3">
+                                <BookOpen className="w-4 h-4 text-slate-500" />
+                                <h3 className="text-sm font-bold text-chippy-navy">CHIPPY.md Preview</h3>
+                            </div>
+                            <div className="bg-white border border-slate-200 rounded-2xl p-5 min-h-[520px] max-h-[680px] overflow-auto">
+                                {playbookMarkdown ? (
+                                    <pre className="whitespace-pre-wrap text-xs leading-6 text-slate-700 font-mono">{playbookMarkdown}</pre>
+                                ) : (
+                                    <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 py-20">
+                                        <Sparkles className="w-8 h-8 mb-3" />
+                                        <p className="text-sm font-semibold">Your generated business instruction file will appear here.</p>
+                                        <p className="text-xs mt-1">Chippy uses this as its operating brief after approval.</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
 };
+
+const StatusRow = ({ done, label }: { done: boolean; label: string }) => (
+    <div className="flex items-center gap-2 text-sm">
+        {done ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <span className="w-4 h-4 rounded-full border border-slate-300" />}
+        <span className={done ? 'text-slate-700' : 'text-slate-400'}>{label}</span>
+    </div>
+);
