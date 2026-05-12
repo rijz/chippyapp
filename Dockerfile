@@ -57,6 +57,7 @@ COPY server.js .
 COPY emailService.js .
 COPY scraper.js .
 COPY src ./src
+COPY agent-runtime ./agent-runtime
 
 ENV PORT=8080
 EXPOSE 8080
