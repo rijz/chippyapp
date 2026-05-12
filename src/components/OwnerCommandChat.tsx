@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Bot, Check, Loader2, Send, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Bot, Check, Loader2, MessageSquarePlus, Send, Sparkles, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { OwnerCommandAction, OwnerCommandMessage, OwnerCommandState } from '../types';
 import {
   decideOwnerCommandAction,
+  createOwnerCommandThread,
   fetchOwnerCommandState,
   sendOwnerCommand,
 } from '../services/ownerCommandService';
@@ -94,6 +95,7 @@ export const OwnerCommandChat = ({ compact = false }: { compact?: boolean }) => 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  const [isThreading, setIsThreading] = useState(false);
   const [processingActionId, setProcessingActionId] = useState<string | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -122,6 +124,32 @@ export const OwnerCommandChat = ({ compact = false }: { compact?: boolean }) => 
     };
     load();
   }, [session?.access_token]);
+
+  const loadThread = async (threadId: string) => {
+    if (!session?.access_token || isLoading || state?.thread?.id === threadId) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      setState(await fetchOwnerCommandState(session.access_token, threadId));
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load chat.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const startNewThread = async () => {
+    if (!session?.access_token || isThreading) return;
+    setIsThreading(true);
+    setError(null);
+    try {
+      setState(await createOwnerCommandThread({ accessToken: session.access_token }));
+    } catch (err: any) {
+      setError(err?.message || 'Failed to start a new chat.');
+    } finally {
+      setIsThreading(false);
+    }
+  };
 
   const submitMessage = async (message: string) => {
     const trimmed = message.trim();
@@ -160,7 +188,41 @@ export const OwnerCommandChat = ({ compact = false }: { compact?: boolean }) => 
   };
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col ${compact ? 'h-[640px]' : 'h-[calc(100vh-190px)] min-h-[620px]'}`}>
+    <div className={`bg-white border border-slate-200 rounded-2xl overflow-hidden flex ${compact ? 'h-[640px]' : 'h-[calc(100vh-190px)] min-h-[620px]'}`}>
+      {!compact && (
+        <aside className="w-64 border-r border-slate-200 bg-white flex flex-col shrink-0">
+          <div className="p-3 border-b border-slate-100">
+            <button
+              onClick={startNewThread}
+              disabled={isThreading}
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-60"
+            >
+              {isThreading ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageSquarePlus className="w-4 h-4" />}
+              New chat
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+            {(state?.threads || []).map(thread => {
+              const active = state?.thread?.id === thread.id;
+              return (
+                <button
+                  key={thread.id}
+                  onClick={() => loadThread(thread.id)}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-sm transition-colors ${active ? 'bg-chippy-coral/10 text-chippy-coral font-semibold' : 'text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <span className="block truncate">{thread.title || 'Owner chat'}</span>
+                  <span className="block text-[10px] text-slate-400 mt-0.5">{new Date(thread.updatedAt).toLocaleDateString()}</span>
+                </button>
+              );
+            })}
+            {(state?.threads || []).length === 0 && (
+              <p className="p-3 text-xs text-slate-400">Previous chats will appear here.</p>
+            )}
+          </div>
+        </aside>
+      )}
+
+      <div className="flex-1 min-w-0 flex flex-col">
       <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-chippy-coral/10 text-chippy-coral flex items-center justify-center">
@@ -261,6 +323,7 @@ export const OwnerCommandChat = ({ compact = false }: { compact?: boolean }) => 
             </button>
           </form>
         </div>
+      </div>
       </div>
     </div>
   );

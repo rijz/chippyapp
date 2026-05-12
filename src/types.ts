@@ -440,6 +440,7 @@ export interface OwnerCommandAction {
 
 export interface OwnerCommandState {
   thread: OwnerCommandThread | null;
+  threads?: OwnerCommandThread[];
   messages: OwnerCommandMessage[];
   actions: OwnerCommandAction[];
   playbook: BusinessPlaybook | null;

@@ -74,15 +74,33 @@ const mapPlaybook = (row: any): BusinessPlaybook | null => {
 
 const mapState = (data: any): OwnerCommandState => ({
   thread: data.thread ? mapThread(data.thread) : null,
+  threads: Array.isArray(data.threads) ? data.threads.map(mapThread) : [],
   messages: Array.isArray(data.messages) ? data.messages.map(mapMessage) : [],
   actions: Array.isArray(data.actions) ? data.actions.map(mapAction) : [],
   playbook: mapPlaybook(data.playbook),
   playbookMarkdown: data.playbookMarkdown || data.playbook?.playbook_markdown || '',
 });
 
-export async function fetchOwnerCommandState(accessToken: string): Promise<OwnerCommandState> {
-  const response = await fetch('/api/owner-command/state', {
+export async function fetchOwnerCommandState(accessToken: string, threadId?: string | null): Promise<OwnerCommandState> {
+  const query = threadId ? `?threadId=${encodeURIComponent(threadId)}` : '';
+  const response = await fetch(`/api/owner-command/state${query}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  return mapState(await response.json());
+}
+
+export async function createOwnerCommandThread(input: {
+  accessToken: string;
+  title?: string;
+}): Promise<OwnerCommandState> {
+  const response = await fetch('/api/owner-command/threads', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${input.accessToken}`,
+    },
+    body: JSON.stringify({ title: input.title || 'New owner chat' }),
   });
   if (!response.ok) throw new Error(await parseError(response));
   return mapState(await response.json());

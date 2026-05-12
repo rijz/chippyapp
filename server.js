@@ -1835,6 +1835,20 @@ const ensureOwnerThread = async (tenantId, threadId = null) => {
   return data;
 };
 
+const createOwnerThread = async (tenantId, title = 'New owner chat') => {
+  const { data, error } = await supabaseAdmin
+    .from('owner_command_threads')
+    .insert({
+      tenant_id: tenantId,
+      title: title || 'New owner chat',
+      status: 'open',
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
 const ensureBusinessPlaybook = async (tenantId) => {
   const { data: existing, error: existingError } = await supabaseAdmin
     .from('business_playbooks')
@@ -1863,7 +1877,7 @@ const fetchOwnerCommandState = async (tenantId, threadId = null) => {
   const thread = await ensureOwnerThread(tenantId, threadId);
   const playbook = await ensureBusinessPlaybook(tenantId);
 
-  const [{ data: messages, error: messagesError }, { data: actions, error: actionsError }] = await Promise.all([
+  const [{ data: messages, error: messagesError }, { data: actions, error: actionsError }, { data: threads, error: threadsError }] = await Promise.all([
     supabaseAdmin
       .from('owner_command_messages')
       .select('*')
@@ -1878,12 +1892,20 @@ const fetchOwnerCommandState = async (tenantId, threadId = null) => {
       .in('status', ['needs_approval', 'approved', 'executed', 'denied', 'failed'])
       .order('created_at', { ascending: false })
       .limit(20),
+    supabaseAdmin
+      .from('owner_command_threads')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('updated_at', { ascending: false })
+      .limit(30),
   ]);
   if (messagesError) throw messagesError;
   if (actionsError) throw actionsError;
+  if (threadsError) throw threadsError;
 
   return {
     thread,
+    threads: threads || [],
     messages: messages || [],
     actions: actions || [],
     playbook,
@@ -1909,6 +1931,88 @@ const insertOwnerMessage = async ({ tenantId, threadId, role, content, metadata 
 
 const normalizeCommandText = (value) => String(value || '').trim();
 
+const buildOwnerCommandContext = async ({ tenantId, threadId, playbook }) => {
+  const [
+    { data: recentLeads },
+    { data: hotLeads },
+    { data: bookings },
+    { data: approvals },
+    { data: outcomes },
+    { data: recentMessages }
+  ] = await Promise.all([
+    supabaseAdmin
+      .from('leads')
+      .select('*')
+      .eq('user_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(12),
+    supabaseAdmin
+      .from('leads')
+      .select('*')
+      .eq('user_id', tenantId)
+      .or('priority.eq.Hot,lead_temperature.eq.hot,pipeline_status.eq.needs_approval')
+      .order('created_at', { ascending: false })
+      .limit(12),
+    supabaseAdmin
+      .from('bookings')
+      .select('*')
+      .eq('user_id', tenantId)
+      .order('start_time', { ascending: false })
+      .limit(8),
+    supabaseAdmin
+      .from('owner_command_actions')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'needs_approval')
+      .order('created_at', { ascending: false })
+      .limit(10),
+    supabaseAdmin
+      .from('recovery_outcomes')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(20),
+    supabaseAdmin
+      .from('owner_command_messages')
+      .select('role, content, created_at')
+      .eq('tenant_id', tenantId)
+      .eq('thread_id', threadId)
+      .order('created_at', { ascending: false })
+      .limit(10)
+  ]);
+
+  const recovery = summarizeRecoveryRows(outcomes || []);
+  const serviceNames = safeJsonArray(playbook?.services_json)
+    .map(service => service?.name)
+    .filter(Boolean)
+    .slice(0, 12);
+
+  return {
+    playbookSummary: {
+      vertical: playbook?.vertical || 'med_spa',
+      services: serviceNames,
+      pricingRules: playbook?.pricing_rules_json || {},
+      bookingRules: playbook?.booking_rules_json || {},
+      followupRules: playbook?.followup_rules_json || {},
+      blockedClaims: safeJsonArray(playbook?.blocked_claims_json),
+      escalationRules: safeJsonArray(playbook?.escalation_rules_json)
+    },
+    recentLeads: recentLeads || [],
+    hotLeads: hotLeads || [],
+    recentBookings: bookings || [],
+    pendingApprovals: approvals || [],
+    recovery,
+    recentThreadMessages: (recentMessages || []).reverse()
+  };
+};
+
+const formatLeadLine = (lead) => {
+  const contact = lead.phone || lead.email || 'no contact';
+  const interest = lead.service_type || lead.treatment_interest || lead.intent || lead.service || 'unknown interest';
+  const temp = lead.lead_temperature || lead.priority || 'unscored';
+  return `- ${lead.name || 'Unknown'}: ${interest}, ${contact}, status ${lead.pipeline_status || lead.status}, ${temp}`;
+};
+
 const parseServiceNameFromCommand = (text) => {
   const withoutPrefix = text
     .replace(/^(please\s+)?(add|create)\s+(a\s+|an\s+|new\s+)?/i, '')
@@ -1927,57 +2031,59 @@ const classifyOwnerCommand = async ({ tenantId, threadId, ownerMessageId, messag
   const text = normalizeCommandText(message);
   const lower = text.toLowerCase();
   const pendingWords = ['approve', 'pending approval', 'queued'];
+  const context = await buildOwnerCommandContext({ tenantId, threadId, playbook });
 
   if (lower.includes('what needs attention') || lower.includes('summarize today') || lower.includes('today')) {
-    const [{ data: leads }, { data: actions }, { data: outcomes }] = await Promise.all([
-      supabaseAdmin
-        .from('leads')
-        .select('*')
-        .eq('user_id', tenantId)
-        .in('status', ['New', 'Call Back'])
-        .order('created_at', { ascending: false })
-        .limit(8),
-      supabaseAdmin
-        .from('owner_command_actions')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'needs_approval')
-        .order('created_at', { ascending: false })
-        .limit(8),
-      supabaseAdmin
-        .from('recovery_outcomes')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false })
-        .limit(8),
-    ]);
-
-    const leadLines = (leads || []).map(lead => `- ${lead.name}: ${lead.service_type || lead.treatment_interest || lead.intent || 'unknown interest'} (${lead.status})`);
-    const value = (outcomes || []).reduce((sum, row) => sum + Number(row.estimated_value || 0), 0);
+    const attentionLeads = context.recentLeads.filter(lead =>
+      ['New', 'Call Back'].includes(lead.status) ||
+      ['new', 'contacted', 'needs_approval'].includes(lead.pipeline_status)
+    );
+    const leadLines = attentionLeads.slice(0, 8).map(formatLeadLine);
+    const approvals = context.pendingApprovals.slice(0, 5).map(action => `- ${action.action_type.replace(/_/g, ' ')} (${action.risk_level})`);
+    const prior = context.recentThreadMessages
+      .filter(item => item.role === 'owner')
+      .slice(-2)
+      .map(item => `- ${item.content}`)
+      .join('\n');
     return {
       type: 'answer',
       content: [
         `Here is what needs attention:`,
         '',
-        `Open leads: ${(leads || []).length}`,
+        `Open leads: ${attentionLeads.length}`,
         leadLines.length ? leadLines.join('\n') : '- No open leads found.',
         '',
-        `Pending approvals: ${(actions || []).length}`,
-        `Recently attributed recovered value: $${value.toFixed(0)}`,
+        `Pending approvals: ${context.pendingApprovals.length}`,
+        approvals.length ? approvals.join('\n') : '- No pending approvals.',
+        '',
+        `Recovered revenue tracked: $${Number(context.recovery.recoveredRevenue || 0).toFixed(0)}`,
+        prior ? `\nRecent owner requests in this chat:\n${prior}` : '',
       ].join('\n'),
     };
   }
 
   if (lower.includes('hot lead') || lower.includes('hot leads')) {
-    const { data } = await supabaseAdmin
-      .from('leads')
-      .select('*')
-      .eq('user_id', tenantId)
-      .or('priority.eq.Hot,lead_temperature.eq.hot')
-      .order('created_at', { ascending: false })
-      .limit(12);
-    const lines = (data || []).map(lead => `- ${lead.name}: ${lead.phone || lead.email || 'no contact'} — ${lead.next_action || lead.notes || 'Review and follow up'}`);
+    const lines = context.hotLeads.map(formatLeadLine);
     return { type: 'answer', content: lines.length ? `Hot leads:\n${lines.join('\n')}` : 'No hot leads are marked right now.' };
+  }
+
+  if (lower.includes('context') || lower.includes('what do you know')) {
+    return {
+      type: 'answer',
+      content: [
+        'Here is the context I am using right now:',
+        '',
+        `Vertical: ${context.playbookSummary.vertical}`,
+        `Services: ${context.playbookSummary.services.length ? context.playbookSummary.services.join(', ') : 'none approved yet'}`,
+        `Recent leads loaded: ${context.recentLeads.length}`,
+        `Hot leads loaded: ${context.hotLeads.length}`,
+        `Recent bookings loaded: ${context.recentBookings.length}`,
+        `Pending approvals: ${context.pendingApprovals.length}`,
+        `Recovered revenue: $${Number(context.recovery.recoveredRevenue || 0).toFixed(0)}`,
+        '',
+        'I also keep the current chat history, CHIPPY.md, blocked claims, escalation rules, and follow-up rules in scope.',
+      ].join('\n')
+    };
   }
 
   if (lower.includes('allowed to say') || lower.includes('chippy.md') || lower.includes('pricing')) {
@@ -1997,7 +2103,11 @@ const classifyOwnerCommand = async ({ tenantId, threadId, ownerMessageId, messag
   if (!isMutation) {
     return {
       type: 'answer',
-      content: 'I can help with today’s priorities, hot leads, approved pricing language, service changes, follow-up drafts, and approval-backed business updates.',
+      content: [
+        'I can help with today’s priorities, hot leads, approved pricing language, service changes, follow-up drafts, and approval-backed business updates.',
+        '',
+        `Current context: ${context.recentLeads.length} recent leads, ${context.hotLeads.length} hot leads, ${context.pendingApprovals.length} pending approvals, and ${context.playbookSummary.services.length} approved services.`,
+      ].join('\n'),
     };
   }
 
@@ -7894,6 +8004,21 @@ app.get('/api/owner-command/state', async (req, res) => {
   }
 });
 
+app.post('/api/owner-command/threads', async (req, res) => {
+  try {
+    const user = await requireAuthenticatedUser(req, res);
+    if (!user) return;
+
+    const title = normalizeCommandText(req.body?.title) || 'New owner chat';
+    const thread = await createOwnerThread(user.id, title);
+    const state = await fetchOwnerCommandState(user.id, thread.id);
+    res.json(state);
+  } catch (error) {
+    console.error('[OwnerCommand] create thread error:', error);
+    res.status(500).json({ error: 'Failed to create owner command thread' });
+  }
+});
+
 app.post('/api/owner-command/message', expensiveApiLimiter, async (req, res) => {
   try {
     const user = await requireAuthenticatedUser(req, res);
@@ -7910,6 +8035,23 @@ app.post('/api/owner-command/message', expensiveApiLimiter, async (req, res) => 
       role: 'owner',
       content: message,
     });
+
+    if (thread.title === 'Owner command chat' || thread.title === 'New owner chat') {
+      await supabaseAdmin
+        .from('owner_command_threads')
+        .update({
+          title: message.slice(0, 64),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('tenant_id', user.id)
+        .eq('id', thread.id);
+    } else {
+      await supabaseAdmin
+        .from('owner_command_threads')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('tenant_id', user.id)
+        .eq('id', thread.id);
+    }
 
     const result = await classifyOwnerCommand({
       tenantId: user.id,
